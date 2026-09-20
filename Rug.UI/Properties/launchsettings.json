@@ -1,0 +1,10 @@
+﻿{
+    "profiles": {
+      "Rug.UI (Package)": {
+        "commandName": "MsixPackage"
+      },
+      "Rug.UI (Unpackaged)": {
+        "commandName": "Project"
+      }
+    }
+}

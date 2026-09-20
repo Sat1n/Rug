@@ -1,0 +1,102 @@
+# ---------------------------------------------------------------------------
+# Rug — Visual Studio (WinUI 3 / C# + native C++)
+# ---------------------------------------------------------------------------
+
+# Visual Studio / Rider caches and user state
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.vcxproj.user
+*.csproj.user
+*.rsuser
+*.VC.db
+*.VC.opendb
+
+# IntelliSense / browse databases
+*.ipch
+ipch/
+*.sdf
+*.opensdf
+*.aps
+*.idb
+
+# Build output
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+[Ll]og/
+[Ll]ogs/
+build/
+bld/
+artifacts/
+*.cache
+
+# Native build intermediates
+*.obj
+*.o
+*.pch
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.tlog
+*.lastbuildstate
+*.log
+
+# MSIX / WinUI packaging
+AppPackages/
+BundleArtifacts/
+Generated Files/
+*.appx
+*.appxbundle
+*.appxupload
+*.msix
+*.msixbundle
+*.msixupload
+*.cer
+*.pfx
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+*.nuget.props
+*.nuget.targets
+project.lock.json
+project.fragment.lock.json
+
+# Test / coverage results
+[Tt]est[Rr]esult*/
+*.coverage
+*.coveragexml
+*.trx
+nunit-results.xml
+TestResult.xml
+
+# Editor / OS noise
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+*.tmp
+*.bak
+*.orig
+*.rej
+
+# Local tooling (opencode config is per-developer)
+opencode.json
+opencode.jsonc
+.opencode/
+.vscode/
+.clangd/
+compile_commands.json
