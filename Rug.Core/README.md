@@ -13,20 +13,29 @@ OCR (WinRT), coordinate normalization and humanized input synthesis. Everything 
 exposed to the managed host through a stable C-ABI. It contains **no** UI,
 scripting, scheduling or plugin logic — those live above it.
 
-> **Status:** scaffolding only (`dllmain.cpp`, `pch.h`, `framework.h`). The
-> components below are **Phase 1 targets**, not yet implemented; symbol anchors are
-> added in the same commit as the code (BLUEPRINT §4). The working reference
+> **Status:** the C-ABI surface (`include/RugCoreAbi.h`) is declared (Task 1.1);
+> the component implementations below are still **Phase 1 targets**. Symbol anchors
+> are added in the same commit as the code (BLUEPRINT §4). The working reference
 > implementation is [Rug.Poc](../Rug.Poc/README.md).
 
-## Internal Topology (planned)
+## Internal Topology
 
 | File | Responsibility |
 |---|---|
-| `WgcCapturer.*` | D3D11 device + `GraphicsCaptureItem` + frame pool → `SoftwareBitmap` |
-| `WinRtOcr.*` | OCR engine lifecycle, recognize, bounding-rect + DPI/scale normalization |
-| `InputController.*` | Dual-mode input: PostMessage and Bezier-curve SendInput |
-| `RugAbi.h` | `extern "C"` exports, error codes, buffer-ownership API |
+| `include/RugCoreAbi.h` | **C-ABI surface** — `extern "C"` exports, status codes, handles, structs (exists) |
+| `WgcCapturer.*` | D3D11 device + `GraphicsCaptureItem` + frame pool → `SoftwareBitmap` (planned) |
+| `WinRtOcr.*` | OCR engine lifecycle, recognize, bounding-rect + DPI/scale normalization (planned) |
+| `InputController.*` | Dual-mode input: PostMessage and Bezier-curve SendInput (planned) |
 | `pch.h` / `framework.h` | Precompiled Win32 + WinRT headers |
+
+## Symbol Anchors (C-ABI)
+
+* Status codes: `[RugStatus](include/RugCoreAbi.h#enum:RugStatus)`
+* Buffer release: `[Rug_FreeBuffer](include/RugCoreAbi.h#function:Rug_FreeBuffer)`
+* Capture: `[Rug_CreateCapturer](include/RugCoreAbi.h#function:Rug_CreateCapturer)` ·
+  `[Rug_GrabFrame](include/RugCoreAbi.h#function:Rug_GrabFrame)`
+* OCR: `[Rug_RecognizeText](include/RugCoreAbi.h#function:Rug_RecognizeText)`
+* Input: `[Rug_Click](include/RugCoreAbi.h#function:Rug_Click)`
 
 ## C-ABI Contract (CRITICAL)
 
