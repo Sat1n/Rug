@@ -1,27 +1,41 @@
-﻿*Recommended Markdown Viewer: [Markdown Editor](https://marketplace.visualstudio.com/items?itemName=MadsKristensen.MarkdownEditor2)*
+---
+id: rug_ui
+type: logic_node
+inputs: [rug_core, rug_ui_core]
+outputs: []
+tags: [host, winui, ui]
+---
 
-## Getting Started
+# Rug.UI Index (L2)
 
-Browse and address `TODO:` comments in `View -> Task List` to learn the codebase and understand next steps for turning the generated code into production code.
+C# WinUI 3 desktop shell: views, view-models, navigation/activation, theming and the
+single native interop boundary. It renders the dynamic UI and forwards user intent to
+host logic; it owns no automation pipeline itself.
 
-Explore the [WinUI Gallery](https://www.microsoft.com/store/productId/9P3JFPWWDZRC) to learn about available controls and design patterns.
+> **Status:** WinUI 3 template scaffold (activation, services, VMs, views). The
+> `Native/NativeMethods.cs` P/Invoke layer is **not yet created**.
 
-Relaunch Template Studio to modify the project by right-clicking on the project in `View -> Solution Explorer` then selecting `Add -> New Item (Template Studio)`.
+## Internal Topology
 
-## Publishing
+| Path | Responsibility |
+|---|---|
+| `Views/` | XAML pages (Main, Settings, Shell) |
+| `ViewModels/` | MVVM view-models (CommunityToolkit.Mvvm) |
+| `Services/` | Activation, navigation, theming, local settings |
+| `Native/NativeMethods.cs` | **Only** place allowed to declare P/Invoke imports (planned) |
 
-For projects with MSIX packaging, right-click on the application project and select `Package and Publish -> Create App Packages...` to create an MSIX package.
+## Interop Restriction (CRITICAL)
 
-For projects without MSIX packaging, follow the [deployment guide](https://docs.microsoft.com/windows/apps/windows-app-sdk/deploy-unpackaged-apps) or add the `Self-Contained` Feature to enable xcopy deployment.
+* All native imports must reside strictly inside `Native/NativeMethods.cs`.
+  Direct P/Invoke in ViewModels or Services is forbidden.
+* Managed code must never free native pointers — release native buffers only via the
+  core's `Rug_FreeBuffer` (see [Rug.Core L2](../Rug.Core/README.md)).
 
-## CI Pipelines
+## Coding Standards (C# / WinUI 3)
 
-See [README.md](https://github.com/microsoft/TemplateStudio/blob/main/docs/WinUI/pipelines/README.md) for guidance on building and testing projects in CI pipelines.
+* Use `CommunityToolkit.Mvvm` (`[ObservableProperty]`, `[RelayCommand]`).
+* Never block the UI thread; run native operations asynchronously.
 
-## Changelog
+## Constraints
 
-See [releases](https://github.com/microsoft/TemplateStudio/releases) and [milestones](https://github.com/microsoft/TemplateStudio/milestones).
-
-## Feedback
-
-Bugs and feature requests should be filed at https://aka.ms/templatestudio.
+* Depends downward only on `Rug.Core` (via P/Invoke) and `Rug.UI.Core` (L1 §5.1).

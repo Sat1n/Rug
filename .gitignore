@@ -93,10 +93,11 @@ desktop.ini
 *.orig
 *.rej
 
-# Local tooling (opencode config is per-developer)
+# Local tooling (opencode / qoder config is per-developer)
 opencode.json
 opencode.jsonc
 .opencode/
+.qoder/
 .vscode/
 .clangd/
 compile_commands.json
