@@ -18,9 +18,11 @@ namespace rug::core {
 
 class WinRtOcrEngine : public IOcrEngine {
 public:
-    // Create the engine. Tries zh-Hans first, then the user's profile languages.
+    // Create the engine. `languageTag` is an optional UTF-8 BCP-47 tag (e.g.
+    // "zh-Hans", "en"); NULL/empty uses the user's system (profile) languages,
+    // which is also the fallback if the requested tag has no OCR language pack.
     // Returns a RugStatus value; on RUG_OK, `out` holds a ready engine.
-    static int32_t Create(std::unique_ptr<IOcrEngine>& out);
+    static int32_t Create(const char* languageTag, std::unique_ptr<IOcrEngine>& out);
 
     ~WinRtOcrEngine() override;
 

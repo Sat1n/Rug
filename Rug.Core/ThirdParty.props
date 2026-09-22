@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <!-- ===========================================================================
+       Rug.Core third-party wiring (Task 1.3.1)
+
+       OpenCV       : provided by vcpkg manifest mode (see vcpkg.json). The vcpkg
+                      MSBuild integration adds OpenCV's include/lib dirs and copies
+                      its DLLs automatically; here we only flip on the RUG_HAS_OPENCV
+                      code guard.
+
+       ONNX Runtime : prebuilt (official release zip). Set the ONNXRUNTIME_ROOT
+                      environment variable (or pass /p:ONNXRUNTIME_ROOT=...) to the
+                      unzipped folder, which must contain include\ and lib\. When it
+                      is set, RUG_HAS_ONNX is enabled and the headers/libs are wired
+                      in; otherwise the Paddle/ONNX path stays compiled out and
+                      Rug.Core builds with WinRT + OpenCV only. At runtime,
+                      onnxruntime.dll must sit next to Rug.Core.dll (or be on PATH).
+       ======================================================================== -->
+
+  <!-- OpenCV guard: always on (vcpkg supplies the library via manifest mode). -->
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <PreprocessorDefinitions>RUG_HAS_OPENCV;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+
+  <!-- vcpkg paths: wire OpenCV + yaml-cpp include/lib EXPLICITLY rather than
+       relying on the global vcpkg MSBuild integration to inject them. Install
+       root is vcpkg_installed\ (set in the vcxproj); packages land under
+       vcpkg_installed\<triplet>\. Note OpenCV headers live in include\opencv4,
+       and debug libs in debug\lib (opencv_world4d / yaml-cppd). -->
+  <PropertyGroup>
+    <RugVcpkgTripletDir Condition="'$(RugVcpkgTripletDir)' == ''">$(MSBuildThisFileDirectory)vcpkg_installed\$(VcpkgTriplet)\</RugVcpkgTripletDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(RugVcpkgTripletDir)include;$(RugVcpkgTripletDir)include\opencv4;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)' == 'Debug'">
+    <Link>
+      <AdditionalLibraryDirectories>$(RugVcpkgTripletDir)debug\lib;$(RugVcpkgTripletDir)lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>opencv_world4d.lib;yaml-cppd.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)' != 'Debug'">
+    <Link>
+      <AdditionalLibraryDirectories>$(RugVcpkgTripletDir)lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>opencv_world4.lib;yaml-cpp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+
+  <!-- ONNX Runtime (prebuilt): only wired when ONNXRUNTIME_ROOT is provided. -->
+  <PropertyGroup Condition="'$(ONNXRUNTIME_ROOT)' != ''">
+    <RugOnnxIncludeDir>$(ONNXRUNTIME_ROOT)\include</RugOnnxIncludeDir>
+    <RugOnnxLibDir>$(ONNXRUNTIME_ROOT)\lib</RugOnnxLibDir>
+  </PropertyGroup>
+
+  <ItemDefinitionGroup Condition="'$(ONNXRUNTIME_ROOT)' != ''">
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(RugOnnxIncludeDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>RUG_HAS_ONNX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <AdditionalLibraryDirectories>$(RugOnnxLibDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>onnxruntime.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <PostBuildEvent>
+      <Command>if exist "$(RugOnnxLibDir)\onnxruntime.dll" copy /Y "$(RugOnnxLibDir)\onnxruntime.dll" "$(OutDir)" &gt;nul
+if exist "$(RugOnnxLibDir)\onnxruntime_providers_shared.dll" copy /Y "$(RugOnnxLibDir)\onnxruntime_providers_shared.dll" "$(OutDir)" &gt;nul</Command>
+      <Message>Copying ONNX Runtime DLLs to $(OutDir)</Message>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+
+</Project>

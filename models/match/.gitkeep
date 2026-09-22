@@ -1,0 +1,2 @@
+# Template-matching image assets go here (committed).
+# Each <name>.png can be passed to Rug_MatchTemplate as the template path.

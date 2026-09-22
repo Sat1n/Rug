@@ -28,7 +28,8 @@ struct OcrBox {
 
 struct OcrLine {
     OcrBox         box;
-    std::wstring   text;  // recognized line text (CJK spacing already compacted)
+    std::wstring   text;        // recognized line text (CJK spacing already compacted)
+    float          confidence = 0.f;  // engine confidence in [0,1]
 };
 
 struct OcrResult {

@@ -152,7 +152,7 @@ RUGCORE_API int32_t RUGCORE_CALL Rug_CreateOcrEngine(int32_t engine_type,
         int32_t st;
         switch (engine_type) {
             case RUG_OCR_ENGINE_WINRT:
-                st = rug::core::WinRtOcrEngine::Create(engine);
+                st = rug::core::WinRtOcrEngine::Create(model_path, engine);  // model_path = optional BCP-47 tag
                 break;
             case RUG_OCR_ENGINE_PADDLE:
                 st = rug::core::PaddleOcrEngine::Create(model_path, engine);
@@ -226,6 +226,7 @@ RUGCORE_API int32_t RUGCORE_CALL Rug_OcrResultGetLine(RugOcrResultHandle result,
     outLine->y      = line.box.y;
     outLine->width  = line.box.width;
     outLine->height = line.box.height;
+    outLine->confidence = line.confidence;
     CopyUtf8(line.text, outLine->text, RUG_OCR_LINE_TEXT_MAX);
     return RUG_OK;
 }

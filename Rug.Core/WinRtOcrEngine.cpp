@@ -7,6 +7,7 @@
 #include "WinRtOcrEngine.h"
 #include "RugCoreAbi.h"   // RugStatus codes
 #include "CoreCom.h"
+#include "OcrTextUtils.h" // shared CompactText / IsCjk
 
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
@@ -35,31 +36,13 @@ namespace {
 
 constexpr uint32_t kOcrUpscale = 2;  // Fant super-resolution factor
 
-bool IsCjk(wchar_t c) {
-    return (c >= 0x3000 && c <= 0x303F)   // CJK symbols & punctuation
-        || (c >= 0x3040 && c <= 0x30FF)   // Hiragana + Katakana
-        || (c >= 0x3400 && c <= 0x4DBF)   // CJK Ext A
-        || (c >= 0x4E00 && c <= 0x9FFF)   // CJK Unified Ideographs
-        || (c >= 0xF900 && c <= 0xFAFF)   // CJK Compatibility Ideographs
-        || (c >= 0xFF00 && c <= 0xFFEF);  // Fullwidth forms
-}
-
-// Strip the spaces Windows OCR inserts between Han glyphs, normalize other
-// whitespace runs to a single space, and trim the trailing space.
-std::wstring CompactText(std::wstring_view s) {
-    std::wstring out;
-    const size_t n = s.size();
-    size_t i = 0;
-    while (i < n) {
-        if (!iswspace(s[i])) { out.push_back(s[i]); ++i; continue; }
-        size_t j = i;
-        while (j < n && iswspace(s[j])) ++j;
-        const bool prevCjk = !out.empty() && IsCjk(out.back());
-        const bool nextCjk = (j < n) && IsCjk(s[j]);
-        if (j < n && !(prevCjk && nextCjk)) out.push_back(L' ');
-        i = j;
-    }
-    return out;
+std::wstring Utf8ToWide(const char* s) {
+    if (!s || !s[0]) return {};
+    int n = MultiByteToWideChar(CP_UTF8, 0, s, -1, nullptr, 0);
+    if (n <= 0) return {};
+    std::wstring w(static_cast<size_t>(n - 1), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s, -1, w.data(), n);
+    return w;
 }
 
 WinRect LineBoundingRect(ocr::OcrLine const& line) {
@@ -132,12 +115,20 @@ struct WinRtOcrEngine::Impl {
 WinRtOcrEngine::WinRtOcrEngine() : m_impl(std::make_unique<Impl>()) {}
 WinRtOcrEngine::~WinRtOcrEngine() = default;
 
-int32_t WinRtOcrEngine::Create(std::unique_ptr<IOcrEngine>& out) {
+int32_t WinRtOcrEngine::Create(const char* languageTag, std::unique_ptr<IOcrEngine>& out) {
     EnsureApartment();
     try {
-        ocr::OcrEngine engine = ocr::OcrEngine::TryCreateFromLanguage(Language(L"zh-Hans"));
+        ocr::OcrEngine engine{ nullptr };
+
+        // Explicit BCP-47 tag when provided (e.g. "zh-Hans", "en", "ja").
+        if (languageTag && languageTag[0] != '\0') {
+            const std::wstring tag = Utf8ToWide(languageTag);
+            if (!tag.empty())
+                engine = ocr::OcrEngine::TryCreateFromLanguage(Language(tag.c_str()));
+        }
+        // Default / fallback: the user's system (profile) languages.
         if (!engine) engine = ocr::OcrEngine::TryCreateFromUserProfileLanguages();
-        if (!engine) return RUG_ERR_OCR_FAILED;  // no OCR language pack installed
+        if (!engine) return RUG_ERR_OCR_FAILED;  // no OCR language pack available
 
         std::unique_ptr<WinRtOcrEngine> created(new WinRtOcrEngine());
         created->m_impl->engine = engine;
@@ -182,6 +173,7 @@ int32_t WinRtOcrEngine::Recognize(const ImageView& image, OcrResult& out) {
             ol.box.width  = static_cast<int32_t>(r.Width / scale);
             ol.box.height = static_cast<int32_t>(r.Height / scale);
             ol.text       = CompactText(line.Text().c_str());
+            ol.confidence = 1.0f;  // WinRT OCR exposes no per-line confidence
             out.lines.push_back(std::move(ol));
         }
         return RUG_OK;

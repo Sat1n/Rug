@@ -14,14 +14,28 @@ exposed to the managed host through a stable C-ABI. It contains **no** UI,
 scripting, scheduling or plugin logic — those live above it.
 
 > **Status:** Task 1.1 C-ABI surface; Task 1.2 capture (`WgcCapturer`);
-> Task 1.3 OCR (`IOcrEngine` + full `WinRtOcrEngine`, `PaddleOcrEngine` skeleton)
-> and OpenCV template matching (`ImageMatcher` skeleton). Input is the remaining
-> **Phase 1 target**. Reference impl: [Rug.Poc](../Rug.Poc/README.md).
->
-> **Optional native deps:** OpenCV and ONNX Runtime are NOT yet wired in. Their
-> code is behind `RUG_HAS_OPENCV` / `RUG_HAS_ONNX`; without those macros
-> `ImageMatcher` returns `RUG_ERR_UNSUPPORTED` and `PaddleOcrEngine` returns
-> `RUG_ERR_OCR_MODEL_NOT_FOUND` (missing model) or `RUG_ERR_UNSUPPORTED`.
+> Task 1.3 OCR abstraction + WinRT back-end + template matching; Task 1.3.1 wires
+> the real PP-OCRv5 (ONNX) and OpenCV paths plus the vcpkg/prebuilt dependency
+> setup. Input is the remaining **Phase 1 target**. Reference impl:
+> [Rug.Poc](../Rug.Poc/README.md).
+
+## Dependencies & Build Guards
+
+* **OpenCV + yaml-cpp** — supplied by **vcpkg manifest mode** ([vcpkg.json](vcpkg.json):
+  `opencv4` features `jpeg`+`png`+`world` (single `opencv_world` lib/dll), plus
+  `yaml-cpp`; dynamic `x64-windows`/`x86-windows`). Requires `vcpkg integrate install`
+  once per dev machine. [ThirdParty.props](ThirdParty.props) always defines `RUG_HAS_OPENCV`.
+* **ONNX Runtime** — **prebuilt** (official release zip). Set the `ONNXRUNTIME_ROOT`
+  env var to the unzipped folder (must contain `include\` + `lib\`). When set,
+  ThirdParty.props defines `RUG_HAS_ONNX`, wires include/lib, and adds a post-build
+  step copying `onnxruntime.dll` + `onnxruntime_providers_shared.dll` into `$(OutDir)`;
+  otherwise the Paddle path compiles out.
+* **PP-OCR assets** — `Rug_CreateOcrEngine(1, model_path, ...)` takes a **directory**
+  holding `det.onnx`, `rec.onnx`, `det.yml`, `rec.yml` (PaddleX export). The CTC
+  dictionary is **embedded in `rec.yml`** and parsed via yaml-cpp — there is no
+  `keys.txt`. Missing dir/files → `RUG_ERR_OCR_MODEL_NOT_FOUND`; without
+  `RUG_HAS_ONNX` → `RUG_ERR_UNSUPPORTED`. Layout & download:
+  [../models/README.md](../models/README.md).
 
 ## Internal Topology
 
@@ -32,10 +46,13 @@ scripting, scheduling or plugin logic — those live above it.
 | `WgcCapturer.h` / `.cpp` | WGC + D3D11 capture: window resolve, black-frame retry, DPI scale (exists) |
 | `IOcrEngine.h` | OCR strategy interface + `OcrResult`/`OcrLine` types (exists) |
 | `ImageView.h` | Shared non-owning BGRA8 pixel view (exists) |
-| `WinRtOcrEngine.h` / `.cpp` | WinRT OCR: 2x Fant upscale, recognize, CJK `CompactText` (exists) |
-| `PaddleOcrEngine.h` / `.cpp` | PP-OCRv5/ONNX back-end — guarded skeleton `RUG_HAS_ONNX` (exists) |
-| `ImageMatcher.h` / `.cpp` | OpenCV template matching — guarded skeleton `RUG_HAS_OPENCV` (exists) |
+| `OcrTextUtils.h` | Shared `CompactText` / `IsCjk` CJK space stripping (both OCR back-ends) (exists) |
+| `WinRtOcrEngine.h` / `.cpp` | WinRT OCR: 2x Fant upscale, recognize, `CompactText` (exists) |
+| `PaddleOcrEngine.h` / `.cpp` | PP-OCR ONNX Det(DBNet)+Rec(CTC); params + dict parsed from `det.yml`/`rec.yml` — active under `RUG_HAS_ONNX`+`RUG_HAS_OPENCV` (exists) |
+| `ImageMatcher.h` / `.cpp` | OpenCV `matchTemplate` (TM_CCOEFF_NORMED) + iterative peak suppression — active under `RUG_HAS_OPENCV` (exists) |
 | `CoreCom.h` | Shared COM apartment helper (exists) |
+| `vcpkg.json` | vcpkg manifest — OpenCV dependency set (exists) |
+| `ThirdParty.props` | Defines `RUG_HAS_OPENCV`/`RUG_HAS_ONNX`, wires ONNX Runtime include/lib (exists) |
 | `InputController.*` | Dual-mode input: PostMessage and Bezier-curve SendInput (planned) |
 | `pch.h` / `framework.h` | Precompiled Win32 + WinRT headers |
 
@@ -61,9 +78,12 @@ scripting, scheduling or plugin logic — those live above it.
 
 * Strategy interface: `[IOcrEngine](IOcrEngine.h#class:IOcrEngine)`
 * WinRT back-end: `[WinRtOcrEngine](WinRtOcrEngine.h#class:WinRtOcrEngine)`
-* CJK space stripping: `[CompactText](WinRtOcrEngine.cpp#function:CompactText)`
+* CJK space stripping: `[CompactText](OcrTextUtils.h#function:CompactText)`
 * 2x super-resolution: `[PrepareOcrBitmap](WinRtOcrEngine.cpp#function:PrepareOcrBitmap)`
 * Paddle back-end: `[PaddleOcrEngine](PaddleOcrEngine.h#class:PaddleOcrEngine)`
+* PP-OCR det post-process: `[BoxScore](PaddleOcrEngine.cpp#function:BoxScore)` ·
+  `[GetRotateCropImage](PaddleOcrEngine.cpp#function:GetRotateCropImage)`
+* PP-OCR CTC decode: `[CtcDecode](PaddleOcrEngine.cpp#function:CtcDecode)`
 * Template matcher: `[ImageMatcher](ImageMatcher.h#class:ImageMatcher)`
 
 ## C-ABI Contract (CRITICAL)
@@ -105,5 +125,10 @@ scripting, scheduling or plugin logic — those live above it.
   via `Rug_FreeBuffer` (`delete[]`) — managed code never frees it directly.
 * `Rug_RecognizeText` allocates the result on the C++ heap; release it with
   `Rug_FreeOcrResult`, NOT `Rug_FreeBuffer` (which is only for raw `new[]` buffers).
-* OpenCV / ONNX Runtime paths are compile-guarded (`RUG_HAS_OPENCV` /
-  `RUG_HAS_ONNX`); Rug.Core builds and runs WinRT-only until they are wired in.
+* OpenCV / ONNX Runtime paths are compile-guarded: `RUG_HAS_OPENCV` is always on
+  (vcpkg); `RUG_HAS_ONNX` is defined only when `ONNXRUNTIME_ROOT` is set. Without
+  ONNX the Paddle engine returns `RUG_ERR_UNSUPPORTED`; WinRT + OpenCV still work.
+* PP-OCR preprocessing params and the CTC dictionary are **parsed from `det.yml` /
+  `rec.yml`** at load time (single source of truth); the constants in
+  `PaddleOcrEngine.cpp` are only fallbacks for missing fields. det normalization
+  keeps the exported **BGR** channel order (no RGB swap).

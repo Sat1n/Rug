@@ -45,6 +45,9 @@
     <ClInclude Include="ImageMatcher.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="OcrTextUtils.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
@@ -71,5 +74,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="README.md" />
+    <None Include="ThirdParty.props" />
+    <None Include="vcpkg.json" />
   </ItemGroup>
 </Project>

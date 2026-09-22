@@ -138,6 +138,7 @@ typedef struct RugOcrLine {
     int32_t y;       // Bounding-box top.
     int32_t width;   // Bounding-box width.
     int32_t height;  // Bounding-box height.
+    float   confidence;  // Engine confidence in [0,1]. WinRT OCR has none -> 1.0.
     char    text[RUG_OCR_LINE_TEXT_MAX];  // UTF-8, NUL-terminated line text.
 } RugOcrLine;
 
@@ -184,10 +185,13 @@ RUGCORE_API int32_t RUGCORE_CALL Rug_GrabFrame(RugCapturerHandle handle,
 // -----------------------------------------------------------------------------
 
 // Create an OCR engine of the given back-end (RugOcrEngineType).
-//   - RUG_OCR_ENGINE_WINRT (0):  model_path is ignored; WinRT uses zh-Hans with
-//                                fallback to the user's profile languages.
-//   - RUG_OCR_ENGINE_PADDLE (1): model_path is a UTF-8 path to the PP-OCRv5 ONNX
-//                                model; missing file -> RUG_ERR_OCR_MODEL_NOT_FOUND.
+//   - RUG_OCR_ENGINE_WINRT (0):  model_path is an OPTIONAL UTF-8 BCP-47 language
+//                                tag (e.g. "zh-Hans", "en"). NULL/empty -> the
+//                                user's system (profile) language; an unavailable
+//                                tag also falls back to the profile language.
+//   - RUG_OCR_ENGINE_PADDLE (1): model_path is a UTF-8 DIRECTORY holding the
+//                                PP-OCR model (det.onnx/rec.onnx/det.yml/rec.yml);
+//                                missing -> RUG_ERR_OCR_MODEL_NOT_FOUND.
 RUGCORE_API int32_t RUGCORE_CALL Rug_CreateOcrEngine(int32_t engine_type,
                                                      const char* model_path,
                                                      RugOcrEngineHandle* out_handle);
