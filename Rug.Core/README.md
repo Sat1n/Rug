@@ -13,17 +13,19 @@ OCR (WinRT), coordinate normalization and humanized input synthesis. Everything 
 exposed to the managed host through a stable C-ABI. It contains **no** UI,
 scripting, scheduling or plugin logic — those live above it.
 
-> **Status:** the C-ABI surface (`include/RugCoreAbi.h`) is declared (Task 1.1);
-> the component implementations below are still **Phase 1 targets**. Symbol anchors
-> are added in the same commit as the code (BLUEPRINT §4). The working reference
-> implementation is [Rug.Poc](../Rug.Poc/README.md).
+> **Status:** C-ABI surface declared (Task 1.1) and the **capture** path
+> implemented (Task 1.2: `WgcCapturer` + `Rug_CreateCapturer`/`Rug_GrabFrame`/
+> `Rug_DestroyCapturer`/`Rug_FreeBuffer`). OCR and input components are still
+> **Phase 1 targets**. The working reference implementation is
+> [Rug.Poc](../Rug.Poc/README.md).
 
 ## Internal Topology
 
 | File | Responsibility |
 |---|---|
 | `include/RugCoreAbi.h` | **C-ABI surface** — `extern "C"` exports, status codes, handles, structs (exists) |
-| `WgcCapturer.*` | D3D11 device + `GraphicsCaptureItem` + frame pool → `SoftwareBitmap` (planned) |
+| `RugCoreAbi.cpp` | C-ABI implementation — capture exports + buffer ownership (exists) |
+| `WgcCapturer.h` / `WgcCapturer.cpp` | WGC + D3D11 capture: window resolve, black-frame retry, DPI scale (exists) |
 | `WinRtOcr.*` | OCR engine lifecycle, recognize, bounding-rect + DPI/scale normalization (planned) |
 | `InputController.*` | Dual-mode input: PostMessage and Bezier-curve SendInput (planned) |
 | `pch.h` / `framework.h` | Precompiled Win32 + WinRT headers |
@@ -36,6 +38,12 @@ scripting, scheduling or plugin logic — those live above it.
   `[Rug_GrabFrame](include/RugCoreAbi.h#function:Rug_GrabFrame)`
 * OCR: `[Rug_RecognizeText](include/RugCoreAbi.h#function:Rug_RecognizeText)`
 * Input: `[Rug_Click](include/RugCoreAbi.h#function:Rug_Click)`
+
+## Symbol Anchors (capture internals)
+
+* Capturer class: `[WgcCapturer](WgcCapturer.h#class:WgcCapturer)`
+* Window resolution: `[ResolveRenderWindow](WgcCapturer.cpp#function:ResolveRenderWindow)`
+* Black-frame guard: `[IsAllBlack](WgcCapturer.cpp#function:IsAllBlack)`
 
 ## C-ABI Contract (CRITICAL)
 
@@ -66,3 +74,8 @@ scripting, scheduling or plugin logic — those live above it.
 
 * No kernel anti-cheat bypass, no memory hacking, no CAPTCHA solving (L1 §5.2).
 * No managed/UI dependencies; dependency direction is strictly one-way (L1 §5.1).
+* Capture blocks on WinRT async (`.get()`); the host must call `Rug_*Capturer` /
+  `Rug_GrabFrame` from a background **MTA** thread, never the STA UI thread
+  (AGENTS.md: never block the UI thread).
+* `Rug_GrabFrame` returns BGRA8 memory allocated with `new[]`; it MUST be released
+  via `Rug_FreeBuffer` (`delete[]`) — managed code never frees it directly.
