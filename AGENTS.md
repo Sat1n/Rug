@@ -39,7 +39,8 @@ Rug/
 ├── Rug.Core/        # C++20 DLL — WGC, OCR, input, C-ABI    (L2: Rug.Core/README.md)
 ├── Rug.UI.Core/     # C# host logic — scheduler, plugins, Lua (L2: Rug.UI.Core/README.md)
 ├── Rug.UI/          # C# WinUI 3 app — views, VMs, P/Invoke   (L2: Rug.UI/README.md)
-└── Rug.Poc/         # C++ sandbox — pipeline validator        (L2: Rug.Poc/README.md)
+├── Rug.Poc/         # C++ sandbox — pipeline validator        (L2: Rug.Poc/README.md)
+└── tests/           # Rug.Core C-ABI test harness             (see tests/README.md)
 ```
 
 ## 4. Top-Level Data Flow
