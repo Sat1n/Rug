@@ -4,23 +4,23 @@ Runtime model assets for Rug. These are **data**, not code: the managed host
 resolves a model directory at runtime and passes its path to the native core
 (e.g. `Rug_CreateOcrEngine(1, "<abs path to models/ocr/ppocr_v6>", &handle)`).
 
-> **Binaries are NOT committed.** `*.onnx` / `*.pdmodel` / `*.pdiparams` under
-> this folder are gitignored. Only the layout, `README.md`, `model.json`, the
-> sidecar `*.yml` configs and small text assets live in the repo. Download the
-> `.onnx` weights per the per-bundle notes below.
+> **Model files are NOT committed.** Everything a bundle needs at runtime — the
+> `*.onnx` weights **and** the `*.yml` configs — is gitignored. Only this
+> `README.md` and each bundle's `model.json` (identity + file roles) live in the
+> repo. Every developer downloads and renames the model files locally, per below.
 
 ## Layout convention
 
 ```text
 models/
-├── README.md              # this file
+├── README.md              # this file (committed)
 ├── ocr/                   # category: optical character recognition
 │   └── ppocr_v6/          # bundle: one directory == one loadable model set
-│       ├── det.onnx       # fixed name — text detection (DBNet)        [gitignored]
-│       ├── rec.onnx       # fixed name — text recognition (CTC)        [gitignored]
-│       ├── det.yml        # fixed name — det pre/post-process config (PaddleX export)
-│       ├── rec.yml        # fixed name — rec config + embedded character_dict
-│       └── model.json     # bundle manifest (identity + file roles)
+│       ├── det.onnx       # text detection (DBNet)            [downloaded, gitignored]
+│       ├── rec.onnx       # text recognition (CTC)            [downloaded, gitignored]
+│       ├── det.yml        # det pre/post-process config       [downloaded, gitignored]
+│       ├── rec.yml        # rec config + embedded character_dict [downloaded, gitignored]
+│       └── model.json     # bundle manifest (identity + file roles)  (committed)
 └── match/                 # category: template-matching image assets
     └── <name>.png
 ```
@@ -37,24 +37,33 @@ Rules:
 
 ## OCR bundles
 
-### `ocr/ppocr_v6` — PaddleOCR PP-OCRv6 (ONNX, PaddleX export)
+### `ocr/ppocr_v6` — PaddleOCR PP-OCRv6 (ONNX)
 
-- **Det + Rec + dictionary.** Modern PaddleOCR/PaddleX exports ship `det.yml` and
-  `rec.yml` sidecars instead of a standalone `keys.txt`; the **CTC character
-  dictionary is embedded** in `rec.yml` under `PostProcess.character_dict`
-  (~6900 entries, includes full-width glyphs).
-- **The native loader parses both yml files at load time** (`yaml-cpp`):
-  - `det.yml` → `NormalizeImage` mean/std/scale, `DBPostProcess` thresh /
-    box_thresh / unclip_ratio / max_candidates, and the resize side length.
-  - `rec.yml` → `character_dict` and `RecResizeImg.image_shape` (recognition height).
-  This makes the engine **data-driven**: a different export with different
-  constants works without code changes.
-- **Required files** (`Rug.Core/PaddleOcrEngine.cpp`): exactly `det.onnx`,
-  `rec.onnx`, `det.yml`, `rec.yml` in this directory. Missing any →
-  `RUG_ERR_OCR_MODEL_NOT_FOUND`.
-- **Where to get them:** the PaddleOCR / PaddleX release, or a ready-to-run ONNX
-  export such as RapidAI / RapidOCR. Drop the detection model in as `det.onnx`,
-  the recognition model as `rec.onnx`, and keep the exported `det.yml` / `rec.yml`.
+**Det + Rec + dictionary.** Modern PaddleOCR/PaddleX exports ship an `inference.yml`
+sidecar per model instead of a standalone `keys.txt`; the **CTC character dictionary
+is embedded** in the recognition config under `PostProcess.character_dict` (~6900
+entries, includes full-width glyphs). The native loader parses both yml files at
+load time (`yaml-cpp`) to get the dictionary and all pre/post-process parameters,
+so the engine is data-driven and a different export works without code changes.
+
+**Where to get them — HuggingFace.** Download the PP-OCRv6 **detection** and
+**recognition** ONNX bundles from HuggingFace. Each bundle ships an
+`inference.onnx` + `inference.yml`. Rename them into this directory as follows:
+
+| Downloaded (detection bundle)  | -> | Local name      |
+|--------------------------------|----|-----------------|
+| `inference.onnx`               | -> | `det.onnx`      |
+| `inference.yml`                | -> | `det.yml`       |
+
+| Downloaded (recognition bundle)| -> | Local name      |
+|--------------------------------|----|-----------------|
+| `inference.onnx`               | -> | `rec.onnx`      |
+| `inference.yml`                | -> | `rec.yml`       |
+
+**Required files** (`Rug.Core/PaddleOcrEngine.cpp`): exactly `det.onnx`,
+`rec.onnx`, `det.yml`, `rec.yml` in this directory. Missing any →
+`RUG_ERR_OCR_MODEL_NOT_FOUND`. None of them are committed — they are downloaded
+and renamed locally.
 
 ## `model.json` (bundle manifest)
 
