@@ -1,8 +1,9 @@
 // =============================================================================
-//  RugCoreAbi.cpp — C-ABI implementation (Task 1.2: capture + buffer ownership).
+//  RugCoreAbi.cpp — C-ABI implementation.
+//  Task 1.2: capture + buffer ownership. Task 1.3: OCR + template matching.
 //
-//  Implements the capture-related exports declared in include/RugCoreAbi.h.
-//  OCR and input exports are added in later Phase 1 tasks.
+//  Implements the capture, OCR and matching exports declared in
+//  include/RugCoreAbi.h. Input exports are added in a later Phase 1 task.
 //
 //  Memory rule: any buffer handed to the caller here is allocated with new[]
 //  and released by Rug_FreeBuffer with delete[]. The two must always pair.
@@ -11,20 +12,62 @@
 #include "pch.h"
 #include "RugCoreAbi.h"
 #include "WgcCapturer.h"
+#include "IOcrEngine.h"
+#include "WinRtOcrEngine.h"
+#include "PaddleOcrEngine.h"
+#include "ImageMatcher.h"
 
 #include <cstring>
 #include <memory>
+#include <new>
+#include <string>
+#include <vector>
 
 using rug::core::WgcCapturer;
 using rug::core::CapturedFrame;
+using rug::core::IOcrEngine;
+using rug::core::ImageView;
+using rug::core::OcrResult;
+using rug::core::MatchBox;
 
 namespace {
-// The opaque ABI handle is the WgcCapturer instance pointer.
+// Opaque ABI handles are the underlying C++ instance pointers.
 inline WgcCapturer* ToCapturer(RugCapturerHandle h) {
     return reinterpret_cast<WgcCapturer*>(h);
 }
 inline RugCapturerHandle FromCapturer(WgcCapturer* p) {
     return reinterpret_cast<RugCapturerHandle>(p);
+}
+inline IOcrEngine* ToEngine(RugOcrEngineHandle h) {
+    return reinterpret_cast<IOcrEngine*>(h);
+}
+inline RugOcrEngineHandle FromEngine(IOcrEngine* p) {
+    return reinterpret_cast<RugOcrEngineHandle>(p);
+}
+inline OcrResult* ToResult(RugOcrResultHandle h) {
+    return reinterpret_cast<OcrResult*>(h);
+}
+inline RugOcrResultHandle FromResult(OcrResult* p) {
+    return reinterpret_cast<RugOcrResultHandle>(p);
+}
+
+// Copy a wide string into a fixed UTF-8 buffer, truncating safely.
+void CopyUtf8(const std::wstring& w, char* dst, size_t dstSize) {
+    if (!dst || dstSize == 0) return;
+    dst[0] = '\0';
+    if (w.empty()) return;
+    int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), static_cast<int>(w.size()),
+                                dst, static_cast<int>(dstSize) - 1, nullptr, nullptr);
+    if (n < 0) n = 0;
+    dst[n] = '\0';
+}
+
+// RugFrame -> ImageView. Returns false if the frame is not usable BGRA8.
+bool FrameToView(const RugFrame* f, ImageView& v) {
+    if (!f || !f->data || f->width <= 0 || f->height <= 0) return false;
+    if (f->format != RUG_PIXEL_BGRA8) return false;
+    v.data = f->data; v.width = f->width; v.height = f->height; v.stride = f->stride;
+    return true;
 }
 }  // namespace
 
@@ -94,6 +137,138 @@ RUGCORE_API int32_t RUGCORE_CALL Rug_GrabFrame(RugCapturerHandle handle,
     outFrame->stride     = cf.stride;
     outFrame->format     = RUG_PIXEL_BGRA8;
     return RUG_OK;
+}
+
+// --- OCR ---------------------------------------------------------------------
+
+RUGCORE_API int32_t RUGCORE_CALL Rug_CreateOcrEngine(int32_t engine_type,
+                                                     const char* model_path,
+                                                     RugOcrEngineHandle* out_handle) {
+    if (!out_handle) return RUG_ERR_INVALID_PARAM;
+    *out_handle = nullptr;
+
+    try {
+        std::unique_ptr<IOcrEngine> engine;
+        int32_t st;
+        switch (engine_type) {
+            case RUG_OCR_ENGINE_WINRT:
+                st = rug::core::WinRtOcrEngine::Create(engine);
+                break;
+            case RUG_OCR_ENGINE_PADDLE:
+                st = rug::core::PaddleOcrEngine::Create(model_path, engine);
+                break;
+            default:
+                return RUG_ERR_INVALID_PARAM;
+        }
+        if (st != RUG_OK) return st;
+
+        *out_handle = FromEngine(engine.release());
+        return RUG_OK;
+    }
+    catch (...) {
+        return RUG_ERR_OCR_FAILED;  // never let an exception cross the ABI
+    }
+}
+
+RUGCORE_API int32_t RUGCORE_CALL Rug_DestroyOcrEngine(RugOcrEngineHandle handle) {
+    if (!handle) return RUG_ERR_INVALID_PARAM;
+    try {
+        std::unique_ptr<IOcrEngine> engine(ToEngine(handle));  // virtual dtor
+        return RUG_OK;
+    }
+    catch (...) {
+        return RUG_ERR_UNKNOWN;
+    }
+}
+
+RUGCORE_API int32_t RUGCORE_CALL Rug_RecognizeText(RugOcrEngineHandle handle,
+                                                   const RugFrame* frame,
+                                                   RugOcrResultHandle* outResult) {
+    if (!handle || !outResult) return RUG_ERR_INVALID_PARAM;
+    *outResult = nullptr;
+
+    ImageView view;
+    if (!FrameToView(frame, view)) return RUG_ERR_INVALID_PARAM;
+
+    OcrResult* result = new (std::nothrow) OcrResult();
+    if (!result) return RUG_ERR_OUT_OF_MEMORY;
+
+    try {
+        int32_t st = ToEngine(handle)->Recognize(view, *result);
+        if (st != RUG_OK) { delete result; return st; }
+    }
+    catch (...) {
+        delete result;
+        return RUG_ERR_OCR_FAILED;
+    }
+
+    *outResult = FromResult(result);  // ownership transfers; free via Rug_FreeOcrResult
+    return RUG_OK;
+}
+
+RUGCORE_API int32_t RUGCORE_CALL Rug_OcrResultGetLineCount(RugOcrResultHandle result,
+                                                           int32_t* outCount) {
+    if (!result || !outCount) return RUG_ERR_INVALID_PARAM;
+    *outCount = static_cast<int32_t>(ToResult(result)->lines.size());
+    return RUG_OK;
+}
+
+RUGCORE_API int32_t RUGCORE_CALL Rug_OcrResultGetLine(RugOcrResultHandle result,
+                                                      int32_t index,
+                                                      RugOcrLine* outLine) {
+    if (!result || !outLine || index < 0) return RUG_ERR_INVALID_PARAM;
+    OcrResult* r = ToResult(result);
+    if (index >= static_cast<int32_t>(r->lines.size())) return RUG_ERR_INVALID_PARAM;
+
+    const rug::core::OcrLine& line = r->lines[static_cast<size_t>(index)];
+    std::memset(outLine, 0, sizeof(*outLine));
+    outLine->x      = line.box.x;
+    outLine->y      = line.box.y;
+    outLine->width  = line.box.width;
+    outLine->height = line.box.height;
+    CopyUtf8(line.text, outLine->text, RUG_OCR_LINE_TEXT_MAX);
+    return RUG_OK;
+}
+
+RUGCORE_API void RUGCORE_CALL Rug_FreeOcrResult(RugOcrResultHandle result) {
+    delete ToResult(result);  // delete nullptr is a no-op
+}
+
+// --- Template matching -------------------------------------------------------
+
+RUGCORE_API int32_t RUGCORE_CALL Rug_MatchTemplate(const RugFrame* frame,
+                                                   const char* template_path,
+                                                   float threshold,
+                                                   RugMatchBox* boxes,
+                                                   int32_t* inout_count) {
+    if (!inout_count || *inout_count < 0) return RUG_ERR_INVALID_PARAM;
+    const int32_t capacity = *inout_count;
+    if (capacity > 0 && !boxes) return RUG_ERR_INVALID_PARAM;
+
+    ImageView view;
+    if (!FrameToView(frame, view)) return RUG_ERR_INVALID_PARAM;
+    *inout_count = 0;
+
+    std::vector<MatchBox> matches;
+    try {
+        int32_t st = rug::core::ImageMatcher::MatchTemplate(view, template_path, threshold, matches);
+        if (st != RUG_OK) return st;
+    }
+    catch (...) {
+        return RUG_ERR_UNSUPPORTED;
+    }
+
+    const int32_t total = static_cast<int32_t>(matches.size());
+    const int32_t write = (total < capacity) ? total : capacity;
+    for (int32_t i = 0; i < write; ++i) {
+        boxes[i].x          = matches[i].x;
+        boxes[i].y          = matches[i].y;
+        boxes[i].width      = matches[i].width;
+        boxes[i].height     = matches[i].height;
+        boxes[i].confidence = matches[i].confidence;
+    }
+    *inout_count = write;
+    return (total > capacity) ? RUG_ERR_BUFFER_TOO_SMALL : RUG_OK;
 }
 
 }  // extern "C"

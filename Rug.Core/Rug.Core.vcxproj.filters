@@ -27,6 +27,24 @@
     <ClInclude Include="WgcCapturer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="CoreCom.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ImageView.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="IOcrEngine.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="WinRtOcrEngine.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PaddleOcrEngine.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ImageMatcher.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">
@@ -36,6 +54,15 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="RugCoreAbi.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="WinRtOcrEngine.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PaddleOcrEngine.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ImageMatcher.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="pch.cpp">

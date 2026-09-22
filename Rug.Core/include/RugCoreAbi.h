@@ -71,7 +71,8 @@ typedef enum RugStatus {
     RUG_ERR_OUT_OF_MEMORY    = -7,  // Native allocation failed.
     RUG_ERR_UNSUPPORTED      = -8,  // Requested feature/format/mode not supported.
     RUG_ERR_BUFFER_TOO_SMALL = -9,  // Caller-provided buffer is too small.
-    RUG_ERR_TIMEOUT          = -10  // Operation exceeded its time budget.
+    RUG_ERR_TIMEOUT          = -10, // Operation exceeded its time budget.
+    RUG_ERR_OCR_MODEL_NOT_FOUND = -11  // Model file required by the engine is missing.
 } RugStatus;
 
 // -----------------------------------------------------------------------------
@@ -93,6 +94,12 @@ typedef enum RugMouseButton {
     RUG_MOUSE_RIGHT  = 1,
     RUG_MOUSE_MIDDLE = 2
 } RugMouseButton;
+
+// OCR engine back-end selected by Rug_CreateOcrEngine.
+typedef enum RugOcrEngineType {
+    RUG_OCR_ENGINE_WINRT  = 0,  // Windows.Media.Ocr (built-in, no model file).
+    RUG_OCR_ENGINE_PADDLE = 1   // Paddle/ONNX (PP-OCRv5), requires model_path.
+} RugOcrEngineType;
 
 // -----------------------------------------------------------------------------
 // Opaque handles
@@ -134,6 +141,16 @@ typedef struct RugOcrLine {
     char    text[RUG_OCR_LINE_TEXT_MAX];  // UTF-8, NUL-terminated line text.
 } RugOcrLine;
 
+// One template-match hit. Coordinates are logical (caller applies DPI mapping).
+// Blittable; the caller allocates the array, so no native free is required.
+typedef struct RugMatchBox {
+    int32_t x;          // Box left.
+    int32_t y;          // Box top.
+    int32_t width;      // Box width.
+    int32_t height;     // Box height.
+    float   confidence; // Match score in [0, 1].
+} RugMatchBox;
+
 // -----------------------------------------------------------------------------
 // Memory ownership API
 // -----------------------------------------------------------------------------
@@ -166,10 +183,14 @@ RUGCORE_API int32_t RUGCORE_CALL Rug_GrabFrame(RugCapturerHandle handle,
 // OCR API
 // -----------------------------------------------------------------------------
 
-// Create an OCR engine. `languageTag` is a UTF-8 BCP-47 tag (e.g. "zh-Hans");
-// pass NULL to use the user's profile languages.
-RUGCORE_API int32_t RUGCORE_CALL Rug_CreateOcrEngine(const char* languageTag,
-                                                     RugOcrEngineHandle* outHandle);
+// Create an OCR engine of the given back-end (RugOcrEngineType).
+//   - RUG_OCR_ENGINE_WINRT (0):  model_path is ignored; WinRT uses zh-Hans with
+//                                fallback to the user's profile languages.
+//   - RUG_OCR_ENGINE_PADDLE (1): model_path is a UTF-8 path to the PP-OCRv5 ONNX
+//                                model; missing file -> RUG_ERR_OCR_MODEL_NOT_FOUND.
+RUGCORE_API int32_t RUGCORE_CALL Rug_CreateOcrEngine(int32_t engine_type,
+                                                     const char* model_path,
+                                                     RugOcrEngineHandle* out_handle);
 
 // Destroy an OCR engine created by Rug_CreateOcrEngine.
 RUGCORE_API int32_t RUGCORE_CALL Rug_DestroyOcrEngine(RugOcrEngineHandle handle);
@@ -189,6 +210,22 @@ RUGCORE_API int32_t RUGCORE_CALL Rug_OcrResultGetLineCount(RugOcrResultHandle re
 RUGCORE_API int32_t RUGCORE_CALL Rug_OcrResultGetLine(RugOcrResultHandle result,
                                                       int32_t index,
                                                       RugOcrLine* outLine);
+
+// -----------------------------------------------------------------------------
+// Template matching API
+// -----------------------------------------------------------------------------
+
+// Locate every occurrence of a template image inside `frame` whose normalized
+// match score is >= `threshold` (0..1). `template_path` is a UTF-8 image path.
+// `boxes` is a caller-allocated array; on entry *inout_count is its capacity, on
+// return it is the number of boxes written. If more matches exist than capacity,
+// the array is filled and RUG_ERR_BUFFER_TOO_SMALL is returned.
+// Requires OpenCV; without it returns RUG_ERR_UNSUPPORTED.
+RUGCORE_API int32_t RUGCORE_CALL Rug_MatchTemplate(const RugFrame* frame,
+                                                   const char* template_path,
+                                                   float threshold,
+                                                   RugMatchBox* boxes,
+                                                   int32_t* inout_count);
 
 // -----------------------------------------------------------------------------
 // Input API

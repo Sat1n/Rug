@@ -159,15 +159,24 @@
     </Manifest>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="CoreCom.h" />
     <ClInclude Include="framework.h" />
+    <ClInclude Include="ImageMatcher.h" />
     <ClInclude Include="include\RugCoreAbi.h" />
+    <ClInclude Include="IOcrEngine.h" />
+    <ClInclude Include="ImageView.h" />
+    <ClInclude Include="PaddleOcrEngine.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="WgcCapturer.h" />
+    <ClInclude Include="WinRtOcrEngine.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp" />
+    <ClCompile Include="ImageMatcher.cpp" />
+    <ClCompile Include="PaddleOcrEngine.cpp" />
     <ClCompile Include="RugCoreAbi.cpp" />
     <ClCompile Include="WgcCapturer.cpp" />
+    <ClCompile Include="WinRtOcrEngine.cpp" />
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
