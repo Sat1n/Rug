@@ -11,8 +11,10 @@
 #include <winrt/Windows.Graphics.Imaging.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <cwctype>
 #include <filesystem>
+#include <iostream>
 
 #pragma comment(lib, "windowsapp.lib")
 
@@ -48,7 +50,7 @@ const std::wstring& RepoRoot() {
 }
 
 std::wstring TestImagesDir() { return RepoRoot() + L"\\tests\\test_images"; }
-std::wstring OcrModelDir()   { return RepoRoot() + L"\\models\\ocr\\ppocr_v6"; }
+std::wstring OcrCategoryDir() { return RepoRoot() + L"\\models\\ocr"; }
 
 bool LoadImageToFrame(const std::wstring& path, FrameBuf& out) {
     try {
@@ -141,6 +143,54 @@ void SetupConsole() {
 
 double MsBetween(Clock::time_point a, Clock::time_point b) {
     return std::chrono::duration<double, std::milli>(b - a).count();
+}
+
+std::vector<EngineChoice> BuildEngineChoices() {
+    std::vector<EngineChoice> choices;
+    choices.push_back(EngineChoice{ L"WinRT OCR (system language)", true, std::string() });
+
+    const std::string dir = ToUtf8(OcrCategoryDir());
+    RugModelListHandle list = nullptr;
+    if (Rug_ScanOcrModels(dir.c_str(), &list) == RUG_OK && list) {
+        int32_t count = 0;
+        Rug_ModelListGetCount(list, &count);
+        for (int32_t i = 0; i < count; ++i) {
+            RugModelInfo info{};
+            if (Rug_ModelListGetInfo(list, i, &info) != RUG_OK) continue;
+            std::wstring label = ToWide(info.id) + L" (paddle";
+            if (info.version[0]) { label += L" v"; label += ToWide(info.version); }
+            label += L")";
+            choices.push_back(EngineChoice{ label, false, std::string(info.id) });
+        }
+        Rug_FreeModelList(list);
+    }
+    return choices;
+}
+
+int ChooseEngine(const std::vector<EngineChoice>& choices, int preset) {
+    if (choices.empty()) return -1;
+
+    std::printf("Available OCR engines:\n");
+    for (size_t i = 0; i < choices.size(); ++i)
+        std::printf("  [%zu] %s\n", i, ToUtf8(choices[i].label).c_str());
+
+    int sel = preset;
+    if (sel < 0) {
+        std::printf("Select engine number [0]: ");
+        std::fflush(stdout);
+        if (!(std::cin >> sel)) sel = 0;  // EOF / non-interactive -> default
+    }
+    if (sel < 0 || sel >= static_cast<int>(choices.size())) sel = 0;
+    return sel;
+}
+
+RugOcrEngineHandle CreateChosenEngine(const EngineChoice& c, int32_t& rc) {
+    RugOcrEngineHandle h = nullptr;
+    if (c.isWinRt)
+        rc = Rug_CreateOcrEngine(RUG_OCR_ENGINE_WINRT, nullptr, &h);
+    else
+        rc = Rug_CreateOcrEngineById(ToUtf8(OcrCategoryDir()).c_str(), c.id.c_str(), &h);
+    return h;
 }
 
 }  // namespace rugtest

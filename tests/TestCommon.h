@@ -28,7 +28,7 @@ using Clock = std::chrono::steady_clock;
 // Directory that contains Rug.slnx, derived from the executable path (cached).
 const std::wstring& RepoRoot();
 std::wstring TestImagesDir();  // <root>\tests\test_images
-std::wstring OcrModelDir();    // <root>\models\ocr\ppocr_v6
+std::wstring OcrCategoryDir(); // <root>\models\ocr
 
 // Decode an image (PNG/JPEG/BMP) into a BGRA8 RugFrame (WinRT BitmapDecoder).
 // False on failure. `pixels` owns the buffer that frame.data points into.
@@ -47,10 +47,28 @@ std::wstring FileName(const std::wstring& path);
 void   SetupConsole();                 // UTF-8 output
 double MsBetween(Clock::time_point a, Clock::time_point b);
 
-// Test entry points (defined in the three test_*.cpp files).
-int RunOcrCorrectness();
-int RunOcrStress();
+// A selectable OCR engine for the interactive tests.
+struct EngineChoice {
+    std::wstring label;    // display string
+    bool         isWinRt;  // true = WinRT system engine; false = Paddle model (by id)
+    std::string  id;       // Paddle model id (empty for WinRT)
+};
+
+// [0] = WinRT (always available), then each discovered Paddle model (by id).
+std::vector<EngineChoice> BuildEngineChoices();
+
+// Print a numbered table and read a selection from stdin. `preset` >= 0 selects
+// that index without prompting. Returns a valid index (or -1 if none available).
+int ChooseEngine(const std::vector<EngineChoice>& choices, int preset);
+
+// Create the engine for `choice`; returns nullptr on failure (rc set).
+RugOcrEngineHandle CreateChosenEngine(const EngineChoice& choice, int32_t& rc);
+
+// Test entry points (defined in the test_*.cpp files).
+int RunOcrCorrectness(int engineIndex);
+int RunOcrStress(int engineIndex);
 int RunTemplateMatch();
+int RunModelDiscovery();
 
 }  // namespace rugtest
 

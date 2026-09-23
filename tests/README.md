@@ -13,7 +13,8 @@ tests/
 ├── test_ocr_correctness.cpp # Task 2: dual-engine structured comparison over ocr_*.png
 ├── test_ocr_stress.cpp      # Task 3: 20× recognize/free per engine + timing + leak check
 ├── test_template_match.cpp  # Task 4: Rug_MatchTemplate (skips if images absent)
-├── main.cpp                 # dispatch: all | ocr | stress | match
+├── test_model_discovery.cpp # model auto-discovery + Rug_CreateOcrEngineById
+├── main.cpp                 # dispatch: all | ocr | stress | match | models
 ├── run_tests.cmd            # one-key build + run
 └── test_images/             # put ocr_*.png, tmpl_search.png, tmpl_target.png here
 ```
@@ -37,11 +38,19 @@ vcpkg/ONNX deployed there (opencv_world, yaml-cpp, onnxruntime). That is the
 ## Run
 
 ```
-x64\Debug\Rug.Tests.exe            # runs all three tests
-x64\Debug\Rug.Tests.exe ocr        # correctness only
-x64\Debug\Rug.Tests.exe stress     # stress only
-x64\Debug\Rug.Tests.exe match      # template match only
+x64\Debug\Rug.Tests.exe                    # runs all tests
+x64\Debug\Rug.Tests.exe ocr                # correctness only
+x64\Debug\Rug.Tests.exe stress             # stress only
+x64\Debug\Rug.Tests.exe match              # template match only
+x64\Debug\Rug.Tests.exe models             # model discovery + create-by-id
+x64\Debug\Rug.Tests.exe ocr 2              # correctness with engine #2 (skip menu)
 ```
+
+**Engine selection:** `ocr` and `stress` first scan `models/ocr` and print a
+numbered menu — `[0] WinRT OCR (system)` plus one entry per discovered Paddle
+model — then ask which to use. Pass a second argument (the index) to skip the
+prompt; with no console input (piped/CI) it defaults to `[0]` WinRT. In `all`
+mode the menu is shown once and reused for both tests.
 
 Paths are resolved from the executable location (it walks up to the directory
 containing `Rug.slnx`), so the working directory does not matter.
@@ -59,9 +68,11 @@ containing `Rug.slnx`), so the working directory does not matter.
 
 ## What "pass" looks like
 
-- **Correctness:** aligned per-image blocks for WinRT OCR and PP-OCRv6 with
-  per-line `Score`, `Box [x,y,w,h]`, and `Text` for visual comparison.
-- **Stress:** avg/min/max latency over 20 iterations per engine, clean
-  `Rug_DestroyOcrEngine`, no crash (an access violation aborts the run), and the
-  CRT leak dump at exit is empty (Debug).
+- **Correctness:** aligned per-image blocks for the selected engine with
+  per-line `Score`, `Box [x,y,w,h]`, and `Text`.
+- **Stress:** avg/min/max latency over 20 iterations for the selected engine,
+  clean `Rug_DestroyOcrEngine`, no crash (an access violation aborts the run), and
+  the CRT leak dump at exit is empty (Debug).
 - **Match:** best match `(x, y, w, h)` + `Score` + timing, or `[SKIP]`.
+- **Discovery:** lists every bundle under `models/ocr` (id/engine/version),
+  creates the first by id, and confirms an unknown id reports model-not-found.
