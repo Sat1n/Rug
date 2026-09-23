@@ -8,12 +8,13 @@ tags: [host, winui, ui]
 
 # Rug.UI Index (L2)
 
-C# WinUI 3 desktop shell: views, view-models, navigation/activation, theming and the
-single native interop boundary. It renders the dynamic UI and forwards user intent to
-host logic; it owns no automation pipeline itself.
+C# WinUI 3 desktop shell: views, view-models, navigation/activation and theming. It
+renders the dynamic UI and forwards user intent to `Rug.UI.Core` host logic; it owns
+no automation pipeline and no native interop itself.
 
-> **Status:** WinUI 3 template scaffold (activation, services, VMs, views). The
-> `Native/NativeMethods.cs` P/Invoke layer is **not yet created**.
+> **Status:** WinUI 3 template scaffold (activation, services, VMs, views). Native
+> interop is **not** done here — the app consumes `Rug.UI.Core` vision services
+> (`IOcrService`, `ITemplateMatchService`).
 
 ## Internal Topology
 
@@ -22,14 +23,16 @@ host logic; it owns no automation pipeline itself.
 | `Views/` | XAML pages (Main, Settings, Shell) |
 | `ViewModels/` | MVVM view-models (CommunityToolkit.Mvvm) |
 | `Services/` | Activation, navigation, theming, local settings |
-| `Native/NativeMethods.cs` | **Only** place allowed to declare P/Invoke imports (planned) |
+| (consumes) `Rug.UI.Core` | `IOcrService` / `ITemplateMatchService` — no direct P/Invoke here |
 
 ## Interop Restriction (CRITICAL)
 
-* All native imports must reside strictly inside `Native/NativeMethods.cs`.
-  Direct P/Invoke in ViewModels or Services is forbidden.
-* Managed code must never free native pointers — release native buffers only via the
-  core's `Rug_FreeBuffer` (see [Rug.Core L2](../Rug.Core/README.md)).
+* **No direct P/Invoke in `Rug.UI`.** The single native boundary lives in
+  [Rug.UI.Core](../Rug.UI.Core/README.md) (`Native/Rug.Core.Native.cs`); the app
+  consumes `IOcrService` / `ITemplateMatchService`. P/Invoke in Views, ViewModels or
+  app Services is forbidden.
+* Native memory safety is handled inside `Rug.UI.Core` (SafeHandle + `Rug_FreeBuffer`);
+  UI code never touches native pointers.
 
 ## Coding Standards (C# / WinUI 3)
 
@@ -38,4 +41,5 @@ host logic; it owns no automation pipeline itself.
 
 ## Constraints
 
-* Depends downward only on `Rug.Core` (via P/Invoke) and `Rug.UI.Core` (L1 §5.1).
+* Depends downward only on `Rug.UI.Core` (which wraps `Rug.Core`); `Rug.UI` does not
+  P/Invoke the native DLL directly (L1 §5.1).

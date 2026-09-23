@@ -63,8 +63,9 @@ Rug/
 2. **Compliance:** no kernel anti-cheat bypass, no memory hacking, no automated
    CAPTCHA solving. Automation relies solely on visual perception and humanized input.
 3. **Boundary discipline:** the C-ABI contract and memory-ownership rules are owned
-   by [Rug.Core L2](Rug.Core/README.md); the managed-side P/Invoke restriction is
-   owned by [Rug.UI L2](Rug.UI/README.md).
+   by [Rug.Core L2](Rug.Core/README.md); the single managed P/Invoke boundary lives
+   in `Rug.UI.Core/Native/` and its restriction is owned by
+   [Rug.UI.Core L2](Rug.UI.Core/README.md). `Rug.UI` consumes services, never P/Invokes.
 4. **Zero documentation rot:** L3 changes and their L2 doc updates land in the same
    commit (BLUEPRINT §4 / §6).
 
