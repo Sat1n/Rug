@@ -85,8 +85,8 @@ typedef enum RugPixelFormat {
 } RugPixelFormat;
 
 typedef enum RugInputMode {
-    RUG_INPUT_POSTMESSAGE = 0,  // Background, window-message based (no focus).
-    RUG_INPUT_SENDINPUT   = 1   // Foreground, humanized Bezier-curve SendInput.
+    RUG_INPUT_WIN32_SOFTWARE  = 0,  // Win32 SendInput (foreground) / PostMessage (background).
+    RUG_INPUT_HARDWARE_KMBOX  = 1   // KMBox B+/Pro/Net hardware controller.
 } RugInputMode;
 
 typedef enum RugMouseButton {
@@ -94,6 +94,12 @@ typedef enum RugMouseButton {
     RUG_MOUSE_RIGHT  = 1,
     RUG_MOUSE_MIDDLE = 2
 } RugMouseButton;
+
+// Mouse movement path shape produced by the humanizer.
+typedef enum RugTrajectoryType {
+    RUG_TRAJECTORY_STRAIGHT     = 0,  // Linear interpolation with ease-in-out timing.
+    RUG_TRAJECTORY_CUBIC_BEZIER = 1   // Cubic Bezier through a perpendicular corridor (default).
+} RugTrajectoryType;
 
 // OCR engine back-end selected by Rug_CreateOcrEngine.
 typedef enum RugOcrEngineType {
@@ -163,6 +169,17 @@ typedef struct RugModelInfo {
     char version[RUG_MODEL_VERSION_MAX];  // e.g. "6.0"
     char engine[RUG_MODEL_ENGINE_MAX];    // back-end key, e.g. "paddle"
 } RugModelInfo;
+
+// Tuning knobs for the humanized input controller. Blittable; the struct is
+// copied by value across the ABI so no ownership transfer occurs.
+typedef struct RugHumanizeConfig {
+    int32_t minClickHoldMs;   // Lower bound of random click hold time. Default 80.
+    int32_t maxClickHoldMs;   // Upper bound of random click hold time. Default 120.
+    int32_t minKeyHoldMs;     // Lower bound of random key hold time.   Default 60.
+    int32_t maxKeyHoldMs;     // Upper bound of random key hold time.   Default 100.
+    float   corridorRatio;    // Bezier control-point offset as a fraction of distance. Default 0.15.
+    int32_t enableJitter;     // 0 = disable per-point jitter, non-zero = enable (default).
+} RugHumanizeConfig;
 
 // -----------------------------------------------------------------------------
 // Memory ownership API
@@ -285,22 +302,96 @@ RUGCORE_API int32_t RUGCORE_CALL Rug_MatchTemplate(const RugFrame* frame,
 // -----------------------------------------------------------------------------
 // Input API
 // -----------------------------------------------------------------------------
+//
+// Coordinates are physical screen pixels for foreground SendInput, or
+// client-space pixels of the bound HWND for background PostMessage. The caller
+// is responsible for Per-Monitor V2 DPI normalization. `holdTimeMs == 0` on
+// Click/KeyPress selects a random duration from the active RugHumanizeConfig.
 
-// Create an input controller operating in `mode` (RugInputMode).
+// Create an input controller operating in `mode` (RugInputMode). `hwnd` (HWND as
+// void*) optionally binds a background target window; pass NULL for foreground
+// SendInput. On RUG_OK, *out_handle receives a valid opaque handle.
 RUGCORE_API int32_t RUGCORE_CALL Rug_CreateInputController(int32_t mode,
-                                                           RugInputControllerHandle* outHandle);
+                                                           void* hwnd,
+                                                           RugInputControllerHandle* out_handle);
 
-// Destroy an input controller created by Rug_CreateInputController.
+// Destroy an input controller created by Rug_CreateInputController. Safe with NULL.
 RUGCORE_API int32_t RUGCORE_CALL Rug_DestroyInputController(RugInputControllerHandle handle);
 
-// Synthesize a click at client-space (x, y) on `targetWindow` (HWND as void*).
-// `button` is a RugMouseButton value. Coordinates must already be normalized
-// against Per-Monitor V2 DPI scaling by the caller.
-RUGCORE_API int32_t RUGCORE_CALL Rug_Click(RugInputControllerHandle handle,
-                                           void* targetWindow,
-                                           int32_t x,
-                                           int32_t y,
-                                           int32_t button);
+// Absolute move to (x, y). `trajectory` is a RugTrajectoryType; when `smooth` is
+// non-zero the path is emitted as humanized samples with dynamic delays, else a
+// single jump is synthesized.
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_MouseMove(RugInputControllerHandle handle,
+                                                     int32_t x,
+                                                     int32_t y,
+                                                     int32_t trajectory,
+                                                     int32_t smooth);
+
+// Relative move by (dx, dy) from the current position, honoring `trajectory`/`smooth`.
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_MouseMoveRelative(RugInputControllerHandle handle,
+                                                             int32_t dx,
+                                                             int32_t dy,
+                                                             int32_t trajectory,
+                                                             int32_t smooth);
+
+// Press / release a mouse button (RugMouseButton) without moving.
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_MouseDown(RugInputControllerHandle handle,
+                                                     int32_t button);
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_MouseUp(RugInputControllerHandle handle,
+                                                   int32_t button);
+
+// Move nowhere; press and release `button`, holding for `holdTimeMs`
+// (0 -> random within RugHumanizeConfig click-hold bounds).
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_Click(RugInputControllerHandle handle,
+                                                 int32_t button,
+                                                 int32_t holdTimeMs);
+
+// Humanized drag: move to (sx, sy), press left, move to (ex, ey), release.
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_DragAndDrop(RugInputControllerHandle handle,
+                                                       int32_t sx,
+                                                       int32_t sy,
+                                                       int32_t ex,
+                                                       int32_t ey,
+                                                       int32_t trajectory,
+                                                       int32_t smooth);
+
+// Keyboard: virtual-key down/up, and a press holding `holdTimeMs`
+// (0 -> random within RugHumanizeConfig key-hold bounds).
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_KeyDown(RugInputControllerHandle handle, int32_t vk);
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_KeyUp(RugInputControllerHandle handle, int32_t vk);
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_KeyPress(RugInputControllerHandle handle,
+                                                    int32_t vk,
+                                                    int32_t holdTimeMs);
+
+// Send a UTF-8, NUL-terminated string as a sequence of Unicode characters.
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_SendText(RugInputControllerHandle handle,
+                                                    const char* utf8_text);
+
+// Re-bind the background target window (HWND as void*). NULL switches to foreground.
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_SetTargetWindow(RugInputControllerHandle handle,
+                                                           void* hwnd);
+
+// Replace the controller's humanization tuning. The struct is copied by value.
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_SetHumanizeConfig(RugInputControllerHandle handle,
+                                                             const RugHumanizeConfig* config);
+
+// Dry-run the humanizer for a move from (sx, sy) to (ex, ey) WITHOUT emitting any
+// OS input. Writes up to *inout_count samples: `xs`/`ys` receive pixel positions
+// and `delays` receives each sample's delay in milliseconds. On entry *inout_count
+// is the capacity of all three caller-allocated arrays; on return it is the number
+// of samples written. If the plan has more samples than capacity, the arrays are
+// filled and RUG_ERR_BUFFER_TOO_SMALL is returned (with *inout_count == capacity).
+// Useful for tests asserting the dynamic sampling-interval distribution.
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_PlanTrajectory(RugInputControllerHandle handle,
+                                                          int32_t sx,
+                                                          int32_t sy,
+                                                          int32_t ex,
+                                                          int32_t ey,
+                                                          int32_t trajectory,
+                                                          int32_t* xs,
+                                                          int32_t* ys,
+                                                          float* delays,
+                                                          int32_t* inout_count);
 
 #ifdef __cplusplus
 }  // extern "C"

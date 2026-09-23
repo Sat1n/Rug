@@ -16,7 +16,8 @@ scripting, scheduling or plugin logic — those live above it.
 > **Status:** Task 1.1 C-ABI surface; Task 1.2 capture (`WgcCapturer`);
 > Task 1.3 OCR abstraction + WinRT back-end + template matching; Task 1.3.1 wires
 > the real PP-OCRv5 (ONNX) and OpenCV paths plus the vcpkg/prebuilt dependency
-> setup. Input is the remaining **Phase 1 target**. Reference impl:
+> setup; Task 1.5 dual-mode input (`Win32InputController` live, KMBox guarded
+> skeleton) with humanized trajectories. Reference impl:
 > [Rug.Poc](../Rug.Poc/README.md).
 
 ## Dependencies & Build Guards
@@ -54,7 +55,11 @@ scripting, scheduling or plugin logic — those live above it.
 | `CoreCom.h` | Shared COM apartment helper (exists) |
 | `vcpkg.json` | vcpkg manifest — OpenCV dependency set (exists) |
 | `ThirdParty.props` | Defines `RUG_HAS_OPENCV`/`RUG_HAS_ONNX`, wires ONNX Runtime include/lib (exists) |
-| `InputController.*` | Dual-mode input: PostMessage and Bezier-curve SendInput (planned) |
+| `Input/IInputController.h` | Dual-mode input contract: enums, `HumanizeConfig`, `TrajectorySample`, factory decl (exists) |
+| `Input/Humanizer.*` | Ease-in-out trajectory planner + velocity-driven dynamic polling cadence + Bezier corridor (exists) |
+| `Input/Win32InputController.*` | Win32 back-end: SendInput (foreground) / PostMessage (background HWND) (exists) |
+| `Input/KmboxInputController.*` | KMBox B+/Pro/Net back-end — **guarded skeleton**, returns `RUG_ERR_UNSUPPORTED` until the vendor protocol lands (exists) |
+| `Input/InputControllerFactory.cpp` | `CreateInputController(mode, hwnd)` — routes to the Win32 or KMBox back-end (exists) |
 | `pch.h` / `framework.h` | Precompiled Win32 + WinRT headers |
 
 ## Symbol Anchors (C-ABI)
@@ -70,7 +75,10 @@ scripting, scheduling or plugin logic — those live above it.
 * Discovery: `[Rug_ScanOcrModels](include/RugCoreAbi.h#function:Rug_ScanOcrModels)` ·
   `[Rug_CreateOcrEngineById](include/RugCoreAbi.h#function:Rug_CreateOcrEngineById)`
 * Matching: `[Rug_MatchTemplate](include/RugCoreAbi.h#function:Rug_MatchTemplate)`
-* Input: `[Rug_Click](include/RugCoreAbi.h#function:Rug_Click)`
+* Input: `[Rug_CreateInputController](include/RugCoreAbi.h#function:Rug_CreateInputController)` ·
+  `[Rug_Input_MouseMove](include/RugCoreAbi.h#function:Rug_Input_MouseMove)` ·
+  `[Rug_Input_Click](include/RugCoreAbi.h#function:Rug_Input_Click)` ·
+  `[Rug_Input_PlanTrajectory](include/RugCoreAbi.h#function:Rug_Input_PlanTrajectory)`
 
 ## Symbol Anchors (capture internals)
 
@@ -90,6 +98,15 @@ scripting, scheduling or plugin logic — those live above it.
 * PP-OCR CTC decode: `[CtcDecode](PaddleOcrEngine.cpp#function:CtcDecode)`
 * Template matcher: `[ImageMatcher](ImageMatcher.h#class:ImageMatcher)`
 * Model catalog: `[ScanOcrModels](ModelCatalog.cpp#function:ScanOcrModels)`
+
+## Symbol Anchors (input internals)
+
+* Input contract: `[IInputController](Input/IInputController.h#class:IInputController)`
+* Factory: `[CreateInputController](Input/InputControllerFactory.cpp#function:CreateInputController)`
+* Trajectory planner: `[Humanizer::Plan](Input/Humanizer.cpp#function:Plan)`
+* Dynamic-cadence wait: `[Humanizer::Wait](Input/Humanizer.cpp#function:Wait)`
+* Win32 back-end: `[Win32InputController](Input/Win32InputController.h#class:Win32InputController)`
+* KMBox back-end (skeleton): `[KmboxInputController](Input/KmboxInputController.h#class:KmboxInputController)`
 
 ## C-ABI Contract (CRITICAL)
 
@@ -115,7 +132,7 @@ scripting, scheduling or plugin logic — those live above it.
 [HWND] ─> [WgcCapturer] ─> BGRA8 frame ─┬─> [IOcrEngine: WinRT | Paddle] ─> lines + boxes ─┐
                                         └─> [ImageMatcher (OpenCV)] ─> match boxes ─────────┤
                                                                                             ▼
-                                                       [InputController] ─> [OS input]  (planned)
+                                                       [InputController] ─> [OS input]  (Win32 live · KMBox skeleton)
    all wrapped by RugCoreAbi.h (int32_t codes; Rug_FreeBuffer / Rug_FreeOcrResult)
 ```
 

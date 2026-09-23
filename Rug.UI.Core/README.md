@@ -10,12 +10,15 @@ tags: [host, logic, interop, vision, lua, plugins]
 
 Managed host logic between the native core and the UI. It is the **single managed
 P/Invoke boundary** to `Rug.Core.dll` and exposes safe, async vision services
-(OCR, template matching) plus model discovery; it will also host task scheduling,
-plugin loading and the sandboxed Lua runtime. It contains no XAML.
+(OCR, template matching) plus model discovery and humanized input synthesis; it
+will also host task scheduling, plugin loading and the sandboxed Lua runtime. It
+contains no XAML.
 
 > **Status:** native interop + vision services implemented (Phase 1, Task 1.4):
 > `Native/`, `Models/Vision.cs`, `Services/OcrService.cs`,
-> `Services/TemplateMatchService.cs`. `FileService`/`Json` pre-exist.
+> `Services/TemplateMatchService.cs`; input service added (Task 1.5):
+> `Models/Input.cs`, `Native/InputControllerHandle.cs`, `Services/InputService.cs`.
+> `FileService`/`Json` pre-exist.
 > `TaskScheduler` / `PluginLoader` / Lua engine are **Phase 2 targets**.
 
 ## Internal Topology
@@ -23,12 +26,14 @@ plugin loading and the sandboxed Lua runtime. It contains no XAML.
 | Path | Responsibility |
 |---|---|
 | `Native/Rug.Core.Native.cs` | **Only** P/Invoke surface — `LibraryImport`(UTF-8) + blittable struct maps of `Rug.Core.dll` |
-| `Native/OcrEngineHandle.cs` · `SafeOcrResult.cs` · `SafeModelList.cs` | `SafeHandle` wrappers releasing native engine/result/list deterministically |
+| `Native/OcrEngineHandle.cs` · `SafeOcrResult.cs` · `SafeModelList.cs` · `InputControllerHandle.cs` | `SafeHandle` wrappers releasing native engine/result/list/input-controller deterministically |
 | `Native/RugNativeException.cs` | Non-zero native status → exception |
 | `Models/Vision.cs` | Managed records: `OcrTextBlock`, `TemplateMatchResult`, `Rect`, `OcrEngineType` |
-| `Contracts/Services/` | `IOcrService`, `ITemplateMatchService`, `IFileService` |
+| `Models/Input.cs` | Managed records: `InputMode`, `MouseButton`, `TrajectoryType`, `HumanizeConfig`, `TrajectorySample` |
+| `Contracts/Services/` | `IOcrService`, `ITemplateMatchService`, `IInputService`, `IFileService` |
 | `Services/OcrService.cs` | Async OCR (Task.Run / MTA): load image → engine (WinRT, or Paddle by discovered id) → managed blocks; frees native memory |
 | `Services/TemplateMatchService.cs` | Async template match over `Rug_MatchTemplate` |
+| `Services/InputService.cs` | Async humanized input (Task.Run / MTA): mouse move/click/drag, key press, `SendText`, dry-run `PlanTrajectoryAsync`; owns one native controller for its lifetime |
 | `Services/FileService.cs` · `Helpers/Json.cs` | File IO / JSON helpers |
 | `TaskScheduler` / `PluginLoader` / Lua engine / permission interceptor | **planned (Phase 2)** |
 
@@ -40,11 +45,14 @@ plugin loading and the sandboxed Lua runtime. It contains no XAML.
   as UTF-8, so CJK text and paths never mojibake.
 * Native memory is owned by native: engine/result/list handles are wrapped in
   `SafeHandle`s that call `Rug_DestroyOcrEngine` / `Rug_FreeOcrResult` /
-  `Rug_FreeModelList`; raw frame buffers are freed with `Rug_FreeBuffer`. Managed
-  code never `Marshal.FreeHGlobal`s a native pointer.
+  `Rug_FreeModelList`; the input controller handle calls `Rug_DestroyInputController`;
+  raw frame buffers are freed with `Rug_FreeBuffer`. Managed code never
+  `Marshal.FreeHGlobal`s a native pointer.
 * Inference runs on a background **MTA** thread (`Task.Run`) — never block the UI
-  thread; the native WinRT OCR path requires MTA.
-* `Rug.UI` consumes `IOcrService` / `ITemplateMatchService`; it does **not** P/Invoke.
+  thread; the native WinRT OCR path requires MTA. Input synthesis (which sleeps
+  between humanized samples) also runs off the UI thread via `Task.Run`.
+* `Rug.UI` consumes `IOcrService` / `ITemplateMatchService` / `IInputService`; it
+  does **not** P/Invoke.
 
 ## Plugin & Permission Rules
 

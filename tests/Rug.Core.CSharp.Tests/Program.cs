@@ -13,6 +13,7 @@
 using System.Text;
 
 using Rug.UI.Core.Models;
+using Rug.UI.Core.Native;
 using Rug.UI.Core.Services;
 
 namespace Rug.Core.CSharp.Tests;
@@ -58,6 +59,9 @@ internal static class Program
 
         // --- Template match (optional) ---
         await TemplateMatchAsync(imagesDir);
+
+        // --- Input controller: trajectory cadence + SafeHandle lifecycle ---
+        await InputControllerAsync();
 
         Console.WriteLine($"done (failures={s_failures})");
         return s_failures == 0 ? 0 : 1;
@@ -140,6 +144,103 @@ internal static class Program
         {
             Fail($"template match threw {ex.GetType().Name}: {ex.Message}");
         }
+        Console.WriteLine();
+    }
+
+    private static async Task InputControllerAsync()
+    {
+        Console.WriteLine("=== input controller: trajectory cadence + SafeHandle lifecycle ===");
+
+        // (1) Dynamic polling cadence via the dry-run planner (no real OS input).
+        try
+        {
+            await using var input = new InputService(InputMode.Win32Software);
+            IReadOnlyList<TrajectorySample> plan =
+                await input.PlanTrajectoryAsync(0, 0, 800, 600, TrajectoryType.CubicBezier);
+
+            if (plan.Count < 2)
+            {
+                Fail($"input: trajectory too short ({plan.Count} samples)");
+            }
+            else
+            {
+                float min = float.MaxValue, max = float.MinValue, sum = 0;
+                int fast = 0, slow = 0;  // fast = mid-trajectory, slow = near the ends
+                foreach (TrajectorySample s in plan)
+                {
+                    if (s.DelayMs < min) min = s.DelayMs;
+                    if (s.DelayMs > max) max = s.DelayMs;
+                    sum += s.DelayMs;
+                    if (s.DelayMs <= 4.0f) fast++;
+                    if (s.DelayMs >= 7.0f) slow++;
+
+                    // Every delay must sit inside the documented dynamic band
+                    // (1.5-3ms fast, 10-25ms slow) plus the +-0.5ms jitter margin.
+                    if (s.DelayMs < 0.5f || s.DelayMs > 26.0f)
+                        Fail($"input: sample delay {s.DelayMs:F2}ms outside [0.5,26] band");
+                }
+                float avg = sum / plan.Count;
+                Console.WriteLine($"  samples: {plan.Count}  delay min={min:F2} avg={avg:F2} max={max:F2} ms");
+                Console.WriteLine($"  fast(<=4ms): {fast}   slow(>=7ms): {slow}");
+
+                // A fixed-interval mover would have fast==0 or slow==0. The humanizer
+                // must produce BOTH: quick mid-flight samples and slow end samples.
+                if (fast == 0) Fail("input: no fast (<=4ms) samples -> cadence is not dynamic");
+                if (slow == 0) Fail("input: no slow (>=7ms) samples -> cadence is not dynamic");
+                if (max - min < 3.0f) Fail($"input: delay spread too narrow ({min:F2}..{max:F2})");
+
+                // The last sample must land exactly on the requested endpoint.
+                TrajectorySample last = plan[plan.Count - 1];
+                if (last.X != 800 || last.Y != 600)
+                    Fail($"input: trajectory endpoint ({last.X},{last.Y}) != (800,600)");
+            }
+        }
+        catch (Exception ex)
+        {
+            Fail($"input: planner threw {ex.GetType().Name}: {ex.Message}");
+        }
+
+        // (2) SafeHandle lifecycle: valid on create, closed after dispose.
+        try
+        {
+            int rc = RugCoreNative.Rug_CreateInputController(
+                RugInputModeNative.Win32Software, 0, out nint raw);
+            if (rc != RugStatus.Ok || raw == 0)
+            {
+                Fail($"input: Rug_CreateInputController failed (status {rc})");
+            }
+            else
+            {
+                var handle = new InputControllerHandle(raw);
+                if (handle.IsInvalid) Fail("input: fresh handle reported IsInvalid");
+                if (handle.IsClosed) Fail("input: fresh handle reported IsClosed");
+                handle.Dispose();
+                if (!handle.IsClosed) Fail("input: handle not closed after Dispose");
+            }
+        }
+        catch (Exception ex)
+        {
+            Fail($"input: lifecycle threw {ex.GetType().Name}: {ex.Message}");
+        }
+
+        // (3) 100 create/dispose cycles + explicit GC to shake out leaks/double-free.
+        try
+        {
+            for (int i = 0; i < 100; i++)
+            {
+                await using var input = new InputService(InputMode.Win32Software);
+                _ = await input.PlanTrajectoryAsync(0, 0, 100, 100, TrajectoryType.Straight);
+            }
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            Console.WriteLine("  100 create/dispose cycles + GC completed without crash.");
+        }
+        catch (Exception ex)
+        {
+            Fail($"input: stress threw {ex.GetType().Name}: {ex.Message}");
+        }
+
         Console.WriteLine();
     }
 

@@ -17,6 +17,7 @@
 #include "PaddleOcrEngine.h"
 #include "ImageMatcher.h"
 #include "ModelCatalog.h"
+#include "Input/IInputController.h"
 
 #ifdef RUG_HAS_OPENCV
 #include <opencv2/core.hpp>
@@ -36,6 +37,13 @@ using rug::core::IOcrEngine;
 using rug::core::ImageView;
 using rug::core::OcrResult;
 using rug::core::MatchBox;
+using rug::core::input::IInputController;
+using rug::core::input::InputMode;
+using rug::core::input::MouseButton;
+using rug::core::input::TrajectoryType;
+using rug::core::input::HumanizeConfig;
+using rug::core::input::TrajectorySample;
+using rug::core::input::CreateInputController;
 
 namespace {
 // Opaque ABI handles are the underlying C++ instance pointers.
@@ -56,6 +64,25 @@ inline OcrResult* ToResult(RugOcrResultHandle h) {
 }
 inline RugOcrResultHandle FromResult(OcrResult* p) {
     return reinterpret_cast<RugOcrResultHandle>(p);
+}
+inline IInputController* ToInput(RugInputControllerHandle h) {
+    return reinterpret_cast<IInputController*>(h);
+}
+inline RugInputControllerHandle FromInput(IInputController* p) {
+    return reinterpret_cast<RugInputControllerHandle>(p);
+}
+
+// Map the blittable ABI struct onto the internal HumanizeConfig.
+inline HumanizeConfig ToHumanizeConfig(const RugHumanizeConfig* c) {
+    HumanizeConfig cfg;  // start from defaults, then overlay provided fields
+    if (!c) return cfg;
+    cfg.minClickHoldMs = c->minClickHoldMs;
+    cfg.maxClickHoldMs = c->maxClickHoldMs;
+    cfg.minKeyHoldMs   = c->minKeyHoldMs;
+    cfg.maxKeyHoldMs   = c->maxKeyHoldMs;
+    cfg.corridorRatio  = c->corridorRatio;
+    cfg.enableJitter   = (c->enableJitter != 0);
+    return cfg;
 }
 
 // Copy a wide string into a fixed UTF-8 buffer, truncating safely.
@@ -389,6 +416,126 @@ RUGCORE_API int32_t RUGCORE_CALL Rug_LoadImageFile(const char* path, RugFrame* o
         return RUG_ERR_UNSUPPORTED;
     }
 #endif
+}
+
+// --- Input -------------------------------------------------------------------
+
+RUGCORE_API int32_t RUGCORE_CALL Rug_CreateInputController(int32_t mode,
+                                                           void* hwnd,
+                                                           RugInputControllerHandle* out_handle) {
+    if (!out_handle) return RUG_ERR_INVALID_PARAM;
+    *out_handle = nullptr;
+    std::unique_ptr<IInputController> ctrl;
+    int32_t rc = CreateInputController(static_cast<InputMode>(mode),
+                                       static_cast<HWND>(hwnd), ctrl);
+    if (rc != RUG_OK || !ctrl) return rc;
+    *out_handle = FromInput(ctrl.release());
+    return RUG_OK;
+}
+
+RUGCORE_API int32_t RUGCORE_CALL Rug_DestroyInputController(RugInputControllerHandle handle) {
+    if (!handle) return RUG_ERR_INVALID_PARAM;
+    delete ToInput(handle);
+    return RUG_OK;
+}
+
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_MouseMove(RugInputControllerHandle handle,
+                                                     int32_t x, int32_t y,
+                                                     int32_t trajectory, int32_t smooth) {
+    if (!handle) return RUG_ERR_INVALID_PARAM;
+    return ToInput(handle)->MouseMove(x, y, static_cast<TrajectoryType>(trajectory), smooth != 0);
+}
+
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_MouseMoveRelative(RugInputControllerHandle handle,
+                                                             int32_t dx, int32_t dy,
+                                                             int32_t trajectory, int32_t smooth) {
+    if (!handle) return RUG_ERR_INVALID_PARAM;
+    return ToInput(handle)->MouseMoveRelative(dx, dy, static_cast<TrajectoryType>(trajectory), smooth != 0);
+}
+
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_MouseDown(RugInputControllerHandle handle, int32_t button) {
+    if (!handle) return RUG_ERR_INVALID_PARAM;
+    return ToInput(handle)->MouseDown(static_cast<MouseButton>(button));
+}
+
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_MouseUp(RugInputControllerHandle handle, int32_t button) {
+    if (!handle) return RUG_ERR_INVALID_PARAM;
+    return ToInput(handle)->MouseUp(static_cast<MouseButton>(button));
+}
+
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_Click(RugInputControllerHandle handle,
+                                                 int32_t button, int32_t holdTimeMs) {
+    if (!handle) return RUG_ERR_INVALID_PARAM;
+    return ToInput(handle)->Click(static_cast<MouseButton>(button), holdTimeMs);
+}
+
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_DragAndDrop(RugInputControllerHandle handle,
+                                                       int32_t sx, int32_t sy,
+                                                       int32_t ex, int32_t ey,
+                                                       int32_t trajectory, int32_t smooth) {
+    if (!handle) return RUG_ERR_INVALID_PARAM;
+    return ToInput(handle)->DragAndDrop(sx, sy, ex, ey, static_cast<TrajectoryType>(trajectory), smooth != 0);
+}
+
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_KeyDown(RugInputControllerHandle handle, int32_t vk) {
+    if (!handle) return RUG_ERR_INVALID_PARAM;
+    return ToInput(handle)->KeyDown(vk);
+}
+
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_KeyUp(RugInputControllerHandle handle, int32_t vk) {
+    if (!handle) return RUG_ERR_INVALID_PARAM;
+    return ToInput(handle)->KeyUp(vk);
+}
+
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_KeyPress(RugInputControllerHandle handle,
+                                                    int32_t vk, int32_t holdTimeMs) {
+    if (!handle) return RUG_ERR_INVALID_PARAM;
+    return ToInput(handle)->KeyPress(vk, holdTimeMs);
+}
+
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_SendText(RugInputControllerHandle handle,
+                                                    const char* utf8_text) {
+    if (!handle || !utf8_text) return RUG_ERR_INVALID_PARAM;
+    return ToInput(handle)->SendText(std::string(utf8_text));
+}
+
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_SetTargetWindow(RugInputControllerHandle handle, void* hwnd) {
+    if (!handle) return RUG_ERR_INVALID_PARAM;
+    ToInput(handle)->SetTargetWindow(static_cast<HWND>(hwnd));
+    return RUG_OK;
+}
+
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_SetHumanizeConfig(RugInputControllerHandle handle,
+                                                             const RugHumanizeConfig* config) {
+    if (!handle || !config) return RUG_ERR_INVALID_PARAM;
+    ToInput(handle)->SetHumanizeConfig(ToHumanizeConfig(config));
+    return RUG_OK;
+}
+
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_PlanTrajectory(RugInputControllerHandle handle,
+                                                          int32_t sx, int32_t sy,
+                                                          int32_t ex, int32_t ey,
+                                                          int32_t trajectory,
+                                                          int32_t* xs, int32_t* ys,
+                                                          float* delays,
+                                                          int32_t* inout_count) {
+    if (!handle || !inout_count) return RUG_ERR_INVALID_PARAM;
+    const int32_t capacity = *inout_count;
+    if (capacity < 0) return RUG_ERR_INVALID_PARAM;
+    if (capacity > 0 && (!xs || !ys || !delays)) return RUG_ERR_INVALID_PARAM;
+
+    std::vector<TrajectorySample> plan =
+        ToInput(handle)->PlanTrajectory(sx, sy, ex, ey, static_cast<TrajectoryType>(trajectory));
+
+    const int32_t total = static_cast<int32_t>(plan.size());
+    const int32_t write = (total < capacity) ? total : capacity;
+    for (int32_t i = 0; i < write; ++i) {
+        xs[i]     = plan[i].x;
+        ys[i]     = plan[i].y;
+        delays[i] = plan[i].delayMs;
+    }
+    *inout_count = write;
+    return (total > capacity) ? RUG_ERR_BUFFER_TOO_SMALL : RUG_OK;
 }
 
 }  // extern "C"

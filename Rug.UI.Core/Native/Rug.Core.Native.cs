@@ -87,6 +87,40 @@ public unsafe struct RugModelInfo
     public fixed byte Engine[32];   // RUG_MODEL_ENGINE_MAX
 }
 
+/// <summary>Maps C `RugHumanizeConfig`. Copied by value across the ABI.</summary>
+[StructLayout(LayoutKind.Sequential)]
+public struct RugHumanizeConfig
+{
+    public int MinClickHoldMs;
+    public int MaxClickHoldMs;
+    public int MinKeyHoldMs;
+    public int MaxKeyHoldMs;
+    public float CorridorRatio;
+    public int EnableJitter;   // 0 = off, non-zero = on
+}
+
+/// <summary>Input controller back-end, mirrors RugInputMode.</summary>
+public static class RugInputModeNative
+{
+    public const int Win32Software = 0;
+    public const int HardwareKmbox = 1;
+}
+
+/// <summary>Mouse button, mirrors RugMouseButton.</summary>
+public static class RugMouseButtonNative
+{
+    public const int Left = 0;
+    public const int Right = 1;
+    public const int Middle = 2;
+}
+
+/// <summary>Trajectory shape, mirrors RugTrajectoryType.</summary>
+public static class RugTrajectoryTypeNative
+{
+    public const int Straight = 0;
+    public const int CubicBezier = 1;
+}
+
 /// <summary>
 /// Raw native imports. Do not call these directly from app code — use the
 /// service layer (OcrService / TemplateMatchService) and SafeHandle wrappers.
@@ -142,4 +176,53 @@ public static partial class RugCoreNative
     [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
     public static partial int Rug_MatchTemplate(in RugFrame frame, string templatePath, float threshold,
                                                 RugMatchBox[] boxes, ref int inoutCount);
+
+    // --- Input ---
+    [LibraryImport(Lib)]
+    public static partial int Rug_CreateInputController(int mode, nint hwnd, out nint outHandle);
+
+    [LibraryImport(Lib)]
+    public static partial int Rug_DestroyInputController(nint handle);
+
+    [LibraryImport(Lib)]
+    public static partial int Rug_Input_MouseMove(nint handle, int x, int y, int trajectory, int smooth);
+
+    [LibraryImport(Lib)]
+    public static partial int Rug_Input_MouseMoveRelative(nint handle, int dx, int dy, int trajectory, int smooth);
+
+    [LibraryImport(Lib)]
+    public static partial int Rug_Input_MouseDown(nint handle, int button);
+
+    [LibraryImport(Lib)]
+    public static partial int Rug_Input_MouseUp(nint handle, int button);
+
+    [LibraryImport(Lib)]
+    public static partial int Rug_Input_Click(nint handle, int button, int holdTimeMs);
+
+    [LibraryImport(Lib)]
+    public static partial int Rug_Input_DragAndDrop(nint handle, int sx, int sy, int ex, int ey,
+                                                    int trajectory, int smooth);
+
+    [LibraryImport(Lib)]
+    public static partial int Rug_Input_KeyDown(nint handle, int vk);
+
+    [LibraryImport(Lib)]
+    public static partial int Rug_Input_KeyUp(nint handle, int vk);
+
+    [LibraryImport(Lib)]
+    public static partial int Rug_Input_KeyPress(nint handle, int vk, int holdTimeMs);
+
+    [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
+    public static partial int Rug_Input_SendText(nint handle, string utf8Text);
+
+    [LibraryImport(Lib)]
+    public static partial int Rug_Input_SetTargetWindow(nint handle, nint hwnd);
+
+    [LibraryImport(Lib)]
+    public static partial int Rug_Input_SetHumanizeConfig(nint handle, in RugHumanizeConfig config);
+
+    [LibraryImport(Lib)]
+    public static partial int Rug_Input_PlanTrajectory(nint handle, int sx, int sy, int ex, int ey,
+                                                       int trajectory, int[] xs, int[] ys,
+                                                       float[] delays, ref int inoutCount);
 }
