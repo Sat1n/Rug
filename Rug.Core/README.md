@@ -42,7 +42,7 @@ scripting, scheduling or plugin logic — those live above it.
 | File | Responsibility |
 |---|---|
 | `include/RugCoreAbi.h` | **C-ABI surface** — exports, status codes, handles, structs (exists) |
-| `RugCoreAbi.cpp` | C-ABI impl — capture, OCR, template-matching exports + buffer ownership (exists) |
+| `RugCoreAbi.cpp` | C-ABI impl — capture, image I/O, OCR, discovery, template-matching exports + buffer ownership (exists) |
 | `WgcCapturer.h` / `.cpp` | WGC + D3D11 capture: window resolve, black-frame retry, DPI scale (exists) |
 | `IOcrEngine.h` | OCR strategy interface + `OcrResult`/`OcrLine` types (exists) |
 | `ImageView.h` | Shared non-owning BGRA8 pixel view (exists) |
@@ -61,6 +61,7 @@ scripting, scheduling or plugin logic — those live above it.
 
 * Status codes: `[RugStatus](include/RugCoreAbi.h#enum:RugStatus)`
 * Buffer release: `[Rug_FreeBuffer](include/RugCoreAbi.h#function:Rug_FreeBuffer)`
+* Image I/O: `[Rug_LoadImageFile](include/RugCoreAbi.h#function:Rug_LoadImageFile)`
 * Capture: `[Rug_CreateCapturer](include/RugCoreAbi.h#function:Rug_CreateCapturer)` ·
   `[Rug_GrabFrame](include/RugCoreAbi.h#function:Rug_GrabFrame)`
 * OCR: `[Rug_CreateOcrEngine](include/RugCoreAbi.h#function:Rug_CreateOcrEngine)` ·

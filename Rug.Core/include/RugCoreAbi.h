@@ -179,6 +179,15 @@ RUGCORE_API void RUGCORE_CALL Rug_FreeOcrResult(RugOcrResultHandle result);
 RUGCORE_API void RUGCORE_CALL Rug_FreeModelList(RugModelListHandle list);
 
 // -----------------------------------------------------------------------------
+// Image I/O
+// -----------------------------------------------------------------------------
+
+// Decode an image file (PNG/JPEG/BMP) into a BGRA8 RugFrame via OpenCV.
+// outFrame->data is core-owned; release it with Rug_FreeBuffer.
+// Requires OpenCV; without it returns RUG_ERR_UNSUPPORTED.
+RUGCORE_API int32_t RUGCORE_CALL Rug_LoadImageFile(const char* path, RugFrame* outFrame);
+
+// -----------------------------------------------------------------------------
 // Capture API
 // -----------------------------------------------------------------------------
 

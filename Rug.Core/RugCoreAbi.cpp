@@ -18,6 +18,12 @@
 #include "ImageMatcher.h"
 #include "ModelCatalog.h"
 
+#ifdef RUG_HAS_OPENCV
+#include <opencv2/core.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/imgcodecs.hpp>
+#endif
+
 #include <cstring>
 #include <memory>
 #include <new>
@@ -347,6 +353,42 @@ RUGCORE_API int32_t RUGCORE_CALL Rug_MatchTemplate(const RugFrame* frame,
     }
     *inout_count = write;
     return (total > capacity) ? RUG_ERR_BUFFER_TOO_SMALL : RUG_OK;
+}
+
+// --- Image I/O ---------------------------------------------------------------
+
+RUGCORE_API int32_t RUGCORE_CALL Rug_LoadImageFile(const char* path, RugFrame* outFrame) {
+    if (!path || !outFrame) return RUG_ERR_INVALID_PARAM;
+    std::memset(outFrame, 0, sizeof(*outFrame));
+#ifndef RUG_HAS_OPENCV
+    return RUG_ERR_UNSUPPORTED;
+#else
+    try {
+        cv::Mat img = cv::imread(path, cv::IMREAD_COLOR);  // BGR 8UC3
+        if (img.empty()) return RUG_ERR_INVALID_PARAM;     // missing / unreadable
+        cv::Mat bgra;
+        cv::cvtColor(img, bgra, cv::COLOR_BGR2BGRA);
+
+        const int32_t w = bgra.cols, h = bgra.rows;
+        const int32_t stride = w * 4;
+        const uint32_t len = static_cast<uint32_t>(stride) * static_cast<uint32_t>(h);
+        uint8_t* dst = new (std::nothrow) uint8_t[len];
+        if (!dst) return RUG_ERR_OUT_OF_MEMORY;
+        for (int y = 0; y < h; ++y)
+            std::memcpy(dst + static_cast<size_t>(y) * stride, bgra.ptr(y), static_cast<size_t>(stride));
+
+        outFrame->data       = dst;   // ownership transfers; free via Rug_FreeBuffer
+        outFrame->dataLength = len;
+        outFrame->width      = w;
+        outFrame->height     = h;
+        outFrame->stride     = stride;
+        outFrame->format     = RUG_PIXEL_BGRA8;
+        return RUG_OK;
+    }
+    catch (...) {
+        return RUG_ERR_UNSUPPORTED;
+    }
+#endif
 }
 
 }  // extern "C"
