@@ -16,6 +16,7 @@
 #include "WinRtOcrEngine.h"
 #include "PaddleOcrEngine.h"
 #include "ImageMatcher.h"
+#include "ModelCatalog.h"
 
 #include <cstring>
 #include <memory>
@@ -59,6 +60,15 @@ void CopyUtf8(const std::wstring& w, char* dst, size_t dstSize) {
     int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), static_cast<int>(w.size()),
                                 dst, static_cast<int>(dstSize) - 1, nullptr, nullptr);
     if (n < 0) n = 0;
+    dst[n] = '\0';
+}
+
+// Copy a UTF-8 std::string into a fixed char buffer, truncating safely.
+void CopyStr(const std::string& s, char* dst, size_t dstSize) {
+    if (!dst || dstSize == 0) return;
+    size_t n = s.size();
+    if (n > dstSize - 1) n = dstSize - 1;
+    if (n > 0) std::memcpy(dst, s.c_str(), n);
     dst[n] = '\0';
 }
 
@@ -233,6 +243,73 @@ RUGCORE_API int32_t RUGCORE_CALL Rug_OcrResultGetLine(RugOcrResultHandle result,
 
 RUGCORE_API void RUGCORE_CALL Rug_FreeOcrResult(RugOcrResultHandle result) {
     delete ToResult(result);  // delete nullptr is a no-op
+}
+
+// --- Model discovery ---------------------------------------------------------
+
+RUGCORE_API int32_t RUGCORE_CALL Rug_ScanOcrModels(const char* ocr_dir,
+                                                   RugModelListHandle* out_list) {
+    if (!ocr_dir || !out_list) return RUG_ERR_INVALID_PARAM;
+    *out_list = nullptr;
+    try {
+        using List = std::vector<rug::core::OcrModelInfo>;
+        List* list = new (std::nothrow) List(rug::core::ScanOcrModels(ocr_dir));
+        if (!list) return RUG_ERR_OUT_OF_MEMORY;
+        *out_list = reinterpret_cast<RugModelListHandle>(list);
+        return RUG_OK;
+    }
+    catch (...) {
+        return RUG_ERR_UNKNOWN;
+    }
+}
+
+RUGCORE_API int32_t RUGCORE_CALL Rug_ModelListGetCount(RugModelListHandle list,
+                                                       int32_t* out_count) {
+    if (!list || !out_count) return RUG_ERR_INVALID_PARAM;
+    auto* v = reinterpret_cast<std::vector<rug::core::OcrModelInfo>*>(list);
+    *out_count = static_cast<int32_t>(v->size());
+    return RUG_OK;
+}
+
+RUGCORE_API int32_t RUGCORE_CALL Rug_ModelListGetInfo(RugModelListHandle list,
+                                                      int32_t index,
+                                                      RugModelInfo* out_info) {
+    if (!list || !out_info || index < 0) return RUG_ERR_INVALID_PARAM;
+    auto* v = reinterpret_cast<std::vector<rug::core::OcrModelInfo>*>(list);
+    if (index >= static_cast<int32_t>(v->size())) return RUG_ERR_INVALID_PARAM;
+
+    const rug::core::OcrModelInfo& m = (*v)[static_cast<size_t>(index)];
+    std::memset(out_info, 0, sizeof(*out_info));
+    CopyStr(m.id,      out_info->id,      RUG_MODEL_ID_MAX);
+    CopyStr(m.version, out_info->version, RUG_MODEL_VERSION_MAX);
+    CopyStr(m.engine,  out_info->engine,  RUG_MODEL_ENGINE_MAX);
+    return RUG_OK;
+}
+
+RUGCORE_API void RUGCORE_CALL Rug_FreeModelList(RugModelListHandle list) {
+    delete reinterpret_cast<std::vector<rug::core::OcrModelInfo>*>(list);
+}
+
+RUGCORE_API int32_t RUGCORE_CALL Rug_CreateOcrEngineById(const char* ocr_dir,
+                                                         const char* id,
+                                                         RugOcrEngineHandle* out_handle) {
+    if (!ocr_dir || !id || !out_handle) return RUG_ERR_INVALID_PARAM;
+    *out_handle = nullptr;
+    try {
+        rug::core::OcrModelInfo info;
+        if (!rug::core::FindOcrModelById(ocr_dir, id, info)) return RUG_ERR_OCR_MODEL_NOT_FOUND;
+        if (info.engine != "paddle") return RUG_ERR_UNSUPPORTED;  // only Paddle family today
+
+        std::unique_ptr<IOcrEngine> engine;
+        const int32_t st = rug::core::PaddleOcrEngine::Create(info.dirPath.c_str(), engine);
+        if (st != RUG_OK) return st;
+
+        *out_handle = FromEngine(engine.release());
+        return RUG_OK;
+    }
+    catch (...) {
+        return RUG_ERR_OCR_FAILED;
+    }
 }
 
 // --- Template matching -------------------------------------------------------

@@ -176,6 +176,7 @@
     <ClInclude Include="include\RugCoreAbi.h" />
     <ClInclude Include="IOcrEngine.h" />
     <ClInclude Include="ImageView.h" />
+    <ClInclude Include="ModelCatalog.h" />
     <ClInclude Include="OcrTextUtils.h" />
     <ClInclude Include="PaddleOcrEngine.h" />
     <ClInclude Include="pch.h" />
@@ -185,6 +186,7 @@
   <ItemGroup>
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="ImageMatcher.cpp" />
+    <ClCompile Include="ModelCatalog.cpp" />
     <ClCompile Include="PaddleOcrEngine.cpp" />
     <ClCompile Include="RugCoreAbi.cpp" />
     <ClCompile Include="WgcCapturer.cpp" />

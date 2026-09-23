@@ -108,6 +108,7 @@ typedef struct RugCapturer*       RugCapturerHandle;
 typedef struct RugOcrEngine*      RugOcrEngineHandle;
 typedef struct RugOcrResult*      RugOcrResultHandle;
 typedef struct RugInputController* RugInputControllerHandle;
+typedef struct RugModelList*      RugModelListHandle;
 
 // -----------------------------------------------------------------------------
 // Plain-old-data structs (blittable for P/Invoke)
@@ -152,6 +153,17 @@ typedef struct RugMatchBox {
     float   confidence; // Match score in [0, 1].
 } RugMatchBox;
 
+// One discovered OCR model bundle (from models/ocr/<bundle>/model.json).
+// Fixed-size fields keep the struct blittable.
+#define RUG_MODEL_ID_MAX      64
+#define RUG_MODEL_VERSION_MAX 32
+#define RUG_MODEL_ENGINE_MAX  32
+typedef struct RugModelInfo {
+    char id[RUG_MODEL_ID_MAX];            // unique selector, e.g. "ppocr_v6_tiny"
+    char version[RUG_MODEL_VERSION_MAX];  // e.g. "6.0"
+    char engine[RUG_MODEL_ENGINE_MAX];    // back-end key, e.g. "paddle"
+} RugModelInfo;
+
 // -----------------------------------------------------------------------------
 // Memory ownership API
 // -----------------------------------------------------------------------------
@@ -162,6 +174,9 @@ RUGCORE_API void RUGCORE_CALL Rug_FreeBuffer(uint8_t* ptr);
 
 // Release a core-owned OCR result and all memory it owns. Safe to call with NULL.
 RUGCORE_API void RUGCORE_CALL Rug_FreeOcrResult(RugOcrResultHandle result);
+
+// Release a model list returned by Rug_ScanOcrModels. Safe to call with NULL.
+RUGCORE_API void RUGCORE_CALL Rug_FreeModelList(RugModelListHandle list);
 
 // -----------------------------------------------------------------------------
 // Capture API
@@ -214,6 +229,33 @@ RUGCORE_API int32_t RUGCORE_CALL Rug_OcrResultGetLineCount(RugOcrResultHandle re
 RUGCORE_API int32_t RUGCORE_CALL Rug_OcrResultGetLine(RugOcrResultHandle result,
                                                       int32_t index,
                                                       RugOcrLine* outLine);
+
+// -----------------------------------------------------------------------------
+// OCR model discovery (models/ocr/<bundle> + model.json routing)
+// -----------------------------------------------------------------------------
+
+// Scan `ocr_dir` (e.g. <repo>/models/ocr) for model bundles. A bundle is an
+// immediate subdirectory whose model.json declares kind="ocr" and a supported
+// engine, and whose required model files are present. Results are sorted by id.
+// On RUG_OK, *out_list is core-owned; release it with Rug_FreeModelList.
+RUGCORE_API int32_t RUGCORE_CALL Rug_ScanOcrModels(const char* ocr_dir,
+                                                   RugModelListHandle* out_list);
+
+// Number of models in a scanned list.
+RUGCORE_API int32_t RUGCORE_CALL Rug_ModelListGetCount(RugModelListHandle list,
+                                                       int32_t* out_count);
+
+// Copy the model info at `index` (0-based) into `out_info`.
+RUGCORE_API int32_t RUGCORE_CALL Rug_ModelListGetInfo(RugModelListHandle list,
+                                                      int32_t index,
+                                                      RugModelInfo* out_info);
+
+// Create an OCR engine for the discovered bundle whose model.json id == `id`,
+// routing to the back-end named by its `engine` field (only "paddle" today).
+// Returns RUG_ERR_OCR_MODEL_NOT_FOUND if no such bundle exists under `ocr_dir`.
+RUGCORE_API int32_t RUGCORE_CALL Rug_CreateOcrEngineById(const char* ocr_dir,
+                                                         const char* id,
+                                                         RugOcrEngineHandle* out_handle);
 
 // -----------------------------------------------------------------------------
 // Template matching API

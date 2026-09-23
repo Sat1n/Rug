@@ -50,6 +50,7 @@ scripting, scheduling or plugin logic — those live above it.
 | `WinRtOcrEngine.h` / `.cpp` | WinRT OCR: 2x Fant upscale, recognize, `CompactText` (exists) |
 | `PaddleOcrEngine.h` / `.cpp` | PP-OCR ONNX Det(DBNet)+Rec(CTC); params + dict parsed from `det.yml`/`rec.yml` — active under `RUG_HAS_ONNX`+`RUG_HAS_OPENCV` (exists) |
 | `ImageMatcher.h` / `.cpp` | OpenCV `matchTemplate` (TM_CCOEFF_NORMED) + iterative peak suppression — active under `RUG_HAS_OPENCV` (exists) |
+| `ModelCatalog.h` / `.cpp` | Scans `models/ocr/*`, parses `model.json` (yaml-cpp), routes by `engine` — model auto-discovery (exists) |
 | `CoreCom.h` | Shared COM apartment helper (exists) |
 | `vcpkg.json` | vcpkg manifest — OpenCV dependency set (exists) |
 | `ThirdParty.props` | Defines `RUG_HAS_OPENCV`/`RUG_HAS_ONNX`, wires ONNX Runtime include/lib (exists) |
@@ -65,6 +66,8 @@ scripting, scheduling or plugin logic — those live above it.
 * OCR: `[Rug_CreateOcrEngine](include/RugCoreAbi.h#function:Rug_CreateOcrEngine)` ·
   `[Rug_RecognizeText](include/RugCoreAbi.h#function:Rug_RecognizeText)` ·
   `[Rug_FreeOcrResult](include/RugCoreAbi.h#function:Rug_FreeOcrResult)`
+* Discovery: `[Rug_ScanOcrModels](include/RugCoreAbi.h#function:Rug_ScanOcrModels)` ·
+  `[Rug_CreateOcrEngineById](include/RugCoreAbi.h#function:Rug_CreateOcrEngineById)`
 * Matching: `[Rug_MatchTemplate](include/RugCoreAbi.h#function:Rug_MatchTemplate)`
 * Input: `[Rug_Click](include/RugCoreAbi.h#function:Rug_Click)`
 
@@ -85,6 +88,7 @@ scripting, scheduling or plugin logic — those live above it.
   `[GetRotateCropImage](PaddleOcrEngine.cpp#function:GetRotateCropImage)`
 * PP-OCR CTC decode: `[CtcDecode](PaddleOcrEngine.cpp#function:CtcDecode)`
 * Template matcher: `[ImageMatcher](ImageMatcher.h#class:ImageMatcher)`
+* Model catalog: `[ScanOcrModels](ModelCatalog.cpp#function:ScanOcrModels)`
 
 ## C-ABI Contract (CRITICAL)
 

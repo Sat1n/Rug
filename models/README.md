@@ -65,10 +65,49 @@ so the engine is data-driven and a different export works without code changes.
 `RUG_ERR_OCR_MODEL_NOT_FOUND`. None of them are committed — they are downloaded
 and renamed locally.
 
-## `model.json` (bundle manifest)
+## `model.json` (bundle manifest — REQUIRED for discovery)
 
-A thin **identity + file-roles** descriptor (`id`, `kind`, `engine`, `version`,
-`files`). Numeric pre-processing parameters and the dictionary are **not** stored
-here — they live in the sidecar `*.yml` and are the single source of truth, so
-nothing is duplicated. `model.json` is currently informational (host tooling /
-future bundling); the C++ loader reads the `.yml` files directly.
+Each bundle must have a `model.json`: the **identity + routing** descriptor the
+native catalog reads. Numeric pre-processing params and the dictionary stay in the
+sidecar `*.yml` (single source of truth, not duplicated here).
+
+Required fields:
+
+| Field     | Value          | Purpose                                            |
+|-----------|----------------|----------------------------------------------------|
+| `id`      | unique string  | Selector passed to `Rug_CreateOcrEngineById`.       |
+| `kind`    | `"ocr"`        | Category guard; non-`ocr` bundles are skipped.      |
+| `engine`  | `"paddle"`     | Routes to the Paddle back-end (only one supported). |
+| `version` | e.g. `"6.0"`   | Informational (shown when listing models).          |
+
+Conventions:
+- **Folder name should equal `id`**, and **ids must be unique** across `models/ocr`.
+- A bundle is discovered only when `model.json` is valid **and** the four required
+  files (`det.onnx`, `rec.onnx`, `det.yml`, `rec.yml`) are present — so a bundle
+  whose weights are not downloaded yet is simply skipped, not an error.
+
+### Adding another Paddle model (size or version)
+
+Drop a new directory under `models/ocr/` with its own `model.json`; no code change
+is needed. For example:
+
+```text
+models/ocr/ppocr_v6_tiny/    id "ppocr_v6_tiny"   version "6.0"
+models/ocr/ppocr_v6_small/   id "ppocr_v6_small"  version "6.0"
+models/ocr/ppocr_v6_medium/  id "ppocr_v6_medium" version "6.0"
+models/ocr/ppocr_v5/         id "ppocr_v5"        version "5.0"
+```
+
+Each needs its `det.onnx`/`rec.onnx`/`det.yml`/`rec.yml` (downloaded + renamed as
+above). `Rug_ScanOcrModels` then lists them and `Rug_CreateOcrEngineById(dir,
+"ppocr_v6_small", &h)` loads the chosen one. Because det/rec parameters and the
+dictionary come from each bundle's own `*.yml`, different sizes/versions/languages
+all run through the same pipeline.
+
+## Discovery API (native, model.json driven)
+
+* `Rug_ScanOcrModels(ocr_dir, &list)` → `Rug_ModelListGetCount` /
+  `Rug_ModelListGetInfo` (id, engine, version) → `Rug_FreeModelList`.
+* `Rug_CreateOcrEngineById(ocr_dir, id, &engine)` routes by the `engine` field
+  (Paddle today; other engines need a new `IOcrEngine` + `RugOcrEngineType`).
+* `ocr_dir` is the category directory, e.g. `<repo>/models/ocr`.

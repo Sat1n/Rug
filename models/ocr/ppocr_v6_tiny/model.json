@@ -1,5 +1,5 @@
 {
-  "id": "ppocr_v6",
+  "id": "ppocr_v6_tiny",
   "kind": "ocr",
   "engine": "paddle",
   "version": "6.0",
