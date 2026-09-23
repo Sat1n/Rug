@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml;
 using Rug.UI.Activation;
 using Rug.UI.Contracts.Services;
 using Rug.UI.Core.Contracts.Services;
+using Rug.UI.Core.Models;
 using Rug.UI.Core.Services;
 using Rug.UI.Helpers;
 using Rug.UI.Models;
@@ -71,11 +72,20 @@ public partial class App : Application
             // Core Services
             services.AddSingleton<IFileService, FileService>();
 
+            // Rug.UI.Core native-backed services (the only P/Invoke boundary)
+            services.AddSingleton<IOcrService>(_ => new OcrService());
+            services.AddSingleton<ITemplateMatchService, TemplateMatchService>();
+            services.AddSingleton<ICaptureService, CaptureService>();
+            services.AddSingleton<IWindowSpyService, WindowSpyService>();
+            services.AddSingleton<IInputService>(_ => new InputService(InputMode.Win32Software, 0));
+
             // Views and ViewModels
             services.AddTransient<SettingsViewModel>();
             services.AddTransient<SettingsPage>();
             services.AddTransient<MainViewModel>();
             services.AddTransient<MainPage>();
+            services.AddTransient<DevToolsViewModel>();
+            services.AddTransient<DevToolsPage>();
             services.AddTransient<ShellPage>();
             services.AddTransient<ShellViewModel>();
 

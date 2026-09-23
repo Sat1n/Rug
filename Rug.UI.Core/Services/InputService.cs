@@ -73,9 +73,14 @@ public sealed class InputService : IInputService
         => Task.Run(() => Check(RugCoreNative.Rug_Input_SendText(H, text),
             nameof(RugCoreNative.Rug_Input_SendText)), cancellationToken);
 
-    public Task SetTargetWindowAsync(nint hwnd, CancellationToken cancellationToken = default)
-        => Task.Run(() => Check(RugCoreNative.Rug_Input_SetTargetWindow(H, hwnd),
-            nameof(RugCoreNative.Rug_Input_SetTargetWindow)), cancellationToken);
+    public Task SetTargetAsync(nint hwnd, bool background, CancellationToken cancellationToken = default)
+        => Task.Run(() =>
+        {
+            Check(RugCoreNative.Rug_Input_SetTargetWindow(H, hwnd),
+                nameof(RugCoreNative.Rug_Input_SetTargetWindow));
+            Check(RugCoreNative.Rug_Input_SetBackgroundDelivery(H, background ? 1 : 0),
+                nameof(RugCoreNative.Rug_Input_SetBackgroundDelivery));
+        }, cancellationToken);
 
     public Task SetHumanizeConfigAsync(HumanizeConfig config, CancellationToken cancellationToken = default)
     {

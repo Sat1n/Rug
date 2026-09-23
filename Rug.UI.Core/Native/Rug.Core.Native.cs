@@ -43,6 +43,15 @@ public static class RugOcrEngineTypeNative
     public const int Paddle = 1;
 }
 
+/// <summary>Maps C `RugCaptureConfig`. Target window is an HWND carried as nint.</summary>
+[StructLayout(LayoutKind.Sequential)]
+public struct RugCaptureConfig
+{
+    public nint TargetWindow;   // HWND of the window to capture. Required.
+    public int OcrUpscale;      // Pre-OCR upscale factor (>= 1).
+    public int CaptureCursor;   // 0 = exclude cursor (default), non-zero = include.
+}
+
 /// <summary>Maps C `RugFrame`. `Data` is core-owned when produced by native.</summary>
 [StructLayout(LayoutKind.Sequential)]
 public struct RugFrame
@@ -112,6 +121,8 @@ public static class RugMouseButtonNative
     public const int Left = 0;
     public const int Right = 1;
     public const int Middle = 2;
+    public const int XButton1 = 3;
+    public const int XButton2 = 4;
 }
 
 /// <summary>Trajectory shape, mirrors RugTrajectoryType.</summary>
@@ -138,6 +149,16 @@ public static partial class RugCoreNative
 
     [LibraryImport(Lib)]
     public static partial void Rug_FreeModelList(nint list);
+
+    // --- Capture (WGC) ---
+    [LibraryImport(Lib)]
+    public static partial int Rug_CreateCapturer(in RugCaptureConfig config, out nint outHandle);
+
+    [LibraryImport(Lib)]
+    public static partial int Rug_DestroyCapturer(nint handle);
+
+    [LibraryImport(Lib)]
+    public static partial int Rug_GrabFrame(nint handle, out RugFrame outFrame);
 
     // --- Image I/O ---
     [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
@@ -217,6 +238,9 @@ public static partial class RugCoreNative
 
     [LibraryImport(Lib)]
     public static partial int Rug_Input_SetTargetWindow(nint handle, nint hwnd);
+
+    [LibraryImport(Lib)]
+    public static partial int Rug_Input_SetBackgroundDelivery(nint handle, int background);
 
     [LibraryImport(Lib)]
     public static partial int Rug_Input_SetHumanizeConfig(nint handle, in RugHumanizeConfig config);

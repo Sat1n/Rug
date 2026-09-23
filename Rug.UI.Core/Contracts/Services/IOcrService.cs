@@ -19,4 +19,17 @@ public interface IOcrService
         OcrEngineType engineType,
         string? modelId = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Recognize text in an already-captured in-memory frame (BGRA8). Used by the
+    /// live preview to overlay OCR boxes on WGC frames without touching disk.
+    /// </summary>
+    Task<IReadOnlyList<OcrTextBlock>> RecognizeFrameAsync(
+        CapturedFrame frame,
+        OcrEngineType engineType,
+        string? modelId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Ids of the discovered Paddle model bundles (empty when none).</summary>
+    IReadOnlyList<string> ListPaddleModelIds();
 }

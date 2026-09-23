@@ -21,6 +21,7 @@ bool KmboxInputController::EnsureConnected() {
 }
 
 void KmboxInputController::SetTargetWindow(HWND hwnd) { m_hwnd = hwnd; }
+void KmboxInputController::SetBackgroundDelivery(bool) { /* hardware delivers directly; no background mode */ }
 void KmboxInputController::SetHumanizeConfig(const HumanizeConfig& config) { m_cfg = config; }
 
 std::vector<TrajectorySample> KmboxInputController::PlanTrajectory(

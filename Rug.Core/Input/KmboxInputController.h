@@ -38,6 +38,7 @@ public:
     int32_t SendText(const std::string& text) override;
 
     void SetTargetWindow(HWND hwnd) override;
+    void SetBackgroundDelivery(bool background) override;
     void SetHumanizeConfig(const HumanizeConfig& config) override;
     std::vector<TrajectorySample> PlanTrajectory(int startX, int startY, int endX, int endY, TrajectoryType trajectory) const override;
 

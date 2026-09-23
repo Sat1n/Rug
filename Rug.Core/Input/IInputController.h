@@ -23,9 +23,11 @@ enum class InputMode : int32_t {
 };
 
 enum class MouseButton : int32_t {
-    Left   = 0,
-    Right  = 1,
-    Middle = 2,
+    Left    = 0,
+    Right   = 1,
+    Middle  = 2,
+    XButton1 = 3,  // side button 1 (browser back)
+    XButton2 = 4,  // side button 2 (browser forward)
 };
 
 enum class TrajectoryType : int32_t {
@@ -49,6 +51,12 @@ struct TrajectorySample {
     float   delayMs = 0.f;
 };
 
+// Coordinate space: when a target window is bound, ALL mouse coordinates are
+// CLIENT-SPACE of that window and are clamped to its client rect, so the cursor
+// can never leave the bound window. Delivery is chosen separately by
+// SetBackgroundDelivery: background = PostMessage to the HWND; foreground =
+// SendInput after mapping client -> screen via ClientToScreen. When no window is
+// bound, coordinates are absolute screen pixels (foreground SendInput only).
 class IInputController {
 public:
     virtual ~IInputController() = default;
@@ -65,6 +73,9 @@ public:
     virtual int32_t SendText(const std::string& text) = 0;
 
     virtual void SetTargetWindow(HWND hwnd) = 0;
+    // true = deliver via PostMessage to the bound HWND (no focus, no real cursor);
+    // false = deliver via foreground SendInput (real cursor, window should be focused).
+    virtual void SetBackgroundDelivery(bool background) = 0;
     virtual void SetHumanizeConfig(const HumanizeConfig& config) = 0;
 
     // Pure planning hook used by tests to inspect the dynamic polling cadence.

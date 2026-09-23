@@ -505,6 +505,12 @@ RUGCORE_API int32_t RUGCORE_CALL Rug_Input_SetTargetWindow(RugInputControllerHan
     return RUG_OK;
 }
 
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_SetBackgroundDelivery(RugInputControllerHandle handle, int32_t background) {
+    if (!handle) return RUG_ERR_INVALID_PARAM;
+    ToInput(handle)->SetBackgroundDelivery(background != 0);
+    return RUG_OK;
+}
+
 RUGCORE_API int32_t RUGCORE_CALL Rug_Input_SetHumanizeConfig(RugInputControllerHandle handle,
                                                              const RugHumanizeConfig* config) {
     if (!handle || !config) return RUG_ERR_INVALID_PARAM;

@@ -57,7 +57,7 @@ scripting, scheduling or plugin logic — those live above it.
 | `ThirdParty.props` | Defines `RUG_HAS_OPENCV`/`RUG_HAS_ONNX`, wires ONNX Runtime include/lib (exists) |
 | `Input/IInputController.h` | Dual-mode input contract: enums, `HumanizeConfig`, `TrajectorySample`, factory decl (exists) |
 | `Input/Humanizer.*` | Ease-in-out trajectory planner + velocity-driven dynamic polling cadence + Bezier corridor (exists) |
-| `Input/Win32InputController.*` | Win32 back-end: SendInput (foreground) / PostMessage (background HWND) (exists) |
+| `Input/Win32InputController.*` | Win32 back-end: bound-window client-space coords clamped to the client rect (cursor never leaves the window); background PostMessage or foreground SendInput via `SetBackgroundDelivery`; left/right/middle + side buttons X1/X2 (exists) |
 | `Input/KmboxInputController.*` | KMBox B+/Pro/Net back-end — **guarded skeleton**, returns `RUG_ERR_UNSUPPORTED` until the vendor protocol lands (exists) |
 | `Input/InputControllerFactory.cpp` | `CreateInputController(mode, hwnd)` — routes to the Win32 or KMBox back-end (exists) |
 | `pch.h` / `framework.h` | Precompiled Win32 + WinRT headers |
@@ -106,6 +106,7 @@ scripting, scheduling or plugin logic — those live above it.
 * Trajectory planner: `[Humanizer::Plan](Input/Humanizer.cpp#function:Plan)`
 * Dynamic-cadence wait: `[Humanizer::Wait](Input/Humanizer.cpp#function:Wait)`
 * Win32 back-end: `[Win32InputController](Input/Win32InputController.h#class:Win32InputController)`
+* Client-rect confinement: `[Win32InputController::ClampClient](Input/Win32InputController.cpp#function:ClampClient)`
 * KMBox back-end (skeleton): `[KmboxInputController](Input/KmboxInputController.h#class:KmboxInputController)`
 
 ## C-ABI Contract (CRITICAL)

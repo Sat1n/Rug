@@ -90,9 +90,11 @@ typedef enum RugInputMode {
 } RugInputMode;
 
 typedef enum RugMouseButton {
-    RUG_MOUSE_LEFT   = 0,
-    RUG_MOUSE_RIGHT  = 1,
-    RUG_MOUSE_MIDDLE = 2
+    RUG_MOUSE_LEFT    = 0,
+    RUG_MOUSE_RIGHT   = 1,
+    RUG_MOUSE_MIDDLE  = 2,
+    RUG_MOUSE_XBUTTON1 = 3,  // Side button 1 (browser back).
+    RUG_MOUSE_XBUTTON2 = 4   // Side button 2 (browser forward).
 } RugMouseButton;
 
 // Mouse movement path shape produced by the humanizer.
@@ -303,14 +305,20 @@ RUGCORE_API int32_t RUGCORE_CALL Rug_MatchTemplate(const RugFrame* frame,
 // Input API
 // -----------------------------------------------------------------------------
 //
-// Coordinates are physical screen pixels for foreground SendInput, or
-// client-space pixels of the bound HWND for background PostMessage. The caller
-// is responsible for Per-Monitor V2 DPI normalization. `holdTimeMs == 0` on
-// Click/KeyPress selects a random duration from the active RugHumanizeConfig.
+// Coordinate space: when a target window is bound (Rug_Input_SetTargetWindow),
+// ALL mouse coordinates are CLIENT-SPACE pixels of that window and are clamped to
+// its client rect on every emitted point, so the cursor can never leave the bound
+// window. Delivery is chosen independently by Rug_Input_SetBackgroundDelivery:
+// background (default) = PostMessage to the HWND; foreground = SendInput after a
+// ClientToScreen mapping. With no bound window, coordinates are absolute screen
+// pixels (foreground SendInput only). The caller is responsible for Per-Monitor V2
+// DPI awareness of the host process. `holdTimeMs == 0` on Click/KeyPress selects a
+// random duration from the active RugHumanizeConfig.
 
 // Create an input controller operating in `mode` (RugInputMode). `hwnd` (HWND as
-// void*) optionally binds a background target window; pass NULL for foreground
-// SendInput. On RUG_OK, *out_handle receives a valid opaque handle.
+// void*) optionally binds the initial target window (NULL = unbound). Delivery
+// defaults to background PostMessage; use Rug_Input_SetBackgroundDelivery to switch.
+// On RUG_OK, *out_handle receives a valid opaque handle.
 RUGCORE_API int32_t RUGCORE_CALL Rug_CreateInputController(int32_t mode,
                                                            void* hwnd,
                                                            RugInputControllerHandle* out_handle);
@@ -367,9 +375,16 @@ RUGCORE_API int32_t RUGCORE_CALL Rug_Input_KeyPress(RugInputControllerHandle han
 RUGCORE_API int32_t RUGCORE_CALL Rug_Input_SendText(RugInputControllerHandle handle,
                                                     const char* utf8_text);
 
-// Re-bind the background target window (HWND as void*). NULL switches to foreground.
+// Bind the target window (HWND as void*) used for client-space coordinate mapping
+// and confinement. NULL clears the target (coords become absolute screen pixels).
 RUGCORE_API int32_t RUGCORE_CALL Rug_Input_SetTargetWindow(RugInputControllerHandle handle,
                                                            void* hwnd);
+
+// Select the delivery mechanism for the bound window: non-zero = background
+// PostMessage (no focus, no real cursor movement); zero = foreground SendInput
+// (real cursor; the window should be activated by the caller first).
+RUGCORE_API int32_t RUGCORE_CALL Rug_Input_SetBackgroundDelivery(RugInputControllerHandle handle,
+                                                                 int32_t background);
 
 // Replace the controller's humanization tuning. The struct is copied by value.
 RUGCORE_API int32_t RUGCORE_CALL Rug_Input_SetHumanizeConfig(RugInputControllerHandle handle,

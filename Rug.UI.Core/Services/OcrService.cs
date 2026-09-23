@@ -30,6 +30,11 @@ public sealed class OcrService : IOcrService
         CancellationToken cancellationToken = default)
         => Task.Run(() => Recognize(imagePath, engineType, modelId), cancellationToken);
 
+    public Task<IReadOnlyList<OcrTextBlock>> RecognizeFrameAsync(
+        CapturedFrame frame, OcrEngineType engineType, string? modelId = null,
+        CancellationToken cancellationToken = default)
+        => Task.Run(() => RecognizeFrame(frame, engineType, modelId), cancellationToken);
+
     /// <summary>Ids of the discovered Paddle bundles (empty when none / dir unset).</summary>
     public IReadOnlyList<string> ListPaddleModelIds()
     {
@@ -59,34 +64,62 @@ public sealed class OcrService : IOcrService
 
         try
         {
-            using OcrEngineHandle engine = CreateEngine(engineType, modelId);
-
-            rc = RugCoreNative.Rug_RecognizeText(engine.DangerousGetHandle(), in frame, out nint resultPtr);
-            if (rc != RugStatus.Ok)
-                throw new RugNativeException(nameof(RugCoreNative.Rug_RecognizeText), rc);
-
-            using SafeOcrResult result = new(resultPtr);
-
-            rc = RugCoreNative.Rug_OcrResultGetLineCount(resultPtr, out int count);
-            if (rc != RugStatus.Ok)
-                throw new RugNativeException(nameof(RugCoreNative.Rug_OcrResultGetLineCount), rc);
-
-            var blocks = new List<OcrTextBlock>(count);
-            for (int i = 0; i < count; i++)
-            {
-                if (RugCoreNative.Rug_OcrResultGetLine(resultPtr, i, out RugOcrLine line) != RugStatus.Ok)
-                    continue;
-                blocks.Add(new OcrTextBlock(
-                    LineText(line),
-                    line.Confidence,
-                    new Rect(line.X, line.Y, line.Width, line.Height)));
-            }
-            return blocks;
+            return RunOcr(in frame, engineType, modelId);
         }
         finally
         {
             if (frame.Data != 0) RugCoreNative.Rug_FreeBuffer(frame.Data);  // native new[] buffer
         }
+    }
+
+    private unsafe IReadOnlyList<OcrTextBlock> RecognizeFrame(CapturedFrame frame, OcrEngineType engineType, string? modelId)
+    {
+        if (frame.Pixels.Length == 0)
+            throw new RugNativeException(nameof(RugCoreNative.Rug_RecognizeText), RugStatus.ErrInvalidParam);
+
+        // Pin the managed BGRA8 buffer and present it as a native RugFrame. The
+        // native side only reads it during the call, so no ownership transfers and
+        // Rug_FreeBuffer must NOT be called on this pointer.
+        fixed (byte* p = frame.Pixels)
+        {
+            var native = new RugFrame
+            {
+                Data = (nint)p,
+                DataLength = (uint)frame.Pixels.Length,
+                Width = frame.Width,
+                Height = frame.Height,
+                Stride = frame.Stride,
+                Format = RugPixelFormat.Bgra8,
+            };
+            return RunOcr(in native, engineType, modelId);
+        }
+    }
+
+    private IReadOnlyList<OcrTextBlock> RunOcr(in RugFrame frame, OcrEngineType engineType, string? modelId)
+    {
+        using OcrEngineHandle engine = CreateEngine(engineType, modelId);
+
+        int rc = RugCoreNative.Rug_RecognizeText(engine.DangerousGetHandle(), in frame, out nint resultPtr);
+        if (rc != RugStatus.Ok)
+            throw new RugNativeException(nameof(RugCoreNative.Rug_RecognizeText), rc);
+
+        using SafeOcrResult result = new(resultPtr);
+
+        rc = RugCoreNative.Rug_OcrResultGetLineCount(resultPtr, out int count);
+        if (rc != RugStatus.Ok)
+            throw new RugNativeException(nameof(RugCoreNative.Rug_OcrResultGetLineCount), rc);
+
+        var blocks = new List<OcrTextBlock>(count);
+        for (int i = 0; i < count; i++)
+        {
+            if (RugCoreNative.Rug_OcrResultGetLine(resultPtr, i, out RugOcrLine line) != RugStatus.Ok)
+                continue;
+            blocks.Add(new OcrTextBlock(
+                LineText(line),
+                line.Confidence,
+                new Rect(line.X, line.Y, line.Width, line.Height)));
+        }
+        return blocks;
     }
 
     private OcrEngineHandle CreateEngine(OcrEngineType engineType, string? modelId)

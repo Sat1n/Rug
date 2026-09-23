@@ -1,7 +1,10 @@
 // =============================================================================
 //  Win32InputController.cpp
-//  Foreground: SendInput (absolute screen coordinates, single-monitor for now).
-//  Background: when a target HWND is bound, PostMessage WM_* with client coords.
+//  Coordinates are CLIENT-SPACE of the bound window and clamped to its client
+//  rect on every emitted point, so the cursor never leaves the target window.
+//    background (default): PostMessage WM_* with client coords.
+//    foreground:           ClientToScreen -> SendInput absolute (single-monitor).
+//  With no bound window, coords are absolute screen pixels (foreground only).
 // =============================================================================
 
 #include "pch.h"
@@ -9,16 +12,22 @@
 #include "Humanizer.h"
 #include "RugCoreAbi.h"  // RugStatus codes
 
+#include <algorithm>
 #include <string>
 
 namespace rug::core::input {
 
 Win32InputController::Win32InputController(HWND hwnd) : m_hwnd(hwnd) {
-    POINT p{};
-    if (GetCursorPos(&p)) { m_curX = p.x; m_curY = p.y; }
+    m_curX = 0; m_curY = 0;
 }
 
-void Win32InputController::SetTargetWindow(HWND hwnd) { m_hwnd = hwnd; }
+void Win32InputController::SetTargetWindow(HWND hwnd) {
+    m_hwnd = hwnd;
+    m_curX = 0; m_curY = 0;   // restart tracking at the client origin
+}
+
+void Win32InputController::SetBackgroundDelivery(bool background) { m_background = background; }
+
 void Win32InputController::SetHumanizeConfig(const HumanizeConfig& config) { m_cfg = config; }
 
 std::vector<TrajectorySample> Win32InputController::PlanTrajectory(
@@ -27,53 +36,78 @@ std::vector<TrajectorySample> Win32InputController::PlanTrajectory(
 }
 
 void Win32InputController::CurrentPos(int& x, int& y) const {
-    if (m_hwnd) { x = m_curX; y = m_curY; return; }  // background: tracked client pos
+    if (m_hwnd) { x = m_curX; y = m_curY; return; }  // bound: tracked client pos
     POINT p{};
     if (GetCursorPos(&p)) { x = p.x; y = p.y; }
     else { x = m_curX; y = m_curY; }
+}
+
+void Win32InputController::ClampClient(int& x, int& y) const {
+    if (!m_hwnd) return;
+    RECT rc{};
+    if (!GetClientRect(m_hwnd, &rc)) return;
+    const int w = rc.right - rc.left;
+    const int h = rc.bottom - rc.top;
+    if (w > 0) x = std::clamp(x, 0, w - 1);
+    if (h > 0) y = std::clamp(y, 0, h - 1);
+}
+
+void Win32InputController::SendAbsolute(int screenX, int screenY) {
+    const int sw = GetSystemMetrics(SM_CXSCREEN);
+    const int sh = GetSystemMetrics(SM_CYSCREEN);
+    INPUT in{};
+    in.type = INPUT_MOUSE;
+    in.mi.dx = static_cast<LONG>(static_cast<double>(screenX) * 65535.0 / (sw > 1 ? sw - 1 : 1));
+    in.mi.dy = static_cast<LONG>(static_cast<double>(screenY) * 65535.0 / (sh > 1 ? sh - 1 : 1));
+    in.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+    SendInput(1, &in, sizeof(INPUT));
 }
 
 // --- low-level emitters ------------------------------------------------------
 
 void Win32InputController::EmitMove(int x, int y) {
     if (m_hwnd) {
-        PostMessageW(m_hwnd, WM_MOUSEMOVE, 0, MAKELPARAM(x, y));
+        ClampClient(x, y);                       // confine every point to the window
+        if (m_background) {
+            PostMessageW(m_hwnd, WM_MOUSEMOVE, 0, MAKELPARAM(x, y));
+        } else {
+            POINT p{ x, y };
+            ClientToScreen(m_hwnd, &p);          // client -> screen for SendInput
+            SendAbsolute(p.x, p.y);
+        }
     } else {
-        const int sw = GetSystemMetrics(SM_CXSCREEN);
-        const int sh = GetSystemMetrics(SM_CYSCREEN);
-        INPUT in{};
-        in.type = INPUT_MOUSE;
-        in.mi.dx = static_cast<LONG>(static_cast<double>(x) * 65535.0 / (sw > 1 ? sw - 1 : 1));
-        in.mi.dy = static_cast<LONG>(static_cast<double>(y) * 65535.0 / (sh > 1 ? sh - 1 : 1));
-        in.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
-        SendInput(1, &in, sizeof(INPUT));
+        SendAbsolute(x, y);                      // unbound: treat as screen coords
     }
     m_curX = x; m_curY = y;
 }
 
 void Win32InputController::EmitButton(bool down, MouseButton button) {
-    if (m_hwnd) {
+    if (UsePost()) {
         UINT msg; WPARAM wp;
         switch (button) {
-            case MouseButton::Right:  msg = down ? WM_RBUTTONDOWN : WM_RBUTTONUP; wp = down ? MK_RBUTTON : 0; break;
-            case MouseButton::Middle: msg = down ? WM_MBUTTONDOWN : WM_MBUTTONUP; wp = down ? MK_MBUTTON : 0; break;
-            default:                  msg = down ? WM_LBUTTONDOWN : WM_LBUTTONUP; wp = down ? MK_LBUTTON : 0; break;
+            case MouseButton::Right:    msg = down ? WM_RBUTTONDOWN : WM_RBUTTONUP; wp = down ? MK_RBUTTON : 0; break;
+            case MouseButton::Middle:   msg = down ? WM_MBUTTONDOWN : WM_MBUTTONUP; wp = down ? MK_MBUTTON : 0; break;
+            case MouseButton::XButton1: msg = down ? WM_XBUTTONDOWN : WM_XBUTTONUP; wp = MAKEWPARAM(down ? MK_XBUTTON1 : 0, XBUTTON1); break;
+            case MouseButton::XButton2: msg = down ? WM_XBUTTONDOWN : WM_XBUTTONUP; wp = MAKEWPARAM(down ? MK_XBUTTON2 : 0, XBUTTON2); break;
+            default:                    msg = down ? WM_LBUTTONDOWN : WM_LBUTTONUP; wp = down ? MK_LBUTTON : 0; break;
         }
         PostMessageW(m_hwnd, msg, wp, MAKELPARAM(m_curX, m_curY));
     } else {
         INPUT in{};
         in.type = INPUT_MOUSE;
         switch (button) {
-            case MouseButton::Right:  in.mi.dwFlags = down ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP; break;
-            case MouseButton::Middle: in.mi.dwFlags = down ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP; break;
-            default:                  in.mi.dwFlags = down ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP; break;
+            case MouseButton::Right:    in.mi.dwFlags = down ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP; break;
+            case MouseButton::Middle:   in.mi.dwFlags = down ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP; break;
+            case MouseButton::XButton1: in.mi.dwFlags = down ? MOUSEEVENTF_XDOWN : MOUSEEVENTF_XUP; in.mi.mouseData = XBUTTON1; break;
+            case MouseButton::XButton2: in.mi.dwFlags = down ? MOUSEEVENTF_XDOWN : MOUSEEVENTF_XUP; in.mi.mouseData = XBUTTON2; break;
+            default:                    in.mi.dwFlags = down ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP; break;
         }
         SendInput(1, &in, sizeof(INPUT));
     }
 }
 
 void Win32InputController::EmitKey(bool down, int virtualKey) {
-    if (m_hwnd) {
+    if (UsePost()) {
         // lParam: repeat count 1; on key-up set prev-state (bit30) and transition (bit31).
         LPARAM lp = down ? 1 : (1 | (1L << 30) | (1L << 31));
         PostMessageW(m_hwnd, down ? WM_KEYDOWN : WM_KEYUP, static_cast<WPARAM>(virtualKey), lp);
@@ -87,7 +121,7 @@ void Win32InputController::EmitKey(bool down, int virtualKey) {
 }
 
 void Win32InputController::EmitChar(wchar_t ch) {
-    if (m_hwnd) {
+    if (UsePost()) {
         PostMessageW(m_hwnd, WM_CHAR, static_cast<WPARAM>(ch), 0);
     } else {
         INPUT in{};
