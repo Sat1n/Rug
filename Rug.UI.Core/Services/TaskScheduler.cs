@@ -11,6 +11,7 @@ namespace Rug.UI.Core.Services;
 public sealed class TaskScheduler : ITaskScheduler
 {
     private readonly IPluginManager _plugins;
+    private readonly IAnomalyLogger _anomalies;
     private readonly string _pluginsRoot;
     private readonly Func<ICaptureService> _captureFactory;
     private readonly Func<IInputService> _inputFactory;
@@ -30,10 +31,11 @@ public sealed class TaskScheduler : ITaskScheduler
     public TaskScheduler(IPluginManager plugins, string pluginsRoot,
         Func<ICaptureService> captureFactory, Func<IInputService> inputFactory,
         Func<ICaptureService, IInputService, IScriptRuntime> runtimeFactory,
-        ILogger<TaskScheduler> logger, TimeSpan? tickInterval = null,
+        ILogger<TaskScheduler> logger, IAnomalyLogger anomalies, TimeSpan? tickInterval = null,
         TimeSpan? watchdogTimeout = null)
     {
         _plugins = plugins ?? throw new ArgumentNullException(nameof(plugins));
+        _anomalies = anomalies ?? throw new ArgumentNullException(nameof(anomalies));
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginsRoot);
         _pluginsRoot = pluginsRoot;
         _captureFactory = captureFactory ?? throw new ArgumentNullException(nameof(captureFactory));
@@ -87,6 +89,7 @@ public sealed class TaskScheduler : ITaskScheduler
             await runtime.PrepareLifecycleAsync().ConfigureAwait(false);
             Guid id = Guid.NewGuid();
             var context = new TaskExecutionContext(id, source.Id, hwnd, cancellation, runtime, capture, input);
+            runtime.ConfigureAnomalyHandler((reason, detail) => _anomalies.LogAnomalyAsync(context, reason, detail));
             lock (_lifecycleGate)
             {
                 if (_disposed) throw new ObjectDisposedException(nameof(TaskScheduler));

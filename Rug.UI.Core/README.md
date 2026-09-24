@@ -24,7 +24,8 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 > `FileService`/`Json` pre-exist.
 > `LuaRuntime` coroutine bridge (Task 2.1.1), plugin manifest/config loading and
 > permission interception (Task 2.1.2), and multi-instance lifecycle scheduling
-> with a Lua instruction watchdog (Task 2.1.3) are implemented.
+> with a Lua instruction watchdog (Task 2.1.3), plus anomaly black-box logging
+> and the Agent rescue hook (Task 2.1.4), are implemented.
 
 ## Internal Topology
 
@@ -50,6 +51,7 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 | `Abstractions/IPluginManager.cs` · `Services/PluginManager.cs` | Scan immediate plugin directories, validate manifest/entry/config, cache valid plugins and UI schema; skip malformed plugins with a warning |
 | `Security/PermissionInterceptor.cs` · `Exceptions/PermissionDeniedException.cs` | Exact-match permission checks before sensitive API tasks start; denied calls log an audit warning and fault the script |
 | `Abstractions/ITaskScheduler.cs` · `Models/TaskExecutionContext.cs` · `Services/TaskScheduler.cs` | Concurrent plugin/window instances, per-instance capture/input/runtime ownership, pause/resume/stop state and periodic lifecycle dispatch |
+| `Abstractions/IAnomalyLogger.cs` · `Models/AnomalyLogModel.cs` · `Services/AnomalyLogger.cs` | Per-instance incident capture, PNG encoding and JSON black-box records |
 | `Services/FileService.cs` · `Helpers/Json.cs` | File IO / JSON helpers |
 
 ## Task lifecycle and watchdog (Task 2.1.3)
@@ -73,6 +75,24 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   `Stop()` cancels its token; the stop hook has its own deadline. The capture and
   input factories must provide distinct service instances for each task.
 
+## Anomaly black box and Agent hook (Task 2.1.4)
+
+* A manifest with `agent` permission may call
+  `rug.agent.resolve_anomaly(reason, context)`. The Lua bridge yields immediately,
+  captures a private Lua traceback alongside the supplied context, and dispatches
+  to the owning task's `IAnomalyLogger`. Unauthorized calls raise an audited
+  `PermissionDeniedException` before invoking the logger.
+* `AnomalyLogger` captures the owning instance's current BGRA frame and writes a
+  real RGBA PNG plus same-basename JSON under `./logs/anomalies/` by default.
+  The JSON stores a UTC timestamp, plugin/instance IDs, reason, script context,
+  relative screenshot filename, and an explicit null `agent_resolution` field for
+  Phase 4. The service returns the JSON path and emits `[Anomaly Detected]` at
+  warning level. The directory can be overridden by the host or tests.
+* Once the record is written, the runtime returns `Faulted` without resuming the
+  reporting Lua coroutine. The scheduler records the error, runs `on_stop`, and
+  releases the capture session and per-instance resources. A capture or disk
+  failure also faults the task and is surfaced through `LastError`.
+
 ## Plugin declarations (Task 2.1.2)
 
 * Each immediate child of the plugins root may contain `manifest.json` and the
@@ -94,7 +114,7 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   before each `rug.*` service task. A missing grant throws
   `PermissionDeniedException`, logs plugin/API/
   permission details, and puts the runtime in `Faulted` state. Defined names:
-  `timer`, `vision.capture`, `vision.ocr`, `input`, `network`, `filesystem`.
+  `timer`, `vision.capture`, `vision.ocr`, `input`, `network`, `filesystem`, `agent`.
 
 ## Lua coroutine contract (Task 2.1.1)
 
@@ -120,6 +140,8 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   `load`, `debug`, `coroutine`, `collectgarbage` and NLua CLR globals are removed
   before script execution. Host services are only reachable through gated `rug.*`
   operations.
+  KeraLua is configured for UTF-8 so non-ASCII Lua reasons and context survive
+  the bridge into the JSON incident record.
 * The bridge is exercised by [script tests](../tests/Rug.UI.Core.Script.Tests/README.md)
   using fake services; no native DLL or target window is needed.
 

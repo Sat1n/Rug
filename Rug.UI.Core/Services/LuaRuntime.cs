@@ -1,5 +1,6 @@
 #nullable enable
 using System.Globalization;
+using System.Text;
 using Microsoft.Extensions.Logging;
 using NLua;
 using Rug.UI.Core.Abstractions;
@@ -19,7 +20,7 @@ public sealed class LuaRuntime : IScriptRuntime
         local luaYield, luaCreate, luaResume, luaStatus = coroutine.yield, coroutine.create, coroutine.resume, coroutine.status
         local pack, luaType, raise = table.pack, type, error
         local getConfig, writeLog, shouldAbort = __rug_get_config, __rug_log, __rug_should_abort
-        local sethook = debug.sethook
+        local sethook, traceback = debug.sethook, debug.traceback
         local thread, chunk
         rug = {}
         function rug.sleep(ms) return luaYield('__rug', 'sleep', ms) end
@@ -27,6 +28,10 @@ public sealed class LuaRuntime : IScriptRuntime
         function rug.ocr(engine_type) return luaYield('__rug', 'ocr', engine_type) end
         function rug.click(x, y) return luaYield('__rug', 'click', x, y) end
         function rug.press_key(key) return luaYield('__rug', 'press_key', key) end
+        rug.agent = {}
+        function rug.agent.resolve_anomaly(reason, context)
+          return luaYield('__rug', 'resolve_anomaly', reason, context, traceback('', 2))
+        end
         function rug.get_config(key) return getConfig(key) end
         function rug.log(level, message)
           if message == nil then message, level = level, 'info' end
@@ -76,6 +81,9 @@ public sealed class LuaRuntime : IScriptRuntime
     private LuaFunction? _beginStop;
     private CapturedFrame? _lastFrame;
     private Guid? _pendingId;
+    private Guid? _pendingAnomalyId;
+    private string? _pendingAnomalyReason;
+    private Func<string, string, Task<string>>? _anomalyHandler;
     private ScriptState _state = ScriptState.Uninitialized;
     private volatile bool _paused;
     private bool _disposed;
@@ -93,6 +101,14 @@ public sealed class LuaRuntime : IScriptRuntime
 
     public ScriptState State { get { lock (_stateGate) return _state; } }
     public event EventHandler<ScriptStateChangedEventArgs>? StateChanged;
+
+    public void ConfigureAnomalyHandler(Func<string, string, Task<string>> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        if (_disposed || State is ScriptState.Running or ScriptState.Yielded or ScriptState.Paused or ScriptState.Stopped)
+            throw new InvalidOperationException("Anomaly handler must be bound before script execution.");
+        _anomalyHandler = handler;
+    }
 
     public async Task InitializeAsync(string scriptPath, PluginManifest manifest, CancellationToken ct = default)
     {
@@ -116,6 +132,7 @@ public sealed class LuaRuntime : IScriptRuntime
             await Task.Run(() =>
             {
                 _lua = new Lua();
+                _lua.State.Encoding = Encoding.UTF8;
                 _lua.RegisterFunction("__rug_get_config", this, GetConfigMethod);
                 _lua.RegisterFunction("__rug_log", this, LogMethod);
                 _lua.RegisterFunction("__rug_should_abort", this, ShouldAbortMethod);
@@ -266,6 +283,15 @@ public sealed class LuaRuntime : IScriptRuntime
                 {
                     _operations.Remove(id);
                     _pendingId = null;
+                    if (_pendingAnomalyId == id)
+                    {
+                        _pendingAnomalyId = null;
+                        string reason = _pendingAnomalyReason ?? "Unknown anomaly";
+                        _pendingAnomalyReason = null;
+                        ChangeState(ScriptState.Faulted);
+                        return new(ScriptState.Faulted, Value: input,
+                            Error: new InvalidOperationException($"Anomaly detected: {reason}. Record: {input}"));
+                    }
                 }
                 ChangeState(ScriptState.Running);
                 return await Task.Run(() => ResumeLua(input, token), token).ConfigureAwait(false);
@@ -309,6 +335,11 @@ public sealed class LuaRuntime : IScriptRuntime
         Guid id = Guid.NewGuid();
         _operations.Add(id, task);
         _pendingId = id;
+        if (operation == "resolve_anomaly")
+        {
+            _pendingAnomalyId = id;
+            _pendingAnomalyReason = Convert.ToString(values[4], CultureInfo.InvariantCulture);
+        }
         ChangeState(ScriptState.Yielded);
         return new(State);
     }
@@ -319,9 +350,10 @@ public sealed class LuaRuntime : IScriptRuntime
         {
             "sleep" => Permission.Timer, "capture" => Permission.VisionCapture, "ocr" => Permission.VisionOcr,
             "click" or "press_key" => Permission.ControlInput,
+            "resolve_anomaly" => Permission.Agent,
             _ => throw new InvalidOperationException($"Unknown rug operation: {operation}")
         };
-        _permissions!.Demand(permission, $"rug.{operation}");
+        _permissions!.Demand(permission, operation == "resolve_anomaly" ? "rug.agent.resolve_anomaly" : $"rug.{operation}");
         return operation switch
         {
             "sleep" => SleepAsync(Int(args[4]), ct),
@@ -329,11 +361,22 @@ public sealed class LuaRuntime : IScriptRuntime
             "ocr" => OcrAsync(Convert.ToString(args[4], CultureInfo.InvariantCulture), ct),
             "click" => ClickAsync(Int(args[4]), Int(args[5]), ct),
             "press_key" => PressKeyAsync(Int(args[4]), ct),
+            "resolve_anomaly" => ResolveAnomalyAsync(args),
             _ => throw new InvalidOperationException()
         };
     }
 
     private static int Int(object? value) => Convert.ToInt32(value, CultureInfo.InvariantCulture);
+
+    private async Task<object?> ResolveAnomalyAsync(LuaTable args)
+    {
+        Func<string, string, Task<string>> handler = _anomalyHandler
+            ?? throw new InvalidOperationException("Anomaly handler is not configured.");
+        string reason = Convert.ToString(args[4], CultureInfo.InvariantCulture) ?? "Unknown anomaly";
+        string detail = Convert.ToString(args[5], CultureInfo.InvariantCulture) ?? "";
+        string traceback = Convert.ToString(args[6], CultureInfo.InvariantCulture) ?? "";
+        return await handler(reason, detail + Environment.NewLine + traceback).ConfigureAwait(false);
+    }
 
     private static async Task<object?> SleepAsync(int ms, CancellationToken ct)
     {

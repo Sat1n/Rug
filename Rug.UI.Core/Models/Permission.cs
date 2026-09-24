@@ -9,4 +9,5 @@ public static class Permission
     public const string ControlInput = "input";
     public const string Network = "network";
     public const string FileSystem = "filesystem";
+    public const string Agent = "agent";
 }

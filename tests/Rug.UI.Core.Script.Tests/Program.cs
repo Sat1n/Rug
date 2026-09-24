@@ -1,5 +1,8 @@
 using System.Diagnostics;
 using System.Collections.Concurrent;
+using System.Buffers.Binary;
+using System.IO.Compression;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Rug.UI.Core.Contracts.Services;
@@ -64,7 +67,8 @@ foreach ((string call, string permission) in new[]
     ("rug.capture()", Permission.VisionCapture),
     ("rug.ocr('winrt')", Permission.VisionOcr),
     ("rug.click(1, 2)", Permission.ControlInput),
-    ("rug.press_key(65)", Permission.ControlInput)
+    ("rug.press_key(65)", Permission.ControlInput),
+    ("rug.agent.resolve_anomaly('denied', 'detail')", Permission.Agent)
 })
 {
     await File.WriteAllTextAsync(path, "function on_tick() " + call + " end");
@@ -76,6 +80,23 @@ foreach ((string call, string permission) in new[]
           ex.Permission == permission && ex.Api == "rug." + call.Split('(')[0][4..],
           "permission mismatch for " + call);
     Check(deniedCapture.GrabCalls == 0, "denied call reached capture service");
+}
+
+await File.WriteAllTextAsync(path, "function on_tick() rug.agent.resolve_anomaly('pending', 'detail'); rug.log('unreachable') end");
+var anomalyGate = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new FakeInput(), NullLogger<LuaRuntime>.Instance))
+{
+    runtime.ConfigureAnomalyHandler((_, _) => anomalyGate.Task);
+    await runtime.InitializeAsync(path, new PluginManifest([Permission.Agent]));
+    Check((await runtime.StepAsync()).State == ScriptState.Yielded, "agent hook must yield before persistence finishes");
+    Task<ScriptExecutionResult> pending = runtime.ResumeAsync();
+    await Task.Delay(20);
+    Check(!pending.IsCompleted, "agent hook blocked the caller or resumed before persistence");
+    anomalyGate.SetResult("incident.json");
+    ScriptExecutionResult result = await pending;
+    Check(result.State == ScriptState.Faulted && Equals(result.Value, "incident.json") &&
+          result.Error?.Message.Contains("incident.json") == true,
+          "agent hook must fault after returning the incident record path");
 }
 
 await File.WriteAllTextAsync(path, "function on_tick() rug.sleep(10); rug.log('resumed') end");
@@ -240,17 +261,27 @@ try
         function on_tick() rug.log('bad_stop_tick') end
         function on_stop() while true do end end
         """);
+    await WritePluginAsync("anomaly", """
+        function on_tick()
+          rug.sleep(50)
+          rug.agent.resolve_anomaly('界面未响应', '超时3秒')
+          rug.log('must_not_resume')
+        end
+        function on_stop() rug.log('anomaly_stop') end
+        """, "\"timer\",\"agent\"");
 
     var events = new ConcurrentQueue<string>();
     var captures = new ConcurrentBag<FakeCapture>();
     var inputs = new ConcurrentBag<FakeInput>();
     var luaLogger = new RecordingLogger<LuaRuntime>(events);
+    string anomalyDirectory = Path.Combine(schedulerRoot, "logs", "anomalies");
+    var anomalyLogger = new AnomalyLogger(new RecordingLogger<AnomalyLogger>(events), anomalyDirectory);
     await using var scheduler = new RugTaskScheduler(
         new PluginManager(NullLogger<PluginManager>.Instance), schedulerRoot,
         () => { var c = new FakeCapture(events); captures.Add(c); return c; },
         () => { var i = new FakeInput(); inputs.Add(i); return i; },
         (c, i) => new LuaRuntime(c, new FakeOcr(), i, luaLogger),
-        NullLogger<RugTaskScheduler>.Instance, TimeSpan.FromMilliseconds(20));
+        NullLogger<RugTaskScheduler>.Instance, anomalyLogger, TimeSpan.FromMilliseconds(20));
 
     Guid life = await scheduler.StartTaskAsync("life", 101);
     TaskExecutionContext lifeContext = scheduler.Instances.Single(c => c.InstanceId == life);
@@ -315,6 +346,44 @@ try
     Check(badStopContext.TaskStatus == AutomationTaskStatus.Faulted && badStopContext.LastError is not null &&
           events.Contains("capture-stop:305"), "on_stop watchdog did not release capture");
 
+    Guid anomaly = await scheduler.StartTaskAsync("anomaly", 306);
+    TaskExecutionContext anomalyContext = scheduler.Instances.Single(c => c.InstanceId == anomaly);
+    await WaitUntilAsync(() => anomalyContext.TaskStatus == AutomationTaskStatus.Faulted &&
+        Directory.Exists(anomalyDirectory) && Directory.GetFiles(anomalyDirectory, "*.json").Length == 1);
+    await WaitUntilAsync(() => !scheduler.Instances.Any(c => c.InstanceId == anomaly));
+    string jsonPath = Directory.GetFiles(anomalyDirectory, "*.json").Single();
+    using (JsonDocument document = JsonDocument.Parse(await File.ReadAllTextAsync(jsonPath)))
+    {
+        JsonElement record = document.RootElement;
+        Check(record.GetProperty("pluginId").GetString() == "anomaly" &&
+              record.GetProperty("instanceId").GetGuid() == anomaly &&
+              record.GetProperty("reason").GetString() == "界面未响应" &&
+              record.GetProperty("timestamp").GetDateTime().Kind == DateTimeKind.Utc &&
+              record.GetProperty("scriptContext").GetString()!.Contains("超时3秒") &&
+              record.GetProperty("scriptContext").GetString()!.Contains("on_tick") &&
+              record.GetProperty("agent_resolution").ValueKind == JsonValueKind.Null,
+              "anomaly metadata is incomplete");
+        string screenshotName = record.GetProperty("screenshotPath").GetString()!;
+        Check(Path.GetFileName(screenshotName) == screenshotName &&
+              Path.GetFileNameWithoutExtension(screenshotName) == Path.GetFileNameWithoutExtension(jsonPath),
+              "anomaly screenshot path must be relative and share the JSON basename");
+        byte[] png = await File.ReadAllBytesAsync(Path.Combine(anomalyDirectory, screenshotName));
+        Check(png.AsSpan(0, 8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }) &&
+              BinaryPrimitives.ReadInt32BigEndian(png.AsSpan(16, 4)) == 1 &&
+              BinaryPrimitives.ReadInt32BigEndian(png.AsSpan(20, 4)) == 1, "invalid anomaly PNG");
+        int dataLength = BinaryPrimitives.ReadInt32BigEndian(png.AsSpan(33, 4));
+        using var compressed = new MemoryStream(png, 41, dataLength);
+        using var zlib = new ZLibStream(compressed, CompressionMode.Decompress);
+        using var pixels = new MemoryStream();
+        await zlib.CopyToAsync(pixels);
+        Check(pixels.ToArray().SequenceEqual(new byte[] { 0, 30, 20, 10, 255 }),
+              "anomaly PNG did not encode the captured BGRA pixel");
+    }
+    Check(anomalyContext.LastError?.Message.Contains(jsonPath) == true &&
+          events.Any(e => e.Contains("[Anomaly Detected]")) &&
+          events.Contains("Lua: anomaly_stop") && !events.Contains("Lua: must_not_resume") &&
+          events.Contains("capture-stop:306"), "anomaly did not fault and clean up safely");
+
     var delayedCapture = new FakeCapture
     {
         StartGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously)
@@ -323,7 +392,7 @@ try
         new PluginManager(NullLogger<PluginManager>.Instance), schedulerRoot,
         () => delayedCapture, () => new FakeInput(),
         (c, i) => new LuaRuntime(c, new FakeOcr(), i, luaLogger),
-        NullLogger<RugTaskScheduler>.Instance);
+        NullLogger<RugTaskScheduler>.Instance, anomalyLogger);
     Task<Guid> opening = delayedScheduler.StartTaskAsync("life", 404);
     await WaitUntilAsync(() => delayedCapture.StartCalls == 1);
     await delayedScheduler.DisposeAsync();
@@ -384,7 +453,7 @@ sealed class FakeCapture : ICaptureService
     { StopCalls++; _events?.Enqueue("capture-stop:" + StartedHwnd); return Task.CompletedTask; }
     public ValueTask DisposeAsync()
     { Disposed = true; return ValueTask.CompletedTask; }
-    public void Complete() => _frame.SetResult(new CapturedFrame(new byte[4], 1, 1, 4));
+    public void Complete() => _frame.SetResult(new CapturedFrame([10, 20, 30, 255], 1, 1, 4));
 }
 
 sealed class FakeOcr : IOcrService

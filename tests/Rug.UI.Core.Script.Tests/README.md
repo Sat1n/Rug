@@ -18,3 +18,8 @@ pause/stop across three instances, and watchdog interruption of tight loops in
 both `on_init` and `on_tick`. The script also attempts to replace the cancellation
 callback, confirming the watchdog uses its private reference. A pending capture
 startup is canceled and cleaned up when the scheduler is disposed.
+
+Anomaly tests check `agent` permission denial, a Lua-triggered yield and task
+fault, the per-instance warning and cleanup, UTF-8 reason/context plus Lua
+traceback in JSON, a null `agent_resolution` placeholder, and the PNG's actual
+RGBA pixel data decoded from its compressed image payload.
