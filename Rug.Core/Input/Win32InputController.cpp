@@ -53,13 +53,21 @@ void Win32InputController::ClampClient(int& x, int& y) const {
 }
 
 void Win32InputController::SendAbsolute(int screenX, int screenY) {
-    const int sw = GetSystemMetrics(SM_CXSCREEN);
-    const int sh = GetSystemMetrics(SM_CYSCREEN);
+    // Normalize against the VIRTUAL screen (the bounding box of ALL monitors) so
+    // windows on negative-coordinate secondary displays map correctly. Without
+    // MOUSEEVENTF_VIRTUALDESK the 0..65535 range covers only the primary monitor
+    // and the cursor would fly to its edge. The host process is Per-Monitor V2
+    // DPI-aware, so these metrics and screenX/screenY are all physical pixels.
+    const int vLeft   = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    const int vTop    = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    const int vWidth  = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    const int vHeight = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+
     INPUT in{};
     in.type = INPUT_MOUSE;
-    in.mi.dx = static_cast<LONG>(static_cast<double>(screenX) * 65535.0 / (sw > 1 ? sw - 1 : 1));
-    in.mi.dy = static_cast<LONG>(static_cast<double>(screenY) * 65535.0 / (sh > 1 ? sh - 1 : 1));
-    in.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
+    in.mi.dx = static_cast<LONG>(static_cast<double>(screenX - vLeft) * 65535.0 / (vWidth  > 1 ? vWidth  - 1 : 1));
+    in.mi.dy = static_cast<LONG>(static_cast<double>(screenY - vTop ) * 65535.0 / (vHeight > 1 ? vHeight - 1 : 1));
+    in.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
     SendInput(1, &in, sizeof(INPUT));
 }
 

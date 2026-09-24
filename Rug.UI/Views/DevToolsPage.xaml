@@ -51,7 +51,7 @@
                 </StackPanel>
 
                 <!-- Bound window info -->
-                <Grid Grid.Column="1" Margin="20,0,0,0" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
+                <Grid Grid.Column="1" Margin="20,0,0,0" ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
                     <TextBlock Grid.Row="0" Grid.Column="0" Text="HWND" FontWeight="SemiBold"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="0,0,12,2" />
                     <TextBlock Grid.Row="0" Grid.Column="1" Text="{x:Bind ViewModel.BoundHwndText, Mode=OneWay}"
@@ -72,8 +72,13 @@
                     <TextBlock Grid.Row="3" Grid.Column="1" Text="{x:Bind ViewModel.BoundSizeText, Mode=OneWay}" Margin="0,0,0,2" />
 
                     <TextBlock Grid.Row="4" Grid.Column="0" Text="DPI" FontWeight="SemiBold"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="0,0,12,2" />
+                    <TextBlock Grid.Row="4" Grid.Column="1" Text="{x:Bind ViewModel.BoundDpiText, Mode=OneWay}" Margin="0,0,0,2" />
+
+                    <TextBlock Grid.Row="5" Grid.Column="0" Text="显示器" FontWeight="SemiBold"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="0,0,12,0" />
-                    <TextBlock Grid.Row="4" Grid.Column="1" Text="{x:Bind ViewModel.BoundDpiText, Mode=OneWay}" />
+                    <TextBlock Grid.Row="5" Grid.Column="1" Text="{x:Bind ViewModel.BoundMonitorText, Mode=OneWay}"
+                               FontFamily="Consolas" TextTrimming="CharacterEllipsis" />
                 </Grid>
 
                 <!-- Input delivery mode -->

@@ -42,8 +42,30 @@ public sealed class WindowSpyService : IWindowSpyService
         double scale = dpi > 0 ? dpi / 96.0 : 1.0;
 
         TryGetClientSize(hwnd, out int cw, out int ch);
+        GetMonitorInfo(hwnd, out string monName, out int mx, out int my, out int mw, out int mh);
 
-        return new WindowInfo(hwnd, title, process, width, height, scale, cw, ch);
+        return new WindowInfo(hwnd, title, process, width, height, scale, cw, ch, monName, mx, my, mw, mh);
+    }
+
+    /// <summary>Read the monitor a window is on: device short-name + physical bounds.</summary>
+    private static void GetMonitorInfo(nint hwnd, out string name, out int x, out int y, out int w, out int h)
+    {
+        name = string.Empty; x = 0; y = 0; w = 0; h = 0;
+
+        nint hmon = WindowNative.MonitorFromWindow(hwnd, WindowNative.MONITOR_DEFAULTTONEAREST);
+        if (hmon == 0) return;
+
+        var info = new WindowNative.MONITORINFOEX { cbSize = System.Runtime.InteropServices.Marshal.SizeOf<WindowNative.MONITORINFOEX>() };
+        if (!WindowNative.GetMonitorInfoW(hmon, ref info)) return;
+
+        // szDevice is like "\\.\DISPLAY2"; keep the short "DISPLAY2" form.
+        string device = info.szDevice ?? string.Empty;
+        name = device.StartsWith(@"\\.\") ? device[4..] : device;
+
+        x = info.rcMonitor.Left;
+        y = info.rcMonitor.Top;
+        w = info.rcMonitor.Right - info.rcMonitor.Left;
+        h = info.rcMonitor.Bottom - info.rcMonitor.Top;
     }
 
     public bool BringToFront(nint hwnd) => hwnd != 0 && WindowNative.SetForegroundWindow(hwnd);

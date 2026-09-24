@@ -23,9 +23,9 @@ no automation pipeline and no native interop itself.
 | Path | Responsibility |
 |---|---|
 | `Views/` | XAML pages (Main, DevTools, Settings, Shell) |
-| `Views/DevToolsPage.xaml(.cs)` | Dev sandbox UI: crosshair window picker, WriteableBitmap live preview + OCR box overlay, input-test buttons, a client-space coordinate picker for scripting, colored console log |
+| `Views/DevToolsPage.xaml(.cs)` | Dev sandbox UI: crosshair window picker (HWND/title/process/size/DPI/**monitor**), WriteableBitmap live preview + OCR box overlay, input-test buttons, a client-space coordinate picker for scripting, colored console log |
 | `ViewModels/` | MVVM view-models (CommunityToolkit.Mvvm) |
-| `ViewModels/DevToolsViewModel.cs` | Orchestrates window binding, preview loop, input self-tests (client-space, confined to the bound window), coordinate picker, stress run; emits `Logged`/`FrameReady` events |
+| `ViewModels/DevToolsViewModel.cs` | Orchestrates window binding, preview loop, input self-tests (client-space, confined to the bound window), coordinate picker (physical + logical DIP), stress run; emits `Logged`/`FrameReady` events |
 | `Helpers/LogLevelToBrushConverter.cs` | `LogLevel` → console foreground brush |
 | `Models/DevTools.cs` | `LogLevel` / `LogEntry` / `PreviewFrame` UI-layer records |
 | `Services/` | Activation, navigation, theming, local settings |
@@ -52,3 +52,10 @@ no automation pipeline and no native interop itself.
 
 * Depends downward only on `Rug.UI.Core` (which wraps `Rug.Core`); `Rug.UI` does not
   P/Invoke the native DLL directly (L1 §5.1).
+* **Multi-monitor / DPI:** `app.manifest` declares `PerMonitorV2`, so the whole
+  pipeline (user32, WGC, native input) is consistently in PHYSICAL pixels — no
+  logical↔physical conversion is applied on the capture/input path. The live-preview
+  OCR overlay stays aligned at any DPI because the `Image` and the overlay `Canvas`
+  share one frame-pixel coordinate space inside a `Viewbox` (scaled together), so no
+  manual ratio matrix is needed. `DpiHelper` (in Rug.UI.Core) converts only for
+  script-facing DIP output.

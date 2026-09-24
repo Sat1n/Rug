@@ -15,6 +15,8 @@ internal static class WindowNative
     private const string User32 = "user32.dll";
 
     internal const uint GA_ROOT = 2;
+    internal const uint MONITOR_DEFAULTTONEAREST = 2;
+    private const int CCHDEVICENAME = 32;
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct POINT
@@ -30,6 +32,17 @@ internal static class WindowNative
         public int Top;
         public int Right;
         public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    internal struct MONITORINFOEX
+    {
+        public int cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public uint dwFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = CCHDEVICENAME)]
+        public string szDevice;
     }
 
     [DllImport(User32)]
@@ -62,4 +75,11 @@ internal static class WindowNative
     [DllImport(User32)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool SetForegroundWindow(nint hwnd);
+
+    [DllImport(User32)]
+    internal static extern nint MonitorFromWindow(nint hwnd, uint dwFlags);
+
+    [DllImport(User32, CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool GetMonitorInfoW(nint hMonitor, ref MONITORINFOEX lpmi);
 }

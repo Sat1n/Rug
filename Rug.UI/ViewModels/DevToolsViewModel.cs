@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
 using Rug.UI.Core.Contracts.Services;
+using Rug.UI.Core.Helpers;
 using Rug.UI.Core.Models;
 using Rug.UI.Models;
 
@@ -72,6 +73,7 @@ public partial class DevToolsViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(BoundProcessText))]
     [NotifyPropertyChangedFor(nameof(BoundSizeText))]
     [NotifyPropertyChangedFor(nameof(BoundDpiText))]
+    [NotifyPropertyChangedFor(nameof(BoundMonitorText))]
     [NotifyPropertyChangedFor(nameof(HasBoundWindow))]
     private WindowInfo? boundWindow;
 
@@ -81,6 +83,7 @@ public partial class DevToolsViewModel : ObservableObject
     public string BoundProcessText => string.IsNullOrEmpty(BoundWindow?.ProcessName) ? "—" : BoundWindow!.ProcessName;
     public string BoundSizeText => BoundWindow is null ? "—" : $"{BoundWindow.Width} × {BoundWindow.Height}";
     public string BoundDpiText => BoundWindow is null ? "—" : $"{BoundWindow.DpiPercent}%";
+    public string BoundMonitorText => BoundWindow?.MonitorDescription ?? "—";
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(PreviewToggleText))]
@@ -183,8 +186,15 @@ public partial class DevToolsViewModel : ObservableObject
 
         _lastPickedPoint = p;
         PickedClientText = $"({p.Value.X}, {p.Value.Y})";
+
+        // Also give the logical DIP equivalent — WinUI/XAML-side scripts reason in DIPs,
+        // while the input API consumes the physical client coordinate.
+        double dpi = BoundWindow.DpiScale * 96.0;
+        PointInt logical = DpiHelper.PhysicalToLogical(p.Value, dpi);
+
         Log(LogLevel.Success, "Picker",
-            $"客户区坐标 {PickedClientText}（窗口 {BoundWindow.HexHwnd}，客户区 {ClientWidth}x{ClientHeight}）");
+            $"客户区物理坐标 {PickedClientText} · 逻辑(DIP) ({logical.X}, {logical.Y}) " +
+            $"@ {BoundWindow.DpiPercent}% [{BoundWindow.MonitorName}]（客户区 {ClientWidth}x{ClientHeight}）");
     }
 
     /// <summary>The last picked point as "x,y" for clipboard/script use, or empty.</summary>

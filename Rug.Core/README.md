@@ -57,7 +57,7 @@ scripting, scheduling or plugin logic — those live above it.
 | `ThirdParty.props` | Defines `RUG_HAS_OPENCV`/`RUG_HAS_ONNX`, wires ONNX Runtime include/lib (exists) |
 | `Input/IInputController.h` | Dual-mode input contract: enums, `HumanizeConfig`, `TrajectorySample`, factory decl (exists) |
 | `Input/Humanizer.*` | Ease-in-out trajectory planner + velocity-driven dynamic polling cadence + Bezier corridor (exists) |
-| `Input/Win32InputController.*` | Win32 back-end: bound-window client-space coords clamped to the client rect (cursor never leaves the window); background PostMessage or foreground SendInput via `SetBackgroundDelivery`; left/right/middle + side buttons X1/X2 (exists) |
+| `Input/Win32InputController.*` | Win32 back-end: bound-window client-space coords clamped to the client rect (cursor never leaves the window); background PostMessage or foreground SendInput via `SetBackgroundDelivery` (absolute moves normalized over the **virtual screen** with `MOUSEEVENTF_VIRTUALDESK`, so negative-coordinate multi-monitor setups work); left/right/middle + side buttons X1/X2 (exists) |
 | `Input/KmboxInputController.*` | KMBox B+/Pro/Net back-end — **guarded skeleton**, returns `RUG_ERR_UNSUPPORTED` until the vendor protocol lands (exists) |
 | `Input/InputControllerFactory.cpp` | `CreateInputController(mode, hwnd)` — routes to the Win32 or KMBox back-end (exists) |
 | `pch.h` / `framework.h` | Precompiled Win32 + WinRT headers |
