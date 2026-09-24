@@ -93,6 +93,22 @@ desktop.ini
 *.orig
 *.rej
 
+# vcpkg manifest-mode install output (large, machine-local)
+vcpkg_installed/
+
+# Model assets — NOT committed; download + rename per models/README.md
+models/**/*.onnx
+models/**/*.pdmodel
+models/**/*.pdiparams
+models/**/*.pdparams
+models/**/*.yml
+models/**/*.yaml
+
+# Test image fixtures — provide locally (see tests/test_images/README.md)
+tests/test_images/*.png
+tests/test_images/*.jpg
+tests/test_images/*.jpeg
+
 # Local tooling (opencode / qoder config is per-developer)
 opencode.json
 opencode.jsonc

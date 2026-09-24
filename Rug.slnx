@@ -8,12 +8,22 @@
     <File Path=".gitignore" />
     <File Path="AGENTS.md" />
     <File Path="BLUEPRINT.md" />
+    <File Path="README.md" />
+    <File Path="README_zh.md" />
   </Folder>
   <Project Path="Rug.Core/Rug.Core.vcxproj" Id="22c844c6-819e-4f86-bc26-36e77b38f48b">
     <Platform Solution="*|arm64" Project="x64" />
   </Project>
   <Project Path="Rug.Poc/Rug.Poc.vcxproj" Id="d987c628-cbd1-42cf-89e6-d4d5d913bffa">
     <Platform Solution="*|arm64" Project="x64" />
+  </Project>
+  <Project Path="tests/Rug.Tests.vcxproj" Id="3f2a9c41-7b6e-4d5a-8c9f-2e1d0a4b6c7d">
+    <Platform Solution="*|arm64" Project="x64" />
+  </Project>
+  <Project Path="tests/Rug.Core.CSharp.Tests/Rug.Core.CSharp.Tests.csproj">
+    <Platform Solution="*|arm64" Project="x64" />
+    <Platform Solution="*|x64" Project="x64" />
+    <Platform Solution="*|x86" Project="x64" />
   </Project>
   <Project Path="Rug.UI.Core/Rug.UI.Core.csproj">
     <Platform Solution="*|arm64" Project="arm64" />

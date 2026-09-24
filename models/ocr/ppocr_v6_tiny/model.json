@@ -1,0 +1,13 @@
+{
+  "id": "ppocr_v6_tiny",
+  "kind": "ocr",
+  "engine": "paddle",
+  "version": "6.0",
+  "files": {
+    "det": "det.onnx",
+    "rec": "rec.onnx",
+    "detConfig": "det.yml",
+    "recConfig": "rec.yml"
+  },
+  "note": "Identity + file roles only. Pre-processing parameters (det mean/std/thresh/unclip, rec image_shape) and the CTC character dictionary are read at load time from det.yml / rec.yml (PaddleX export). They are intentionally NOT duplicated here, so swapping model versions needs no code or manifest change."
+}

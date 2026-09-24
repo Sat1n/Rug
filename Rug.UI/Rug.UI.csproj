@@ -7,8 +7,8 @@
     <ApplicationIcon>Assets/WindowIcon.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Platforms>x86;x64;arm64</Platforms>
-    <RuntimeIdentifiers>win10-x86;win10-x64;win10-arm64</RuntimeIdentifiers>
-    <PublishProfile>Properties\PublishProfiles\win10-$(Platform).pubxml</PublishProfile>
+    <RuntimeIdentifiers>win-x86;win-x64;win-arm64</RuntimeIdentifiers>
+    <PublishProfile>Properties\PublishProfiles\win-$(Platform).pubxml</PublishProfile>
 	<ImplicitUsings>enable</ImplicitUsings>
 	<Nullable>enable</Nullable>
 	<UseWinUI>true</UseWinUI>
@@ -35,6 +35,19 @@
     <None Update="appsettings.json">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
+  </ItemGroup>
+
+  <!-- Native Rug.Core.dll + its dependency DLLs (opencv_world, yaml-cpp, onnxruntime)
+       are produced by the Rug.Core project under ..\$(Platform)\$(Configuration)\.
+       Include them as Content so they land next to the app (Unpackaged run) AND
+       inside the MSIX package (Packaged run), letting P/Invoke resolve at runtime.
+       Build Rug.Core for the matching platform first. -->
+  <ItemGroup Condition="Exists('$(MSBuildThisFileDirectory)..\$(Platform)\$(Configuration)\')">
+    <Content Include="$(MSBuildThisFileDirectory)..\$(Platform)\$(Configuration)\*.dll"
+             Link="%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest"
+             Visible="false" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(DisableMsixProjectCapabilityAddedByProject)'!='true' and '$(EnableMsixTooling)'=='true'">
