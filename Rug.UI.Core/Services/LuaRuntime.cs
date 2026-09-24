@@ -26,8 +26,8 @@ public sealed class LuaRuntime : IScriptRuntime
         function rug.sleep(ms) return luaYield('__rug', 'sleep', ms) end
         function rug.capture() return luaYield('__rug', 'capture') end
         function rug.ocr(engine_type) return luaYield('__rug', 'ocr', engine_type) end
-        function rug.click(x, y) return luaYield('__rug', 'click', x, y) end
-        function rug.press_key(key) return luaYield('__rug', 'press_key', key) end
+        function rug.click(x, y, button, mode) return luaYield('__rug', 'click', x, y, button, mode) end
+        function rug.press_key(key, duration_ms) return luaYield('__rug', 'press_key', key, duration_ms) end
         rug.agent = {}
         function rug.agent.resolve_anomaly(reason, context)
           return luaYield('__rug', 'resolve_anomaly', reason, context, traceback('', 2))
@@ -66,6 +66,8 @@ public sealed class LuaRuntime : IScriptRuntime
     private readonly ICaptureService _capture;
     private readonly IOcrService _ocr;
     private readonly IInputService _input;
+    private readonly ICoordinateMapper? _coordinateMapper;
+    private readonly Func<nint, bool>? _ensureForeground;
     private readonly ILogger _logger;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly SemaphoreSlim _driveGate = new(1, 1);
@@ -74,6 +76,7 @@ public sealed class LuaRuntime : IScriptRuntime
     private CancellationTokenSource? _lifetime;
     private PluginManifest? _manifest;
     private PermissionInterceptor? _permissions;
+    private InputBridge? _inputBridge;
     private Lua? _lua;
     private LuaFunction? _drive;
     private LuaFunction? _prepareInit;
@@ -91,12 +94,15 @@ public sealed class LuaRuntime : IScriptRuntime
     private volatile bool _inStopHook;
     private long _stopHookDeadline;
 
-    public LuaRuntime(ICaptureService capture, IOcrService ocr, IInputService input, ILogger<LuaRuntime> logger)
+    public LuaRuntime(ICaptureService capture, IOcrService ocr, IInputService input, ILogger<LuaRuntime> logger,
+        ICoordinateMapper? coordinateMapper = null, Func<nint, bool>? ensureForeground = null)
     {
         _capture = capture;
         _ocr = ocr;
         _input = input;
         _logger = logger;
+        _coordinateMapper = coordinateMapper;
+        _ensureForeground = ensureForeground;
     }
 
     public ScriptState State { get { lock (_stateGate) return _state; } }
@@ -117,14 +123,16 @@ public sealed class LuaRuntime : IScriptRuntime
         ArgumentException.ThrowIfNullOrWhiteSpace(scriptPath);
         if (State != ScriptState.Uninitialized) throw new InvalidOperationException("Runtime is already initialized.");
         string source = await File.ReadAllTextAsync(scriptPath, ct).ConfigureAwait(false);
-        if (manifest.Permissions.Contains(Permission.ControlInput))
-        {
-            if (manifest.TargetWindow == 0)
-                throw new ArgumentException("Input permission requires a bound target window.", nameof(manifest));
-            await _input.SetTargetAsync(manifest.TargetWindow, manifest.BackgroundInput, ct).ConfigureAwait(false);
-        }
         _manifest = manifest;
         _permissions = new PermissionInterceptor(manifest, _logger);
+        _inputBridge = new InputBridge(_input, _permissions, _coordinateMapper, _ensureForeground);
+        if (manifest.Permissions.Contains(Permission.ControlInput))
+        {
+            await _inputBridge.BindAsync(manifest.TargetWindow,
+                manifest.InputDelivery ?? (manifest.BackgroundInput
+                    ? InputDeliveryMode.Win32PostMessage : InputDeliveryMode.Win32SendInput),
+                ct).ConfigureAwait(false);
+        }
         _lifetime = CancellationTokenSource.CreateLinkedTokenSource(ct);
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -359,14 +367,42 @@ public sealed class LuaRuntime : IScriptRuntime
             "sleep" => SleepAsync(Int(args[4]), ct),
             "capture" => CaptureAsync(ct),
             "ocr" => OcrAsync(Convert.ToString(args[4], CultureInfo.InvariantCulture), ct),
-            "click" => ClickAsync(Int(args[4]), Int(args[5]), ct),
-            "press_key" => PressKeyAsync(Int(args[4]), ct),
+            "click" => ClickAsync(Int(args[4]), Int(args[5]), ParseButton(args[6]), ParseMode(args[7]), ct),
+            "press_key" => PressKeyAsync(Int(args[4]), args[5] is null ? 0 : Int(args[5]), ct),
             "resolve_anomaly" => ResolveAnomalyAsync(args),
             _ => throw new InvalidOperationException()
         };
     }
 
     private static int Int(object? value) => Convert.ToInt32(value, CultureInfo.InvariantCulture);
+
+    private static MouseButton ParseButton(object? value)
+    {
+        if (value is null) return MouseButton.Left;
+        if (value is string name)
+            return name.ToLowerInvariant() switch
+            {
+                "left" => MouseButton.Left, "right" => MouseButton.Right,
+                "middle" => MouseButton.Middle, "x1" => MouseButton.XButton1,
+                "x2" => MouseButton.XButton2,
+                _ => throw new ArgumentException($"Unknown mouse button: {name}")
+            };
+        int numeric = Int(value);
+        if (!Enum.IsDefined((MouseButton)numeric)) throw new ArgumentOutOfRangeException(nameof(value));
+        return (MouseButton)numeric;
+    }
+
+    private static InputDeliveryMode? ParseMode(object? value)
+    {
+        if (value is null) return null;
+        if (value is not string name) throw new ArgumentException("Input mode must be a string.");
+        return name.ToLowerInvariant() switch
+        {
+            "win32sendinput" or "sendinput" or "foreground" => InputDeliveryMode.Win32SendInput,
+            "win32postmessage" or "postmessage" or "background" => InputDeliveryMode.Win32PostMessage,
+            _ => throw new ArgumentException($"Unknown input delivery mode: {name}")
+        };
+    }
 
     private async Task<object?> ResolveAnomalyAsync(LuaTable args)
     {
@@ -431,16 +467,15 @@ public sealed class LuaRuntime : IScriptRuntime
 
     private LuaTable NewTable() => (LuaTable)_lua!.DoString("return {}")![0];
 
-    private async Task<object?> ClickAsync(int x, int y, CancellationToken ct)
+    private async Task<object?> ClickAsync(int x, int y, MouseButton button, InputDeliveryMode? mode, CancellationToken ct)
     {
-        await _input.MoveMouseAsync(x, y, cancellationToken: ct).ConfigureAwait(false);
-        await _input.ClickAsync(cancellationToken: ct).ConfigureAwait(false);
+        await _inputBridge!.ClickAsync(x, y, button, mode, ct).ConfigureAwait(false);
         return true;
     }
 
-    private async Task<object?> PressKeyAsync(int key, CancellationToken ct)
+    private async Task<object?> PressKeyAsync(int key, int durationMs, CancellationToken ct)
     {
-        await _input.KeyPressAsync(key, cancellationToken: ct).ConfigureAwait(false);
+        await _inputBridge!.PressKeyAsync(key, durationMs, ct).ConfigureAwait(false);
         return true;
     }
 
@@ -493,6 +528,7 @@ public sealed class LuaRuntime : IScriptRuntime
             _lua?.Dispose();
             _lifetime?.Dispose();
             _operations.Clear();
+            if (_inputBridge is not null) await _inputBridge.DisposeAsync().ConfigureAwait(false);
             _disposed = true;
         }
         finally { _gate.Release(); _driveGate.Release(); _gate.Dispose(); _driveGate.Dispose(); }

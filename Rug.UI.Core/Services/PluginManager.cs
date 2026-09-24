@@ -66,6 +66,8 @@ public sealed class PluginManager(ILogger<PluginManager> logger) : IPluginManage
         if (manifest.Permissions is null || manifest.Permissions.Any(string.IsNullOrWhiteSpace) ||
             manifest.Permissions.Count != manifest.Permissions.Distinct(StringComparer.Ordinal).Count())
             throw new InvalidDataException("Permissions must be a distinct list of nonempty names.");
+        if (manifest.InputDelivery is { } mode && !Enum.IsDefined(mode))
+            throw new InvalidDataException("Input delivery mode is not supported.");
         if (string.IsNullOrWhiteSpace(manifest.Entry) || Path.IsPathRooted(manifest.Entry) ||
             manifest.Entry.Split('/', '\\').Any(part => part is ".." or "." or ""))
             throw new InvalidDataException("Entry must be a relative path inside the plugin directory.");

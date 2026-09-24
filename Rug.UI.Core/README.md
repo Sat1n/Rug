@@ -26,6 +26,7 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 > permission interception (Task 2.1.2), and multi-instance lifecycle scheduling
 > with a Lua instruction watchdog (Task 2.1.3), plus anomaly black-box logging
 > and the Agent rescue hook (Task 2.1.4), are implemented.
+> Task 2.2 adds the managed input bridge and physical coordinate mapper.
 
 ## Internal Topology
 
@@ -37,12 +38,14 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 | `Native/RugNativeException.cs` | Non-zero native status → exception |
 | `Helpers/DpiHelper.cs` | Per-Monitor DPI `PhysicalToLogical` / `LogicalToPhysical` point conversion (96-DPI baseline) |
 | `Models/Vision.cs` | Managed records: `OcrTextBlock`, `TemplateMatchResult`, `Rect`, `OcrEngineType` |
-| `Models/Input.cs` | Managed records: `InputMode`, `MouseButton`(L/R/M/X1/X2), `TrajectoryType`, `HumanizeConfig`, `TrajectorySample` |
+| `Models/Input.cs` | Managed records: native `InputMode`, delivery `InputDeliveryMode` (`Win32SendInput`/`Win32PostMessage`), `MouseButton`(L/R/M/X1/X2), `TrajectoryType`, `HumanizeConfig`, `TrajectorySample` |
 | `Models/Capture.cs` · `Models/WindowInfo.cs` · `Models/Geometry.cs` | `CapturedFrame` (managed BGRA8 copy) · `WindowInfo` (HWND/title/process/window+client size/DPI/**monitor name+bounds**) · `PointInt` |
 | `Contracts/Services/` | `IOcrService`, `ITemplateMatchService`, `IInputService`, `ICaptureService`, `IWindowSpyService`, `IFileService` |
 | `Services/OcrService.cs` | Async OCR (Task.Run / MTA) from a file **or** an in-memory `CapturedFrame`; engine = WinRT or Paddle by discovered id; frees native memory |
 | `Services/TemplateMatchService.cs` | Async template match over `Rug_MatchTemplate` |
 | `Services/InputService.cs` | Async humanized input (Task.Run / MTA): mouse move/click/drag, key press, `SendText`, dry-run `PlanTrajectoryAsync`; `SetTargetAsync(hwnd, background)` binds the window + delivery mode. Mouse coords are **client-space**, confined to the window by native |
+| `Abstractions/ICoordinateMapper.cs` · `Services/CoordinateMapper.cs` | Validate a physical client point against the target HWND and project it through Win32 `ClientToScreen` for diagnostics and tests |
+| `Services/InputBridge.cs` | Permission-gated input dispatch, per-call foreground/background selection, focus guard, button selection and cancellable key hold |
 | `Services/CaptureService.cs` | Async WGC capture (Task.Run / MTA): start/stop a native capturer, copy each frame to managed BGRA8, free the native buffer |
 | `Services/WindowSpyService.cs` | Resolve the window under the cursor → `WindowInfo` (incl. its monitor via `MonitorFromWindow`); client-size query + `ClientPointUnderCursor` for the scripting coordinate picker. All physical pixels (PMv2-aware host) |
 | `Abstractions/IScriptRuntime.cs` · `Models/ScriptExecutionResult.cs` | Script lifecycle/state contract |
@@ -93,6 +96,28 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   releases the capture session and per-instance resources. A capture or disk
   failure also faults the task and is surfaced through `LastError`.
 
+## Native input bridge and coordinates (Task 2.2)
+
+* `rug.click(x, y, button?, mode?)` and `rug.press_key(vk, duration_ms?)` require
+  `input`. Buttons accept `left`, `right`, `middle`, `x1`, `x2` or their native
+  integer values; modes accept `Win32SendInput`/`sendinput`/`foreground` and
+  `Win32PostMessage`/`postmessage`/`background`, case-insensitively. A missing mode
+  uses the plugin default. A positive key duration uses an asynchronous delay
+  between KeyDown and KeyUp; cancellation still releases the key. Zero duration
+  uses the native humanized press duration.
+* `manifest.json` may declare `inputDelivery` as `Win32SendInput` or
+  `Win32PostMessage`. If absent, the host-only `BackgroundInput` flag chooses the
+  default (background by default). The bridge binds the task's HWND before any
+  input, validates click points within the current client rect, and rejects a
+  foreground click/key if that HWND cannot be brought to the foreground.
+* The WinUI app manifest declares PerMonitorV2 awareness. Script and native input
+  coordinates are **physical client pixels**. `CoordinateMapper.ClientToScreen`
+  uses Win32 for the physical screen projection without applying a second DPI
+  scale. The bound native controller still receives the original client point:
+  its PostMessage path needs client coordinates, and its SendInput path performs
+  ClientToScreen plus virtual-desktop normalization itself. Passing the managed
+  screen projection to the native controller would offset the click twice.
+
 ## Plugin declarations (Task 2.1.2)
 
 * Each immediate child of the plugins root may contain `manifest.json` and the
@@ -108,7 +133,8 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   string `options` containing the default. `PluginConfig.Defaults` exposes validated
   Boolean, string or numeric values for host-side rendering and initialization.
 * `Configuration`, `TargetWindow`, `BackgroundInput`, and `PluginDirectory` on `PluginManifest` are
-  runtime fields ignored during JSON parsing. The manager fills `Configuration`
+  host-only runtime fields ignored during JSON parsing. `InputDelivery` is an
+  optional JSON declaration validated at scan time. The manager fills `Configuration`
   with typed config defaults; the host may override values and supplies the window.
   Permissions are copied into `PermissionInterceptor` on initialization and checked
   before each `rug.*` service task. A missing grant throws
@@ -129,7 +155,8 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 * `rug.sleep(ms)` requires `timer`; `rug.capture()` requires `vision.capture` and
   returns frame width/height/stride metadata; `rug.ocr(engine_type)` requires
   `vision.ocr`, recognizes the most recently captured frame, and returns an array of
-  text/score/box tables. `rug.click(x,y)` and `rug.press_key(vk)` require `input`.
+  text/score/box tables. `rug.click(x,y,button?,mode?)` and
+  `rug.press_key(vk,duration_ms?)` require `input`.
   The host starts an `ICaptureService` session before `rug.capture()` is called.
   An input-enabled manifest must provide `TargetWindow`; initialization binds it via
   `IInputService.SetTargetAsync`. Click coordinates are client-space and confinement

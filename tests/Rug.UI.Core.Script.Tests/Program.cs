@@ -3,9 +3,11 @@ using System.Collections.Concurrent;
 using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Text.Json;
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Rug.UI.Core.Contracts.Services;
+using Rug.UI.Core.Abstractions;
 using Rug.UI.Core.Exceptions;
 using Rug.UI.Core.Models;
 using Rug.UI.Core.Services;
@@ -111,15 +113,109 @@ await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new 
     Check((await runtime.ResumeAsync()).State == ScriptState.Stopped, "completed operation must survive pause");
 }
 
-await File.WriteAllTextAsync(path, "function on_tick() rug.click(12, 34); rug.press_key(65) end");
+using (var window = new TestWindow())
+{
+    var mapper = new CoordinateMapper();
+    PointInt origin = window.ClientOrigin;
+    Check(mapper.ClientToScreen(window.Handle, 100, 100) == new PointInt(origin.X + 100, origin.Y + 100),
+          "Win32 client-to-screen mapping changed the physical pixel offset");
+    try { mapper.ClientToScreen(window.Handle, -1, 100); throw new Exception("negative client point accepted"); }
+    catch (ArgumentOutOfRangeException) { }
+    try { mapper.ClientToScreen(window.Handle, window.ClientWidth, 0); throw new Exception("outside client point accepted"); }
+    catch (ArgumentOutOfRangeException) { }
+}
+
+var fakeMapper = new FakeCoordinateMapper();
+var inputAudit = new AuditLogger();
+var deniedInput = new FakeInput();
+await using (var bridge = new InputBridge(deniedInput,
+    new PermissionInterceptor(new PluginManifest([]) { Id = "input-denied" }, inputAudit), fakeMapper))
+{
+    try { await bridge.ClickAsync(100, 100); throw new Exception("ungranted input was dispatched"); }
+    catch (PermissionDeniedException ex)
+    {
+        Check(ex.Permission == Permission.ControlInput && ex.Api == "rug.click" &&
+              deniedInput.TargetModes.Count == 0 && inputAudit.LastLevel == LogLevel.Warning,
+              "input bridge did not gate unauthorized calls");
+    }
+}
+
+var bridgedInput = new FakeInput();
+await using (var bridge = new InputBridge(bridgedInput,
+    new PermissionInterceptor(new PluginManifest([Permission.ControlInput]), NullLogger.Instance),
+    fakeMapper, _ => true))
+{
+    await bridge.BindAsync(123, InputDeliveryMode.Win32PostMessage);
+    await bridge.ClickAsync(100, 100, MouseButton.Right, InputDeliveryMode.Win32SendInput);
+    Check(bridge.LastMappedScreenPoint == new PointInt(1100, 2100) &&
+          bridgedInput.X == 100 && bridgedInput.Y == 100 && bridgedInput.Button == MouseButton.Right &&
+          bridgedInput.TargetModes.SequenceEqual([true, false]),
+          "input bridge lost the client point, button or foreground mode");
+    var watch = Stopwatch.StartNew();
+    Task held = bridge.PressKeyAsync(65, 80);
+    Check(!held.IsCompleted && bridgedInput.KeyDownCalls == 1 && bridgedInput.KeyUpCalls == 0,
+          "key hold blocked the caller or did not remain pressed");
+    await held;
+    Check(watch.ElapsedMilliseconds >= 80 && bridgedInput.KeyUpCalls == 1 &&
+          bridgedInput.TargetModes.SequenceEqual([true, false, true]),
+          "key release or default background mode restoration failed");
+    using var canceled = new CancellationTokenSource();
+    Task longHold = bridge.PressKeyAsync(65, 5000, canceled.Token);
+    await WaitUntilAsync(() => bridgedInput.KeyDownCalls == 2);
+    canceled.Cancel();
+    try { await longHold; throw new Exception("canceled hold completed normally"); }
+    catch (OperationCanceledException) { }
+    Check(bridgedInput.KeyUpCalls == 2, "cancellation left the key pressed");
+}
+
+var unfocusedInput = new FakeInput();
+await using (var bridge = new InputBridge(unfocusedInput,
+    new PermissionInterceptor(new PluginManifest([Permission.ControlInput]), NullLogger.Instance),
+    fakeMapper, _ => false))
+{
+    await bridge.BindAsync(123, InputDeliveryMode.Win32PostMessage);
+    await bridge.ClickAsync(100, 100);
+    Check(unfocusedInput.MoveCalls == 1, "background click unexpectedly needed foreground focus");
+    try { await bridge.ClickAsync(-1, 0); throw new Exception("invalid client point accepted"); }
+    catch (ArgumentOutOfRangeException) { }
+    try
+    {
+        await bridge.ClickAsync(100, 100, mode: InputDeliveryMode.Win32SendInput);
+        throw new Exception("unfocused SendInput was dispatched");
+    }
+    catch (InvalidOperationException ex) when (ex.Message.Contains("foreground")) { }
+    Check(unfocusedInput.MoveCalls == 1,
+          "invalid point or unfocused window reached native input");
+}
+
+await File.WriteAllTextAsync(path, "function on_tick() rug.click(12, 34, 'right', 'sendinput'); rug.press_key(65, 40) end");
 var input = new FakeInput();
-await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), input, NullLogger<LuaRuntime>.Instance))
+await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), input,
+    NullLogger<LuaRuntime>.Instance, fakeMapper, _ => true))
 {
     await runtime.InitializeAsync(path, new PluginManifest(new HashSet<string> { "input" }, TargetWindow: 123));
     Check((await runtime.StepAsync()).State == ScriptState.Yielded, "click must yield");
     Check((await runtime.ResumeAsync()).State == ScriptState.Yielded, "key must yield");
     Check((await runtime.ResumeAsync()).State == ScriptState.Stopped, "input script must finish");
-    Check(input.Target == 123 && input.X == 12 && input.Y == 34 && input.Key == 65, "input target/arguments were lost");
+    Check(input.Target == 123 && input.X == 12 && input.Y == 34 && input.Key == 65 &&
+          input.Button == MouseButton.Right && input.KeyDownCalls == 1 && input.KeyUpCalls == 1 &&
+          input.TargetModes.SequenceEqual([true, false, true]),
+          "Lua input bridge lost button, mode or key duration");
+}
+
+await File.WriteAllTextAsync(path, "function on_tick() rug.press_key(66) end");
+var manifestInput = new FakeInput();
+await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), manifestInput,
+    NullLogger<LuaRuntime>.Instance, fakeMapper, _ => true))
+{
+    await runtime.InitializeAsync(path, new PluginManifest([Permission.ControlInput], TargetWindow: 123)
+    {
+        InputDelivery = InputDeliveryMode.Win32SendInput
+    });
+    Check(manifestInput.TargetModes.SequenceEqual([false]), "manifest SendInput default was ignored");
+    Check((await runtime.StepAsync()).State == ScriptState.Yielded &&
+          (await runtime.ResumeAsync()).State == ScriptState.Stopped && manifestInput.Key == 66,
+          "manifest-selected input mode did not execute");
 }
 
 await File.WriteAllTextAsync(path, "assert(os == nil and io == nil and package == nil and debug == nil and luanet == nil and load == nil)");
@@ -138,7 +234,8 @@ try
     await File.WriteAllTextAsync(Path.Combine(valid, "main.lua"), "function on_tick() assert(rug.get_config('enabled') == true and rug.get_config('label') == 'hello' and rug.get_config('speed') == 2.5 and rug.get_config('mode') == 'fast') end");
     await File.WriteAllTextAsync(Path.Combine(valid, "manifest.json"), """
         {"id":"demo","name":"Demo","version":"1.2.3","targetProcess":"Demo.exe",
-         "permissions":["timer","vision.capture"],"targetWindow":987,"configuration":{"injected":"yes"}}
+         "permissions":["timer","vision.capture"],"inputDelivery":"Win32SendInput",
+         "targetWindow":987,"configuration":{"injected":"yes"}}
         """);
     await File.WriteAllTextAsync(Path.Combine(valid, "config.json"), """
         {"fields":[
@@ -178,10 +275,19 @@ try
         {"fields":[{"key":"enabled","type":"CheckBox","default":"yes"}]}
         """);
 
+    string badMode = Path.Combine(pluginsRoot, "bad-mode");
+    Directory.CreateDirectory(badMode);
+    await File.WriteAllTextAsync(Path.Combine(badMode, "main.lua"), "function on_tick() end");
+    await File.WriteAllTextAsync(Path.Combine(badMode, "manifest.json"), """
+        {"id":"bad-mode","name":"Bad Mode","version":"1.0.0","targetProcess":"Demo.exe",
+         "permissions":[],"inputDelivery":999}
+        """);
+
     var manager = new PluginManager(NullLogger<PluginManager>.Instance);
     PluginManifest[] plugins = manager.ScanPlugins(pluginsRoot).ToArray();
     Check(plugins.Length == 1 && plugins[0].Id == "demo" && plugins[0].Entry == "main.lua" &&
           plugins[0].Permissions.SequenceEqual(new[] { "timer", "vision.capture" }) &&
+          plugins[0].InputDelivery == InputDeliveryMode.Win32SendInput &&
           plugins[0].TargetWindow == 0 && !plugins[0].Configuration!.ContainsKey("injected"), "manifest scan failed");
     PluginConfig config = manager.GetPluginConfig("demo");
     Check(config.Schema.Fields.Count == 4 && config.Schema.Fields[0].Type == PluginConfigControlType.CheckBox &&
@@ -195,6 +301,7 @@ try
     Check(!plugins.Any(p => p.Id == "escape"), "entry traversal was accepted");
     Check(!plugins.Any(p => p.Id == "bad-config"), "malformed config was accepted");
     Check(!plugins.Any(p => p.Id == "bad-default"), "invalid config default was accepted");
+    Check(!plugins.Any(p => p.Id == "bad-mode"), "invalid input delivery mode was accepted");
 }
 finally { Directory.Delete(pluginsRoot, recursive: true); }
 
@@ -468,27 +575,88 @@ sealed class FakeOcr : IOcrService
 sealed class FakeInput : IInputService
 {
     public nint Target { get; private set; }
+    public List<bool> TargetModes { get; } = [];
+    public MouseButton Button { get; private set; }
+    public int KeyDownCalls { get; private set; }
+    public int KeyUpCalls { get; private set; }
     public int X { get; private set; }
     public int Y { get; private set; }
+    public int MoveCalls { get; private set; }
     public int Key { get; private set; }
     public Task MoveMouseAsync(int x, int y, TrajectoryType trajectory = TrajectoryType.CubicBezier, bool smooth = true, CancellationToken cancellationToken = default)
-    { X = x; Y = y; return Task.CompletedTask; }
+    { X = x; Y = y; MoveCalls++; return Task.CompletedTask; }
     public Task MoveMouseRelativeAsync(int dx, int dy, TrajectoryType trajectory = TrajectoryType.CubicBezier, bool smooth = true, CancellationToken cancellationToken = default) => Task.CompletedTask;
-    public Task ClickAsync(MouseButton button = MouseButton.Left, int holdMs = 0, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task ClickAsync(MouseButton button = MouseButton.Left, int holdMs = 0, CancellationToken cancellationToken = default)
+    { Button = button; return Task.CompletedTask; }
     public Task MouseDownAsync(MouseButton button, CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task MouseUpAsync(MouseButton button, CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task DragAndDropAsync(int sx, int sy, int ex, int ey, TrajectoryType trajectory = TrajectoryType.CubicBezier, bool smooth = true, CancellationToken cancellationToken = default) => Task.CompletedTask;
-    public Task KeyDownAsync(int virtualKey, CancellationToken cancellationToken = default) => Task.CompletedTask;
-    public Task KeyUpAsync(int virtualKey, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task KeyDownAsync(int virtualKey, CancellationToken cancellationToken = default)
+    { Key = virtualKey; KeyDownCalls++; return Task.CompletedTask; }
+    public Task KeyUpAsync(int virtualKey, CancellationToken cancellationToken = default)
+    { KeyUpCalls++; return Task.CompletedTask; }
     public Task KeyPressAsync(int virtualKey, int holdMs = 0, CancellationToken cancellationToken = default)
     { Key = virtualKey; return Task.CompletedTask; }
     public Task SendTextAsync(string text, CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task SetTargetAsync(nint hwnd, bool background, CancellationToken cancellationToken = default)
-    { Target = hwnd; return Task.CompletedTask; }
+    { Target = hwnd; TargetModes.Add(background); return Task.CompletedTask; }
     public Task SetHumanizeConfigAsync(HumanizeConfig config, CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task<IReadOnlyList<TrajectorySample>> PlanTrajectoryAsync(int sx, int sy, int ex, int ey, TrajectoryType trajectory = TrajectoryType.CubicBezier, CancellationToken cancellationToken = default)
         => Task.FromResult<IReadOnlyList<TrajectorySample>>([]);
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}
+
+sealed class FakeCoordinateMapper : ICoordinateMapper
+{
+    public PointInt ClientToScreen(nint hwnd, int x, int y)
+    {
+        if (hwnd != 123 || x < 0 || y < 0 || x >= 400 || y >= 300)
+            throw new ArgumentOutOfRangeException(nameof(x));
+        return new PointInt(x + 1000, y + 2000);
+    }
+}
+
+sealed class TestWindow : IDisposable
+{
+    public nint Handle { get; }
+    public int ClientWidth { get; }
+    public PointInt ClientOrigin { get; }
+
+    public TestWindow()
+    {
+        Handle = CreateWindowExW(0, "STATIC", "Rug Coordinate Test", 0x00CF0000,
+            80, 90, 400, 300, 0, 0, 0, 0);
+        if (Handle == 0) throw new Exception("Could not create a Win32 coordinate test window.");
+        if (!GetClientRect(Handle, out Rect rect)) throw new Exception("Could not read test client area.");
+        ClientWidth = rect.Right - rect.Left;
+        var point = new WinPoint();
+        if (MapWindowPoints(Handle, 0, ref point, 1) == 0 && Marshal.GetLastWin32Error() != 0)
+            throw new Exception("Could not map the test window origin.");
+        ClientOrigin = new PointInt(point.X, point.Y);
+    }
+
+    public void Dispose() => DestroyWindow(Handle);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WinPoint { public int X; public int Y; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Rect { public int Left; public int Top; public int Right; public int Bottom; }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern nint CreateWindowExW(uint exStyle, string className, string title, uint style,
+        int x, int y, int width, int height, nint parent, nint menu, nint instance, nint param);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetClientRect(nint hwnd, out Rect rect);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int MapWindowPoints(nint from, nint to, ref WinPoint point, uint count);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DestroyWindow(nint hwnd);
 }
 
 sealed class AuditLogger : ILogger

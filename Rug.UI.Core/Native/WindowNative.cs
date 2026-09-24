@@ -60,8 +60,12 @@ internal static class WindowNative
     [DllImport(User32)]
     internal static extern bool GetWindowRect(nint hwnd, out RECT lpRect);
 
-    [DllImport(User32)]
+    [DllImport(User32, SetLastError = true)]
     internal static extern bool GetClientRect(nint hwnd, out RECT lpRect);
+
+    [DllImport(User32, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool ClientToScreen(nint hwnd, ref POINT lpPoint);
 
     [DllImport(User32)]
     internal static extern bool ScreenToClient(nint hwnd, ref POINT lpPoint);
@@ -75,6 +79,9 @@ internal static class WindowNative
     [DllImport(User32)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool SetForegroundWindow(nint hwnd);
+
+    [DllImport(User32)]
+    internal static extern nint GetForegroundWindow();
 
     [DllImport(User32)]
     internal static extern nint MonitorFromWindow(nint hwnd, uint dwFlags);

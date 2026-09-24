@@ -12,6 +12,9 @@ public sealed record PluginManifest
     public string Entry { get; init; } = "main.lua";
     public string TargetProcess { get; init; } = "";
     public List<string> Permissions { get; init; } = [];
+    /// <summary>Optional plugin default; host-only BackgroundInput remains the fallback.</summary>
+    [JsonConverter(typeof(JsonStringEnumConverter<InputDeliveryMode>))]
+    public InputDeliveryMode? InputDelivery { get; init; }
 
     [JsonIgnore] public IReadOnlyDictionary<string, object?>? Configuration { get; init; }
     [JsonIgnore] public nint TargetWindow { get; init; }

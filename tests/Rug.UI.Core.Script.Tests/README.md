@@ -23,3 +23,9 @@ Anomaly tests check `agent` permission denial, a Lua-triggered yield and task
 fault, the per-instance warning and cleanup, UTF-8 reason/context plus Lua
 traceback in JSON, a null `agent_resolution` placeholder, and the PNG's actual
 RGBA pixel data decoded from its compressed image payload.
+
+Task 2.2 tests use a real Win32 test HWND to compare client-to-screen mapping
+against `MapWindowPoints`, and fake input services to verify permission denial,
+client-coordinate forwarding, per-call SendInput/PostMessage mode selection,
+manifest defaults, button selection, asynchronous key duration, cancellation
+KeyUp, and rejection when foreground activation fails.
