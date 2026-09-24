@@ -1,0 +1,94 @@
+# =============================================================================
+#  PR Auto-Label — derives labels from a conventional-commit PR title and feeds
+#  the release-notes categories in .github/release.yml.
+#
+#    "feat(core): ..."   -> type:feature, scope:core
+#    "fix(ui)!: ..."     -> type:bug, scope:ui, breaking-change
+#
+#  Labels are created on demand if missing (best effort) and previously-managed
+#  type:/scope:/breaking-change labels are re-synced when the title is edited.
+# =============================================================================
+name: PR Auto-Label
+
+on:
+  pull_request:
+    types: [opened, edited, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  administration: write   # allows creating repo labels on demand
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Apply conventional-commit labels
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prNumber = context.payload.pull_request.number;
+            const title = context.payload.pull_request.title || '';
+
+            const m = title.match(/^(\w+)(?:\(([^)]+)\))?(!)?:/);
+            const typeMap = {
+              feat: 'type:feature', fix: 'type:bug', docs: 'type:docs',
+              refactor: 'type:refactor', perf: 'type:perf', test: 'type:test',
+              tests: 'type:test', build: 'type:build', ci: 'type:ci',
+              chore: 'type:chore', style: 'type:style', revert: 'type:revert',
+            };
+            if (!m || !typeMap[m[1].toLowerCase()]) {
+              core.info(`PR title "${title}" is not conventional-commit style; no labels applied.`);
+              return;
+            }
+
+            const type = m[1].toLowerCase();
+            const scope = (m[2] || '').toLowerCase().trim();
+            const breaking = !!m[3];
+
+            const palette = {
+              'type:feature': '1d76db', 'type:bug': 'd73a4a', 'type:docs': '0075ca',
+              'type:refactor': 'fef2c0', 'type:perf': 'fb8500', 'type:test': '0e8a16',
+              'type:build': 'd4c5f9', 'type:ci': 'c5def5', 'type:chore': 'eeeeee',
+              'type:style': 'cccccc', 'type:revert': 'e99695', 'breaking-change': 'b60205',
+            };
+
+            const want = new Set([typeMap[type]]);
+            if (scope) want.add(`scope:${scope}`);
+            if (breaking) want.add('breaking-change');
+
+            // Ensure each label exists; keep only the ones we can confirm.
+            const ensured = [];
+            for (const name of want) {
+              const color = palette[name] || (name.startsWith('scope:') ? 'fbca04' : 'ededed');
+              const description = name.startsWith('scope:')
+                ? `Component: ${name.slice(6)}`
+                : (name === 'breaking-change' ? 'Introduces a breaking change'
+                                               : `Conventional-commit type: ${name.replace(/^type:/, '')}`);
+              try {
+                await github.rest.issues.createLabel({ owner, repo, name, color, description });
+                core.info(`Created label ${name}`);
+                ensured.push(name);
+              } catch (e) {
+                if (e.status === 422) { ensured.push(name); }        // already exists
+                else { core.warning(`Cannot ensure label ${name}: ${e.message}`); }
+              }
+            }
+
+            // Drop managed labels that no longer match the title.
+            const current = (context.payload.pull_request.labels || []).map(l => l.name);
+            const managed = current.filter(n => n.startsWith('type:') || n.startsWith('scope:') || n === 'breaking-change');
+            for (const name of managed.filter(n => !want.has(n))) {
+              try { await github.rest.issues.removeLabel({ owner, repo, issue_number: prNumber, name }); }
+              catch (e) { core.warning(`Could not remove ${name}: ${e.message}`); }
+            }
+
+            const toAdd = ensured.filter(n => !current.includes(n));
+            if (toAdd.length) {
+              await github.rest.issues.addLabels({ owner, repo, issue_number: prNumber, labels: toAdd });
+              core.info(`Applied labels: ${toAdd.join(', ')}`);
+            } else {
+              core.info('Labels already up to date.');
+            }

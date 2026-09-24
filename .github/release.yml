@@ -1,0 +1,45 @@
+# =============================================================================
+#  GitHub auto-generated release notes configuration.
+#
+#  When you draft a Release (Repository -> Releases -> "Draft a new release" ->
+#  "Generate release notes"), GitHub groups the merged PRs since the last tag
+#  into the categories below, matched by their LABELS. Labels are applied
+#  automatically by .github/workflows/pr-labeler.yml from conventional-commit
+#  PR titles, e.g. "feat(core): ..." -> labels [type:feature, scope:core].
+#
+#  A PR lands in the FIRST category whose labels it carries; PRs with none of
+#  these labels fall into "Other Changes".
+# =============================================================================
+changelog:
+  categories:
+    - title: 💥 Breaking Changes
+      labels:
+        - breaking-change
+    - title: 🚀 Features
+      labels:
+        - type:feature
+    - title: 🐛 Bug Fixes
+      labels:
+        - type:bug
+    - title: ♻️ Refactoring
+      labels:
+        - type:refactor
+    - title: ⚡ Performance
+      labels:
+        - type:perf
+    - title: 📖 Documentation
+      labels:
+        - type:docs
+    - title: ✅ Tests
+      labels:
+        - type:test
+    - title: 🔧 Maintenance
+      labels:
+        - type:chore
+        - type:ci
+        - type:build
+        - type:style
+        - type:revert
+    - title: Other Changes
+      labels:
+        - "*"
