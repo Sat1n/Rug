@@ -12,7 +12,8 @@ public interface IOcrService
     /// <param name="engineType">WinRT (system) or Paddle (models/ocr bundle).</param>
     /// <param name="modelId">
     /// For Paddle: the discovered model id (e.g. "ppocr_v6_tiny"). Null selects the
-    /// first discovered bundle. Ignored for WinRT.
+    /// first discovered bundle. For WinRT: an optional BCP-47 language tag;
+    /// null uses the user's profile languages.
     /// </param>
     Task<IReadOnlyList<OcrTextBlock>> RecognizeAsync(
         string imagePath,

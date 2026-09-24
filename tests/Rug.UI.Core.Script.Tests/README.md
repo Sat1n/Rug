@@ -29,3 +29,13 @@ against `MapWindowPoints`, and fake input services to verify permission denial,
 client-coordinate forwarding, per-call SendInput/PostMessage mode selection,
 manifest defaults, button selection, asynchronous key duration, cancellation
 KeyUp, and rejection when foreground activation fails.
+
+Task 2.3 tests use generated BGRA frames and fake OCR/template engines to verify
+Lua hit coordinates, confidence, region offsets, OCR text/language, permission
+denial, missing/invalid/escaping template paths, and coroutine polling for both
+image appearance and timeout. A 1,000-cycle capture/match test confirms only the
+current frame remains cached and older frames can be collected. The native
+`TemplateMatchService.MatchFrameAsync` path pins the managed frame only for its
+Rug.Core call. The fake-based test does not measure native heap usage; run the
+`--visual-only` mode in [Rug.Core.CSharp.Tests](../Rug.Core.CSharp.Tests/README.md)
+for a synthetic-BMP OpenCV match and 1,000 native calls with memory/handle checks.

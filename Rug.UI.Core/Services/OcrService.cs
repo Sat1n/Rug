@@ -128,7 +128,7 @@ public sealed class OcrService : IOcrService
         nint h;
         if (engineType == OcrEngineType.WinRt)
         {
-            rc = RugCoreNative.Rug_CreateOcrEngine(RugOcrEngineTypeNative.WinRt, null, out h);
+            rc = RugCoreNative.Rug_CreateOcrEngine(RugOcrEngineTypeNative.WinRt, modelId, out h);
         }
         else
         {

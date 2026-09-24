@@ -27,6 +27,7 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 > with a Lua instruction watchdog (Task 2.1.3), plus anomaly black-box logging
 > and the Agent rescue hook (Task 2.1.4), are implemented.
 > Task 2.2 adds the managed input bridge and physical coordinate mapper.
+> Task 2.3 connects WGC frames to in-memory template matching and OCR for Lua.
 
 ## Internal Topology
 
@@ -37,12 +38,13 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 | `Native/OcrEngineHandle.cs` · `SafeOcrResult.cs` · `SafeModelList.cs` · `InputControllerHandle.cs` · `CapturerHandle.cs` | `SafeHandle` wrappers releasing native engine/result/list/input/capturer deterministically |
 | `Native/RugNativeException.cs` | Non-zero native status → exception |
 | `Helpers/DpiHelper.cs` | Per-Monitor DPI `PhysicalToLogical` / `LogicalToPhysical` point conversion (96-DPI baseline) |
-| `Models/Vision.cs` | Managed records: `OcrTextBlock`, `TemplateMatchResult`, `Rect`, `OcrEngineType` |
+| `Models/Vision.cs` · `Models/VisionResultModels.cs` | Native-facing OCR/match records and Lua-facing best image hit / aggregated OCR result |
 | `Models/Input.cs` | Managed records: native `InputMode`, delivery `InputDeliveryMode` (`Win32SendInput`/`Win32PostMessage`), `MouseButton`(L/R/M/X1/X2), `TrajectoryType`, `HumanizeConfig`, `TrajectorySample` |
 | `Models/Capture.cs` · `Models/WindowInfo.cs` · `Models/Geometry.cs` | `CapturedFrame` (managed BGRA8 copy) · `WindowInfo` (HWND/title/process/window+client size/DPI/**monitor name+bounds**) · `PointInt` |
 | `Contracts/Services/` | `IOcrService`, `ITemplateMatchService`, `IInputService`, `ICaptureService`, `IWindowSpyService`, `IFileService` |
 | `Services/OcrService.cs` | Async OCR (Task.Run / MTA) from a file **or** an in-memory `CapturedFrame`; engine = WinRT or Paddle by discovered id; frees native memory |
-| `Services/TemplateMatchService.cs` | Async template match over `Rug_MatchTemplate` |
+| `Services/TemplateMatchService.cs` | Async template match over `Rug_MatchTemplate`, accepting a file or pinned managed BGRA frame |
+| `Services/VisualEngineBridge.cs` | Single-frame cache per runtime, permission-gated capture/match/OCR, safe template paths, region crops and client-space result coordinates |
 | `Services/InputService.cs` | Async humanized input (Task.Run / MTA): mouse move/click/drag, key press, `SendText`, dry-run `PlanTrajectoryAsync`; `SetTargetAsync(hwnd, background)` binds the window + delivery mode. Mouse coords are **client-space**, confined to the window by native |
 | `Abstractions/ICoordinateMapper.cs` · `Services/CoordinateMapper.cs` | Validate a physical client point against the target HWND and project it through Win32 `ClientToScreen` for diagnostics and tests |
 | `Services/InputBridge.cs` | Permission-gated input dispatch, per-call foreground/background selection, focus guard, button selection and cancellable key hold |
@@ -118,6 +120,38 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   ClientToScreen plus virtual-desktop normalization itself. Passing the managed
   screen projection to the native controller would offset the click twice.
 
+## Visual engine bridge (Task 2.3)
+
+* Phase 1 exposes `ICaptureService`, `IOcrService`, and `ITemplateMatchService`
+  separately; there is no `IRecognizeService`. `VisualEngineBridge` composes those
+  contracts. `rug.capture()` requires `vision.capture` and replaces the one cached
+  managed BGRA8 frame. `rug.find_image(path, threshold?, region?)` requires
+  `vision.match`, searches that frame with OpenCV, and returns the strongest hit's
+  top-left `{x,y,similarity}` or `nil`. Both threshold and returned score are in
+  `[0,1]`. A missing cached frame is an error.
+* `rug.ocr(region?, language?)` requires `vision.ocr` and returns a Lua array of
+  `{text,score,x,y,width,height}` blocks plus `.text` (joined lines) and `.blocks`.
+  A region is `{x,y,width,height}` in physical client pixels. Match and OCR crop
+  the frame in managed memory, then add the region origin to returned boxes so
+  every Lua coordinate remains relative to the bound window. The older
+  `rug.ocr('winrt')` / `rug.ocr('paddle')` engine selector remains supported.
+  A WinRT language argument is a BCP-47 tag passed to the native engine; native
+  falls back to user profile languages if the requested language is unavailable.
+* `rug.wait_image(path, timeout_ms?, threshold?, interval_ms?)` is a Lua coroutine
+  helper that repeatedly captures, matches, and yields through `rug.sleep` until
+  the image appears or the monotonic-clock deadline passes. It needs
+  `vision.capture`, `vision.match`, and `timer`; defaults are 5 s timeout, 0.8
+  threshold, and 100 ms interval. The scheduler thread is released at every
+  capture, match, and sleep operation.
+* Relative template paths resolve inside the scanned plugin directory. An
+  absolute or escaping path additionally requires `filesystem`; linked asset
+  paths are rejected. Missing files throw `FileNotFoundException`; native decode
+  errors become `InvalidDataException`. Template matching pins the managed
+  frame only for the native call, with no ownership transfer or temporary image
+  file. OCR follows the same ownership rule. Replacing/disposing the bridge
+  releases the previous frame for garbage collection. The native synthetic-BMP
+  test verifies the pinned-frame path across 1,000 OpenCV calls.
+
 ## Plugin declarations (Task 2.1.2)
 
 * Each immediate child of the plugins root may contain `manifest.json` and the
@@ -140,7 +174,7 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   before each `rug.*` service task. A missing grant throws
   `PermissionDeniedException`, logs plugin/API/
   permission details, and puts the runtime in `Faulted` state. Defined names:
-  `timer`, `vision.capture`, `vision.ocr`, `input`, `network`, `filesystem`, `agent`.
+  `timer`, `vision.capture`, `vision.match`, `vision.ocr`, `input`, `network`, `filesystem`, `agent`.
 
 ## Lua coroutine contract (Task 2.1.1)
 
@@ -153,9 +187,9 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   thread during `Task.Delay` or a pending service call. `Stop()` cancels the linked
   lifetime token and promptly interrupts a pending `ResumeAsync`.
 * `rug.sleep(ms)` requires `timer`; `rug.capture()` requires `vision.capture` and
-  returns frame width/height/stride metadata; `rug.ocr(engine_type)` requires
-  `vision.ocr`, recognizes the most recently captured frame, and returns an array of
-  text/score/box tables. `rug.click(x,y,button?,mode?)` and
+  returns frame width/height/stride metadata; `rug.ocr(region?,language?)` requires
+  `vision.ocr` and recognizes the most recently captured frame.
+  `rug.click(x,y,button?,mode?)` and
   `rug.press_key(vk,duration_ms?)` require `input`.
   The host starts an `ICaptureService` session before `rug.capture()` is called.
   An input-enabled manifest must provide `TargetWindow`; initialization binds it via

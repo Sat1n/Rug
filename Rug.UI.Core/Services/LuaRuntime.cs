@@ -19,13 +19,35 @@ public sealed class LuaRuntime : IScriptRuntime
     private const string Bridge = """
         local luaYield, luaCreate, luaResume, luaStatus = coroutine.yield, coroutine.create, coroutine.resume, coroutine.status
         local pack, luaType, raise = table.pack, type, error
-        local getConfig, writeLog, shouldAbort = __rug_get_config, __rug_log, __rug_should_abort
+        local getConfig, writeLog, shouldAbort, clock = __rug_get_config, __rug_log, __rug_should_abort, __rug_ticks
+        local min = math.min
         local sethook, traceback = debug.sethook, debug.traceback
         local thread, chunk
         rug = {}
         function rug.sleep(ms) return luaYield('__rug', 'sleep', ms) end
         function rug.capture() return luaYield('__rug', 'capture') end
-        function rug.ocr(engine_type) return luaYield('__rug', 'ocr', engine_type) end
+        function rug.ocr(region, language) return luaYield('__rug', 'ocr', region, language) end
+        function rug.find_image(path, threshold, region)
+          return luaYield('__rug', 'find_image', path, threshold, region)
+        end
+        local capture, findImage, sleep = rug.capture, rug.find_image, rug.sleep
+        function rug.wait_image(path, timeout_ms, threshold, interval_ms)
+          local timeout, interval = timeout_ms or 5000, interval_ms or 100
+          if luaType(timeout) ~= 'number' or timeout < 0 or timeout > 600000 or
+             luaType(interval) ~= 'number' or interval <= 0 or interval > 60000 then
+            raise('wait_image timeout/interval is invalid', 2)
+          end
+          local deadline = clock() + timeout
+          while true do
+            if capture() ~= nil then
+              local hit = findImage(path, threshold)
+              if hit ~= nil then return hit end
+            end
+            local remaining = deadline - clock()
+            if remaining <= 0 then return nil end
+            sleep(min(interval, remaining))
+          end
+        end
         function rug.click(x, y, button, mode) return luaYield('__rug', 'click', x, y, button, mode) end
         function rug.press_key(key, duration_ms) return luaYield('__rug', 'press_key', key, duration_ms) end
         rug.agent = {}
@@ -65,6 +87,7 @@ public sealed class LuaRuntime : IScriptRuntime
 
     private readonly ICaptureService _capture;
     private readonly IOcrService _ocr;
+    private readonly ITemplateMatchService _matcher;
     private readonly IInputService _input;
     private readonly ICoordinateMapper? _coordinateMapper;
     private readonly Func<nint, bool>? _ensureForeground;
@@ -77,12 +100,12 @@ public sealed class LuaRuntime : IScriptRuntime
     private PluginManifest? _manifest;
     private PermissionInterceptor? _permissions;
     private InputBridge? _inputBridge;
+    private VisualEngineBridge? _visual;
     private Lua? _lua;
     private LuaFunction? _drive;
     private LuaFunction? _prepareInit;
     private LuaFunction? _beginTick;
     private LuaFunction? _beginStop;
-    private CapturedFrame? _lastFrame;
     private Guid? _pendingId;
     private Guid? _pendingAnomalyId;
     private string? _pendingAnomalyReason;
@@ -95,10 +118,12 @@ public sealed class LuaRuntime : IScriptRuntime
     private long _stopHookDeadline;
 
     public LuaRuntime(ICaptureService capture, IOcrService ocr, IInputService input, ILogger<LuaRuntime> logger,
-        ICoordinateMapper? coordinateMapper = null, Func<nint, bool>? ensureForeground = null)
+        ICoordinateMapper? coordinateMapper = null, Func<nint, bool>? ensureForeground = null,
+        ITemplateMatchService? templateMatcher = null)
     {
         _capture = capture;
         _ocr = ocr;
+        _matcher = templateMatcher ?? new TemplateMatchService();
         _input = input;
         _logger = logger;
         _coordinateMapper = coordinateMapper;
@@ -125,6 +150,7 @@ public sealed class LuaRuntime : IScriptRuntime
         string source = await File.ReadAllTextAsync(scriptPath, ct).ConfigureAwait(false);
         _manifest = manifest;
         _permissions = new PermissionInterceptor(manifest, _logger);
+        _visual = new VisualEngineBridge(_capture, _ocr, _matcher, _permissions, manifest.PluginDirectory);
         _inputBridge = new InputBridge(_input, _permissions, _coordinateMapper, _ensureForeground);
         if (manifest.Permissions.Contains(Permission.ControlInput))
         {
@@ -144,6 +170,7 @@ public sealed class LuaRuntime : IScriptRuntime
                 _lua.RegisterFunction("__rug_get_config", this, GetConfigMethod);
                 _lua.RegisterFunction("__rug_log", this, LogMethod);
                 _lua.RegisterFunction("__rug_should_abort", this, ShouldAbortMethod);
+                _lua.RegisterFunction("__rug_ticks", this, TicksMethod);
                 _lua.DoString(Bridge);
                 _lua["__rug_source"] = source;
                 var chunk = (LuaFunction)_lua.DoString("return assert(load(__rug_source, '@plugin', 't', _ENV))")![0];
@@ -154,7 +181,7 @@ public sealed class LuaRuntime : IScriptRuntime
                 _beginTick = (LuaFunction)_lua["__rug_begin_tick"]!;
                 _beginStop = (LuaFunction)_lua["__rug_begin_stop"]!;
                 // Remove ambient file/process and CLR access from script globals.
-                _lua.DoString("__rug_source=nil; __rug_set_chunk=nil; __rug_prepare_oneshot=nil; __rug_prepare_init=nil; __rug_begin_tick=nil; __rug_begin_stop=nil; __rug_drive=nil; __rug_should_abort=nil; __rug_get_config=nil; __rug_log=nil; coroutine=nil; io=nil; os=nil; package=nil; require=nil; dofile=nil; loadfile=nil; load=nil; debug=nil; luanet=nil; import=nil; load_assembly=nil; collectgarbage=nil");
+                _lua.DoString("__rug_source=nil; __rug_set_chunk=nil; __rug_prepare_oneshot=nil; __rug_prepare_init=nil; __rug_begin_tick=nil; __rug_begin_stop=nil; __rug_drive=nil; __rug_should_abort=nil; __rug_get_config=nil; __rug_log=nil; __rug_ticks=nil; coroutine=nil; io=nil; os=nil; package=nil; require=nil; dofile=nil; loadfile=nil; load=nil; debug=nil; luanet=nil; import=nil; load_assembly=nil; collectgarbage=nil");
             }, ct).ConfigureAwait(false);
             ChangeState(ScriptState.Ready);
         }
@@ -169,6 +196,9 @@ public sealed class LuaRuntime : IScriptRuntime
     private static readonly System.Reflection.MethodInfo GetConfigMethod = typeof(LuaRuntime).GetMethod(nameof(GetConfig))!;
     private static readonly System.Reflection.MethodInfo LogMethod = typeof(LuaRuntime).GetMethod(nameof(Log))!;
     private static readonly System.Reflection.MethodInfo ShouldAbortMethod = typeof(LuaRuntime).GetMethod(nameof(ShouldAbort))!;
+    private static readonly System.Reflection.MethodInfo TicksMethod = typeof(LuaRuntime).GetMethod(nameof(Ticks))!;
+
+    public long Ticks() => Environment.TickCount64;
 
     public bool ShouldAbort() => _inStopHook
         ? Environment.TickCount64 >= Volatile.Read(ref _stopHookDeadline)
@@ -357,6 +387,7 @@ public sealed class LuaRuntime : IScriptRuntime
         string permission = operation switch
         {
             "sleep" => Permission.Timer, "capture" => Permission.VisionCapture, "ocr" => Permission.VisionOcr,
+            "find_image" => Permission.VisionMatch,
             "click" or "press_key" => Permission.ControlInput,
             "resolve_anomaly" => Permission.Agent,
             _ => throw new InvalidOperationException($"Unknown rug operation: {operation}")
@@ -366,7 +397,8 @@ public sealed class LuaRuntime : IScriptRuntime
         {
             "sleep" => SleepAsync(Int(args[4]), ct),
             "capture" => CaptureAsync(ct),
-            "ocr" => OcrAsync(Convert.ToString(args[4], CultureInfo.InvariantCulture), ct),
+            "ocr" => OcrAsync(args[4], args[5], ct),
+            "find_image" => FindImageAsync(args[4], args[5], args[6], ct),
             "click" => ClickAsync(Int(args[4]), Int(args[5]), ParseButton(args[6]), ParseMode(args[7]), ct),
             "press_key" => PressKeyAsync(Int(args[4]), args[5] is null ? 0 : Int(args[5]), ct),
             "resolve_anomaly" => ResolveAnomalyAsync(args),
@@ -375,6 +407,14 @@ public sealed class LuaRuntime : IScriptRuntime
     }
 
     private static int Int(object? value) => Convert.ToInt32(value, CultureInfo.InvariantCulture);
+
+    private static Rect? ParseRegion(object? value)
+    {
+        if (value is null) return null;
+        if (value is not LuaTable region) throw new ArgumentException("Region must be a table with x, y, width and height.");
+        return new Rect(Int(region["x"]), Int(region["y"]),
+            Int(region["width"]), Int(region["height"]));
+    }
 
     private static MouseButton ParseButton(object? value)
     {
@@ -423,17 +463,29 @@ public sealed class LuaRuntime : IScriptRuntime
 
     private async Task<object?> CaptureAsync(CancellationToken ct)
     {
-        _lastFrame = await _capture.GrabFrameAsync(ct).ConfigureAwait(false);
-        return _lastFrame;
+        return await _visual!.CaptureAsync(ct).ConfigureAwait(false);
     }
 
-    private async Task<object?> OcrAsync(string? engine, CancellationToken ct)
+    private async Task<object?> FindImageAsync(object? path, object? threshold, object? region, CancellationToken ct)
     {
-        if (_lastFrame is null) throw new InvalidOperationException("Call rug.capture before rug.ocr.");
-        OcrEngineType type = string.Equals(engine, "paddle", StringComparison.OrdinalIgnoreCase)
-            ? OcrEngineType.Paddle : OcrEngineType.WinRt;
-        var blocks = await _ocr.RecognizeFrameAsync(_lastFrame, type, cancellationToken: ct).ConfigureAwait(false);
-        return blocks;
+        string template = path as string ?? throw new ArgumentException("Template path must be a string.");
+        float score = threshold is null ? 0.8f : Convert.ToSingle(threshold, CultureInfo.InvariantCulture);
+        return await _visual!.FindImageAsync(template, score, ParseRegion(region), ct).ConfigureAwait(false);
+    }
+
+    private async Task<object?> OcrAsync(object? first, object? second, CancellationToken ct)
+    {
+        Rect? region = ParseRegion(first is LuaTable ? first : null);
+        OcrEngineType engine = OcrEngineType.WinRt;
+        string? language = second as string;
+        if (first is string selector)
+        {
+            if (selector.Equals("paddle", StringComparison.OrdinalIgnoreCase)) engine = OcrEngineType.Paddle;
+            else if (!selector.Equals("winrt", StringComparison.OrdinalIgnoreCase)) language = selector;
+        }
+        else if (first is not null && first is not LuaTable)
+            throw new ArgumentException("OCR region must be a table or an engine name.");
+        return await _visual!.OcrAsync(region, language, engine, ct).ConfigureAwait(false);
     }
 
     private object? ToLuaValue(object? value)
@@ -444,6 +496,35 @@ public sealed class LuaRuntime : IScriptRuntime
             table["width"] = frame.Width;
             table["height"] = frame.Height;
             table["stride"] = frame.Stride;
+            return table;
+        }
+        if (value is ImageFindResult hit)
+        {
+            LuaTable table = NewTable();
+            table["x"] = hit.X;
+            table["y"] = hit.Y;
+            table["similarity"] = hit.Similarity;
+            return table;
+        }
+        if (value is VisionOcrResult recognized)
+        {
+            LuaTable table = NewTable();
+            LuaTable blockTable = NewTable();
+            table["text"] = recognized.Text;
+            for (int i = 0; i < recognized.Blocks.Count; i++)
+            {
+                OcrTextBlock block = recognized.Blocks[i];
+                LuaTable item = NewTable();
+                item["text"] = block.Text;
+                item["score"] = block.Score;
+                item["x"] = block.BoundingBox.X;
+                item["y"] = block.BoundingBox.Y;
+                item["width"] = block.BoundingBox.Width;
+                item["height"] = block.BoundingBox.Height;
+                table[i + 1] = item;
+                blockTable[i + 1] = item;
+            }
+            table["blocks"] = blockTable;
             return table;
         }
         if (value is IReadOnlyList<OcrTextBlock> blocks)
@@ -528,6 +609,7 @@ public sealed class LuaRuntime : IScriptRuntime
             _lua?.Dispose();
             _lifetime?.Dispose();
             _operations.Clear();
+            _visual?.Dispose();
             if (_inputBridge is not null) await _inputBridge.DisposeAsync().ConfigureAwait(false);
             _disposed = true;
         }

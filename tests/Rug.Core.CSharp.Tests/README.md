@@ -12,6 +12,9 @@ native C-ABI through the single P/Invoke boundary in `Rug.UI.Core/Native/`.
 - 10 consecutive recognitions + explicit `GC.Collect`/`WaitForPendingFinalizers` to
   prove the `SafeHandle`s release native resources without a crash.
 - Optional `TemplateMatchService` check when `tmpl_search`/`tmpl_target` exist.
+- `--visual-only` generates a patterned BMP and managed BGRA frame, checks the
+  native in-memory match coordinate, then runs 1,000 matches while measuring
+  private memory and handle growth; it needs no external OCR sample images.
 
 Exit code is `0` on success, `1` if any check failed, `2` if no test image is found.
 
@@ -29,6 +32,7 @@ Exit code is `0` on success, `1` if any check failed, `2` if no test image is fo
 ```bat
 dotnet build ..\..\Rug.slnx -c Debug            :: or build Rug.Core in VS first
 dotnet run --project Rug.Core.CSharp.Tests.csproj -c Debug
+dotnet run --project Rug.Core.CSharp.Tests.csproj -c Debug -- --visual-only
 ```
 
 The process is x64 (`PlatformTarget=x64`) to match the native DLL. Paths are

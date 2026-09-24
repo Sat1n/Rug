@@ -10,6 +10,7 @@ using Rug.UI.Core.Contracts.Services;
 using Rug.UI.Core.Abstractions;
 using Rug.UI.Core.Exceptions;
 using Rug.UI.Core.Models;
+using Rug.UI.Core.Native;
 using Rug.UI.Core.Services;
 using Rug.UI.Core.Security;
 using RugTaskScheduler = Rug.UI.Core.Services.TaskScheduler;
@@ -68,6 +69,7 @@ foreach ((string call, string permission) in new[]
     ("rug.sleep(1)", Permission.Timer),
     ("rug.capture()", Permission.VisionCapture),
     ("rug.ocr('winrt')", Permission.VisionOcr),
+    ("rug.find_image('template.png')", Permission.VisionMatch),
     ("rug.click(1, 2)", Permission.ControlInput),
     ("rug.press_key(65)", Permission.ControlInput),
     ("rug.agent.resolve_anomaly('denied', 'detail')", Permission.Agent)
@@ -83,6 +85,132 @@ foreach ((string call, string permission) in new[]
           "permission mismatch for " + call);
     Check(deniedCapture.GrabCalls == 0, "denied call reached capture service");
 }
+
+string visionRoot = Path.Combine(AppContext.BaseDirectory, "vision-test-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(visionRoot);
+try
+{
+    await File.WriteAllBytesAsync(Path.Combine(visionRoot, "template.png"), [137, 80, 78, 71]);
+    await File.WriteAllTextAsync(Path.Combine(visionRoot, "broken.png"), "not an image");
+    var visionManifest = new PluginManifest([Permission.VisionCapture, Permission.VisionMatch, Permission.VisionOcr,
+        Permission.Timer]) { PluginDirectory = visionRoot };
+    var visionGate = new PermissionInterceptor(visionManifest, NullLogger.Instance);
+    var matcher = new FakeTemplateMatch();
+    var ocr = new FakeOcr();
+    var directCapture = new SequenceCapture(_ => VisualFrame(true));
+    using (var visual = new VisualEngineBridge(directCapture, ocr, matcher, visionGate, visionRoot))
+    {
+        Check((await visual.CaptureAsync())?.Width == 4, "visual capture did not cache the WGC frame");
+        ImageFindResult? hit = await visual.FindImageAsync("template.png", 0.9f, new Rect(1, 1, 3, 2));
+        Check(hit is { X: 2, Y: 2 } && hit.Similarity >= 0.9 &&
+              matcher.LastWidth == 3 && matcher.LastHeight == 2,
+              "region match did not restore physical client coordinates");
+        VisionOcrResult recognized = await visual.OcrAsync(new Rect(1, 1, 3, 2), "zh-Hans");
+        Check(recognized.Text == "ready" && recognized.Blocks.Single().BoundingBox.X == 1 &&
+              recognized.Blocks.Single().BoundingBox.Y == 1 &&
+              ocr.LastFrame?.Width == 3 && ocr.LastLanguage == "zh-Hans" &&
+              ocr.LastEngine == OcrEngineType.WinRt,
+              "region OCR lost its language or full-frame bounding box");
+        try { await visual.FindImageAsync("missing.png"); throw new Exception("missing template accepted"); }
+        catch (FileNotFoundException) { }
+        try { await visual.FindImageAsync("broken.png"); throw new Exception("invalid template accepted"); }
+        catch (InvalidDataException ex) when (ex.Message.Contains("unreadable")) { }
+        try { await visual.FindImageAsync("../outside.png"); throw new Exception("template escaped plugin root"); }
+        catch (PermissionDeniedException ex) when (ex.Permission == Permission.FileSystem) { }
+        try { await visual.FindImageAsync("template.png", region: new Rect(3, 2, 2, 2));
+              throw new Exception("out-of-bounds region accepted"); }
+        catch (ArgumentOutOfRangeException) { }
+    }
+
+    using (var deniedVisual = new VisualEngineBridge(new SequenceCapture(_ => VisualFrame(true)),
+        new FakeOcr(), matcher, new PermissionInterceptor(new PluginManifest([]), NullLogger.Instance), visionRoot))
+    {
+        try { await deniedVisual.CaptureAsync(); throw new Exception("capture without grant succeeded"); }
+        catch (PermissionDeniedException ex) when (ex.Permission == Permission.VisionCapture) { }
+        try { await deniedVisual.FindImageAsync("template.png"); throw new Exception("match without grant succeeded"); }
+        catch (PermissionDeniedException ex) when (ex.Permission == Permission.VisionMatch) { }
+        try { await deniedVisual.OcrAsync(); throw new Exception("OCR without grant succeeded"); }
+        catch (PermissionDeniedException ex) when (ex.Permission == Permission.VisionOcr) { }
+    }
+
+    await File.WriteAllTextAsync(path, """
+        function on_tick()
+          local frame = rug.capture()
+          assert(frame.width == 4 and frame.height == 3)
+          local hit = rug.find_image('template.png', 0.9, {x=1,y=1,width=3,height=2})
+          assert(hit.x == 2 and hit.y == 2 and hit.similarity > 0.9)
+          local result = rug.ocr({x=1,y=1,width=3,height=2}, 'zh-Hans')
+          assert(result.text == 'ready' and #result == 1 and result.blocks[1].x == 1)
+        end
+        """);
+    await using (var runtime = new LuaRuntime(new SequenceCapture(_ => VisualFrame(true)),
+        new FakeOcr(), new FakeInput(), NullLogger<LuaRuntime>.Instance, templateMatcher: matcher))
+    {
+        await runtime.InitializeAsync(path, visionManifest);
+        ScriptExecutionResult result = await DriveToEndAsync(runtime);
+        Check(result.State == ScriptState.Stopped, "Lua visual result tables lost coordinates or OCR text");
+    }
+
+    await File.WriteAllTextAsync(path, """
+        function on_tick()
+          local hit = rug.wait_image('template.png', 500, 0.8, 20)
+          assert(hit and hit.x == 2 and hit.y == 2)
+        end
+        """);
+    var appearing = new SequenceCapture(index => VisualFrame(index >= 3));
+    await using (var runtime = new LuaRuntime(appearing, new FakeOcr(), new FakeInput(),
+        NullLogger<LuaRuntime>.Instance, templateMatcher: matcher))
+    {
+        await runtime.InitializeAsync(path, visionManifest);
+        ScriptExecutionResult result = await DriveToEndAsync(runtime);
+        Check(result.State == ScriptState.Stopped && appearing.GrabCalls == 3,
+              "wait_image did not return promptly when the template appeared");
+    }
+
+    await File.WriteAllTextAsync(path, """
+        function on_tick()
+          assert(rug.wait_image('template.png', 200, 0.8, 30) == nil)
+        end
+        """);
+    var absent = new SequenceCapture(_ => VisualFrame(false));
+    await using (var runtime = new LuaRuntime(absent, new FakeOcr(), new FakeInput(),
+        NullLogger<LuaRuntime>.Instance, templateMatcher: matcher))
+    {
+        await runtime.InitializeAsync(path, visionManifest);
+        var watch = Stopwatch.StartNew();
+        ScriptExecutionResult result = await DriveToEndAsync(runtime);
+        Check(result.State == ScriptState.Stopped && absent.GrabCalls >= 2 &&
+              watch.ElapsedMilliseconds >= 180 && watch.ElapsedMilliseconds < 1000,
+              "wait_image timeout blocked or returned too early");
+    }
+
+    WeakReference<CapturedFrame>? firstFrame = null;
+    var repeatedCapture = new SequenceCapture(index =>
+    {
+        var frame = LeakFrame();
+        if (index == 1) firstFrame = new WeakReference<CapturedFrame>(frame);
+        return frame;
+    });
+    var repeatedMatch = new FakeTemplateMatch();
+    using (var visual = new VisualEngineBridge(repeatedCapture, new FakeOcr(), repeatedMatch,
+        visionGate, visionRoot))
+    {
+        for (int i = 0; i < 1000; i++)
+        {
+            await visual.CaptureAsync();
+            Check(await visual.FindImageAsync("template.png") is not null,
+                  "repeated in-memory matching lost its frame");
+        }
+        Check(repeatedCapture.GrabCalls == 1000 && repeatedMatch.MatchCalls == 1000,
+              "capture/match stress loop did not complete");
+    }
+    GC.Collect();
+    GC.WaitForPendingFinalizers();
+    GC.Collect();
+    Check(firstFrame is not null && !firstFrame.TryGetTarget(out _),
+          "visual bridge retained an old capture frame after 1,000 iterations");
+}
+finally { Directory.Delete(visionRoot, recursive: true); }
 
 await File.WriteAllTextAsync(path, "function on_tick() rug.agent.resolve_anomaly('pending', 'detail'); rug.log('unreachable') end");
 var anomalyGate = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -525,6 +653,30 @@ static void Check(bool condition, string message)
     if (!condition) throw new Exception(message);
 }
 
+static async Task<ScriptExecutionResult> DriveToEndAsync(LuaRuntime runtime)
+{
+    ScriptExecutionResult result = await runtime.StepAsync();
+    for (int step = 0; result.State == ScriptState.Yielded && step < 128; step++)
+        result = await runtime.ResumeAsync();
+    if (result.State == ScriptState.Faulted)
+        throw new Exception("Visual Lua script faulted", result.Error);
+    return result;
+}
+
+static CapturedFrame VisualFrame(bool visible)
+{
+    var pixels = new byte[4 * 3 * 4];
+    if (visible) pixels[(2 * 4 + 2) * 4] = 200;
+    return new CapturedFrame(pixels, 4, 3, 16);
+}
+
+static CapturedFrame LeakFrame()
+{
+    var pixels = new byte[64 * 64 * 4];
+    pixels[0] = 200;
+    return new CapturedFrame(pixels, 64, 64, 256);
+}
+
 static async Task WaitUntilAsync(Func<bool> condition)
 {
     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
@@ -563,12 +715,61 @@ sealed class FakeCapture : ICaptureService
     public void Complete() => _frame.SetResult(new CapturedFrame([10, 20, 30, 255], 1, 1, 4));
 }
 
+sealed class SequenceCapture(Func<int, CapturedFrame?> frameFactory) : ICaptureService
+{
+    public int GrabCalls { get; private set; }
+    public bool IsCapturing => true;
+    public Task StartAsync(nint hwnd, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task<CapturedFrame?> GrabFrameAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(frameFactory(++GrabCalls));
+    }
+    public Task StopAsync() => Task.CompletedTask;
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}
+
+sealed class FakeTemplateMatch : ITemplateMatchService
+{
+    public int MatchCalls { get; private set; }
+    public int LastWidth { get; private set; }
+    public int LastHeight { get; private set; }
+    public Task<IReadOnlyList<TemplateMatchResult>> MatchAsync(string targetImagePath,
+        string templateImagePath, float threshold = 0.8f,
+        CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+    public Task<IReadOnlyList<TemplateMatchResult>> MatchFrameAsync(CapturedFrame frame,
+        string templateImagePath, float threshold = 0.8f,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        MatchCalls++;
+        LastWidth = frame.Width;
+        LastHeight = frame.Height;
+        if (Path.GetFileName(templateImagePath) == "broken.png")
+            throw new RugNativeException("Rug_MatchTemplate", RugStatus.ErrInvalidParam);
+        for (int y = 0; y < frame.Height; y++)
+            for (int x = 0; x < frame.Width; x++)
+                if (frame.Pixels[y * frame.Stride + x * 4] == 200)
+                    return Task.FromResult<IReadOnlyList<TemplateMatchResult>>([new(x, y, 0.95)]);
+        return Task.FromResult<IReadOnlyList<TemplateMatchResult>>([]);
+    }
+}
+
 sealed class FakeOcr : IOcrService
 {
+    public CapturedFrame? LastFrame { get; private set; }
+    public string? LastLanguage { get; private set; }
+    public OcrEngineType LastEngine { get; private set; }
     public Task<IReadOnlyList<OcrTextBlock>> RecognizeAsync(string imagePath, OcrEngineType engineType, string? modelId = null, CancellationToken cancellationToken = default)
         => Task.FromResult<IReadOnlyList<OcrTextBlock>>([]);
     public Task<IReadOnlyList<OcrTextBlock>> RecognizeFrameAsync(CapturedFrame frame, OcrEngineType engineType, string? modelId = null, CancellationToken cancellationToken = default)
-        => Task.FromResult<IReadOnlyList<OcrTextBlock>>([new("ready", 1, new Rect(0, 0, 1, 1))]);
+    {
+        LastFrame = frame;
+        LastLanguage = modelId;
+        LastEngine = engineType;
+        return Task.FromResult<IReadOnlyList<OcrTextBlock>>([new("ready", 1, new Rect(0, 0, 1, 1))]);
+    }
     public IReadOnlyList<string> ListPaddleModelIds() => [];
 }
 

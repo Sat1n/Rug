@@ -11,6 +11,8 @@
 // =============================================================================
 
 using System.Text;
+using System.Buffers.Binary;
+using System.Diagnostics;
 
 using Rug.UI.Core.Models;
 using Rug.UI.Core.Native;
@@ -22,9 +24,14 @@ internal static class Program
 {
     private static int s_failures;
 
-    private static async Task<int> Main()
+    private static async Task<int> Main(string[] args)
     {
         Console.OutputEncoding = Encoding.UTF8;
+        if (args.Contains("--visual-only", StringComparer.Ordinal))
+        {
+            await InMemoryTemplateMatchAsync();
+            return s_failures == 0 ? 0 : 1;
+        }
 
         string root = FindRepoRoot();
         string imagesDir = Path.Combine(root, "tests", "test_images");
@@ -145,6 +152,98 @@ internal static class Program
             Fail($"template match threw {ex.GetType().Name}: {ex.Message}");
         }
         Console.WriteLine();
+    }
+
+    private static async Task InMemoryTemplateMatchAsync()
+    {
+        Console.WriteLine("=== in-memory template match (Task 2.3) ===");
+        string path = Path.Combine(Path.GetTempPath(), "rug-template-" + Guid.NewGuid().ToString("N") + ".bmp");
+        try
+        {
+            const int width = 16, height = 16, stride = width * 4;
+            byte[] pixels = new byte[stride * height];
+            for (int pixel = 0; pixel < width * height; pixel++)
+            {
+                pixels[pixel * 4] = 10;
+                pixels[pixel * 4 + 1] = 20;
+                pixels[pixel * 4 + 2] = 30;
+                pixels[pixel * 4 + 3] = 255;
+            }
+            var bmpPixels = new byte[3 * 3 * 3];
+            for (int y = 0; y < 3; y++)
+                for (int x = 0; x < 3; x++)
+                {
+                    int blue = 30 + x * 53 + y * 7;
+                    int green = 35 + x * 17 + y * 39;
+                    int red = 40 + x * 13 + y * 47;
+                    int target = (7 + y) * stride + (5 + x) * 4;
+                    pixels[target] = (byte)blue;
+                    pixels[target + 1] = (byte)green;
+                    pixels[target + 2] = (byte)red;
+                    int template = (y * 3 + x) * 3;
+                    bmpPixels[template] = (byte)blue;
+                    bmpPixels[template + 1] = (byte)green;
+                    bmpPixels[template + 2] = (byte)red;
+                }
+            await File.WriteAllBytesAsync(path, CreateBmp(bmpPixels));
+            var frame = new CapturedFrame(pixels, width, height, stride);
+            var matcher = new TemplateMatchService();
+            IReadOnlyList<TemplateMatchResult> warmup = await matcher.MatchFrameAsync(frame, path, 0.9f);
+            if (!warmup.Any(hit => hit.X == 5 && hit.Y == 7 && hit.Score > 0.99))
+            {
+                Fail("native MatchFrameAsync did not find the synthetic template at (5,7)");
+                return;
+            }
+            using Process process = Process.GetCurrentProcess();
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            process.Refresh();
+            long baselineBytes = process.PrivateMemorySize64;
+            int baselineHandles = process.HandleCount;
+            for (int i = 0; i < 1000; i++)
+            {
+                IReadOnlyList<TemplateMatchResult> hits = await matcher.MatchFrameAsync(frame, path, 0.9f);
+                if (hits.Count == 0 || hits[0].X != 5 || hits[0].Y != 7)
+                {
+                    Fail($"native frame match changed at iteration {i}");
+                    return;
+                }
+            }
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            process.Refresh();
+            long growth = process.PrivateMemorySize64 - baselineBytes;
+            int handleGrowth = process.HandleCount - baselineHandles;
+            Console.WriteLine($"  1,000 matches: private-memory delta={growth:N0} bytes, handle delta={handleGrowth}");
+            if (growth > 32 * 1024 * 1024 || handleGrowth > 32)
+                Fail("native frame matching retained excessive memory or handles");
+        }
+        catch (Exception ex)
+        {
+            Fail($"native frame match threw {ex.GetType().Name}: {ex.Message}");
+        }
+        finally { File.Delete(path); }
+    }
+
+    private static byte[] CreateBmp(byte[] bgr)
+    {
+        const int width = 3, height = 3, rowStride = 12, offset = 54;
+        byte[] bmp = new byte[offset + rowStride * height];
+        bmp[0] = (byte)'B'; bmp[1] = (byte)'M';
+        BinaryPrimitives.WriteInt32LittleEndian(bmp.AsSpan(2), bmp.Length);
+        BinaryPrimitives.WriteInt32LittleEndian(bmp.AsSpan(10), offset);
+        BinaryPrimitives.WriteInt32LittleEndian(bmp.AsSpan(14), 40);
+        BinaryPrimitives.WriteInt32LittleEndian(bmp.AsSpan(18), width);
+        BinaryPrimitives.WriteInt32LittleEndian(bmp.AsSpan(22), height);
+        BinaryPrimitives.WriteUInt16LittleEndian(bmp.AsSpan(26), 1);
+        BinaryPrimitives.WriteUInt16LittleEndian(bmp.AsSpan(28), 24);
+        BinaryPrimitives.WriteInt32LittleEndian(bmp.AsSpan(34), rowStride * height);
+        for (int y = 0; y < height; y++)
+            Buffer.BlockCopy(bgr, (height - 1 - y) * width * 3,
+                bmp, offset + y * rowStride, width * 3);
+        return bmp;
     }
 
     private static async Task InputControllerAsync()
