@@ -22,7 +22,8 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 > `Native/WindowNative.cs`, `Models/Capture.cs`, `Models/WindowInfo.cs`,
 > `Services/CaptureService.cs`, `Services/WindowSpyService.cs`, `OcrService.RecognizeFrameAsync`.
 > `FileService`/`Json` pre-exist.
-> `TaskScheduler` / `PluginLoader` / Lua engine are **Phase 2 targets**.
+> `LuaRuntime` coroutine bridge is implemented (Phase 2, Task 2.1.1).
+> `TaskScheduler` / `PluginLoader` / permission interceptor are subsequent Phase 2 targets.
 
 ## Internal Topology
 
@@ -42,8 +43,36 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 | `Services/InputService.cs` | Async humanized input (Task.Run / MTA): mouse move/click/drag, key press, `SendText`, dry-run `PlanTrajectoryAsync`; `SetTargetAsync(hwnd, background)` binds the window + delivery mode. Mouse coords are **client-space**, confined to the window by native |
 | `Services/CaptureService.cs` | Async WGC capture (Task.Run / MTA): start/stop a native capturer, copy each frame to managed BGRA8, free the native buffer |
 | `Services/WindowSpyService.cs` | Resolve the window under the cursor → `WindowInfo` (incl. its monitor via `MonitorFromWindow`); client-size query + `ClientPointUnderCursor` for the scripting coordinate picker. All physical pixels (PMv2-aware host) |
+| `Abstractions/IScriptRuntime.cs` · `Models/ScriptExecutionResult.cs` · `Models/PluginManifest.cs` | Script lifecycle/state contract and manifest-supplied permissions/configuration |
+| `Services/LuaRuntime.cs` | NLua coroutine bridge: `StepAsync` yields a `rug.*` operation, starts its .NET task, and `ResumeAsync` awaits that task before resuming Lua; all Lua-state access is serialized |
 | `Services/FileService.cs` · `Helpers/Json.cs` | File IO / JSON helpers |
-| `TaskScheduler` / `PluginLoader` / Lua engine / permission interceptor | **planned (Phase 2)** |
+| `TaskScheduler` / `PluginLoader` / centralized permission interceptor | **planned (Phase 2)** |
+
+## Lua coroutine contract (Task 2.1.1)
+
+* `InitializeAsync` compiles a script into a Lua coroutine. The script body runs first;
+  a declared `on_tick()` then runs once in the same coroutine. The future scheduler
+  can create a fresh runtime for each tick. `StepAsync` begins execution and returns
+  on the first async yield. `ResumeAsync` asynchronously waits for exactly one pending
+  operation and drives the coroutine to the next yield or completion. Neither holds a
+  thread during `Task.Delay` or a pending service call. `Stop()` cancels the linked
+  lifetime token and promptly interrupts a pending `ResumeAsync`.
+* `rug.sleep(ms)` requires `timer`; `rug.capture()` requires `vision.capture` and
+  returns frame width/height/stride metadata; `rug.ocr(engine_type)` requires
+  `vision.ocr`, recognizes the most recently captured frame, and returns an array of
+  text/score/box tables. `rug.click(x,y)` and `rug.press_key(vk)` require `input`.
+  The host starts an `ICaptureService` session before `rug.capture()` is called.
+  An input-enabled manifest must provide `TargetWindow`; initialization binds it via
+  `IInputService.SetTargetAsync`. Click coordinates are client-space and confinement
+  is performed by the input service.
+  `rug.get_config(key)` reads manifest configuration; `rug.log(level,message)` routes
+  through `ILogger` (one argument defaults to info). Permissions default to denied.
+* Lua runs on a worker thread behind a state gate. `io`, `os`, `package`, `require`,
+  `load`, `debug` and NLua CLR globals are removed before script execution. The
+  permission bridge applies to `rug.*`; a full untrusted-code sandbox and
+  CPU preemption of non-yielding Lua are future work.
+* The bridge is exercised by [script tests](../tests/Rug.UI.Core.Script.Tests/README.md)
+  using fake services; no native DLL or target window is needed.
 
 ## Native Interop & Memory Safety (CRITICAL)
 
