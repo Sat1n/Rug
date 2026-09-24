@@ -12,12 +12,12 @@ name: PR Auto-Label
 
 on:
   pull_request:
-    types: [opened, edited, reopened]
+    types: [opened, edited, synchronize, reopened]
 
 permissions:
   contents: read
-  pull-requests: write
-  administration: write   # allows creating repo labels on demand
+  issues: write           # label create/apply
+  pull-requests: write    # add/remove labels on the PR
 
 jobs:
   label:
