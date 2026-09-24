@@ -16,20 +16,45 @@ namespace Rug.UI.Core.Services;
 public sealed class LuaRuntime : IScriptRuntime
 {
     private const string Bridge = """
+        local luaYield, luaCreate, luaResume, luaStatus = coroutine.yield, coroutine.create, coroutine.resume, coroutine.status
+        local pack, luaType, raise = table.pack, type, error
+        local getConfig, writeLog, shouldAbort = __rug_get_config, __rug_log, __rug_should_abort
+        local sethook = debug.sethook
+        local thread, chunk
         rug = {}
-        function rug.sleep(ms) return coroutine.yield('__rug', 'sleep', ms) end
-        function rug.capture() return coroutine.yield('__rug', 'capture') end
-        function rug.ocr(engine_type) return coroutine.yield('__rug', 'ocr', engine_type) end
-        function rug.click(x, y) return coroutine.yield('__rug', 'click', x, y) end
-        function rug.press_key(key) return coroutine.yield('__rug', 'press_key', key) end
-        function rug.get_config(key) return __rug_get_config(key) end
+        function rug.sleep(ms) return luaYield('__rug', 'sleep', ms) end
+        function rug.capture() return luaYield('__rug', 'capture') end
+        function rug.ocr(engine_type) return luaYield('__rug', 'ocr', engine_type) end
+        function rug.click(x, y) return luaYield('__rug', 'click', x, y) end
+        function rug.press_key(key) return luaYield('__rug', 'press_key', key) end
+        function rug.get_config(key) return getConfig(key) end
         function rug.log(level, message)
           if message == nil then message, level = level, 'info' end
-          return __rug_log(level, message)
+          return writeLog(level, message)
         end
         function __rug_drive(value)
-          local r = table.pack(coroutine.resume(__rug_thread, value))
-          return coroutine.status(__rug_thread), r
+          local r = pack(luaResume(thread, value))
+          return luaStatus(thread), r
+        end
+        local function watchdog()
+          if shouldAbort() then raise('__rug_watchdog_abort', 0) end
+        end
+        local function newThread(body)
+          thread = luaCreate(body)
+          sethook(thread, watchdog, '', 10000)
+        end
+        function __rug_set_chunk(value) chunk = value end
+        function __rug_prepare_oneshot()
+          newThread(function() chunk(); if luaType(on_tick) == 'function' then on_tick() end end)
+        end
+        function __rug_prepare_init()
+          newThread(function() chunk(); if luaType(on_init) == 'function' then on_init() end end)
+        end
+        function __rug_begin_tick()
+          newThread(function() if luaType(on_tick) == 'function' then on_tick() end end)
+        end
+        function __rug_begin_stop()
+          newThread(function() if luaType(on_stop) == 'function' then on_stop() end end)
         end
         """;
 
@@ -46,11 +71,17 @@ public sealed class LuaRuntime : IScriptRuntime
     private PermissionInterceptor? _permissions;
     private Lua? _lua;
     private LuaFunction? _drive;
+    private LuaFunction? _prepareInit;
+    private LuaFunction? _beginTick;
+    private LuaFunction? _beginStop;
     private CapturedFrame? _lastFrame;
     private Guid? _pendingId;
     private ScriptState _state = ScriptState.Uninitialized;
     private volatile bool _paused;
     private bool _disposed;
+    private bool _lifecycleMode;
+    private volatile bool _inStopHook;
+    private long _stopHookDeadline;
 
     public LuaRuntime(ICaptureService capture, IOcrService ocr, IInputService input, ILogger<LuaRuntime> logger)
     {
@@ -87,12 +118,18 @@ public sealed class LuaRuntime : IScriptRuntime
                 _lua = new Lua();
                 _lua.RegisterFunction("__rug_get_config", this, GetConfigMethod);
                 _lua.RegisterFunction("__rug_log", this, LogMethod);
+                _lua.RegisterFunction("__rug_should_abort", this, ShouldAbortMethod);
                 _lua.DoString(Bridge);
                 _lua["__rug_source"] = source;
-                _lua.DoString("local chunk = assert(load(__rug_source, '@plugin', 't', _ENV)); __rug_thread = coroutine.create(function() chunk(); if type(on_tick) == 'function' then on_tick() end end); __rug_source = nil");
-                // Remove ambient file/process and CLR access from script globals.
-                _lua.DoString("io=nil; os=nil; package=nil; require=nil; dofile=nil; loadfile=nil; load=nil; debug=nil; luanet=nil; import=nil; load_assembly=nil; collectgarbage=nil");
+                var chunk = (LuaFunction)_lua.DoString("return assert(load(__rug_source, '@plugin', 't', _ENV))")![0];
+                ((LuaFunction)_lua["__rug_set_chunk"]!).Call(chunk);
+                ((LuaFunction)_lua["__rug_prepare_oneshot"]!).Call();
                 _drive = (LuaFunction)_lua["__rug_drive"]!;
+                _prepareInit = (LuaFunction)_lua["__rug_prepare_init"]!;
+                _beginTick = (LuaFunction)_lua["__rug_begin_tick"]!;
+                _beginStop = (LuaFunction)_lua["__rug_begin_stop"]!;
+                // Remove ambient file/process and CLR access from script globals.
+                _lua.DoString("__rug_source=nil; __rug_set_chunk=nil; __rug_prepare_oneshot=nil; __rug_prepare_init=nil; __rug_begin_tick=nil; __rug_begin_stop=nil; __rug_drive=nil; __rug_should_abort=nil; __rug_get_config=nil; __rug_log=nil; coroutine=nil; io=nil; os=nil; package=nil; require=nil; dofile=nil; loadfile=nil; load=nil; debug=nil; luanet=nil; import=nil; load_assembly=nil; collectgarbage=nil");
             }, ct).ConfigureAwait(false);
             ChangeState(ScriptState.Ready);
         }
@@ -106,6 +143,68 @@ public sealed class LuaRuntime : IScriptRuntime
 
     private static readonly System.Reflection.MethodInfo GetConfigMethod = typeof(LuaRuntime).GetMethod(nameof(GetConfig))!;
     private static readonly System.Reflection.MethodInfo LogMethod = typeof(LuaRuntime).GetMethod(nameof(Log))!;
+    private static readonly System.Reflection.MethodInfo ShouldAbortMethod = typeof(LuaRuntime).GetMethod(nameof(ShouldAbort))!;
+
+    public bool ShouldAbort() => _inStopHook
+        ? Environment.TickCount64 >= Volatile.Read(ref _stopHookDeadline)
+        : _lifetime?.IsCancellationRequested == true;
+
+    public async Task PrepareLifecycleAsync()
+    {
+        await _driveGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (State != ScriptState.Ready || _lifecycleMode) throw new InvalidOperationException("Lifecycle must be prepared before execution.");
+            await _gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                _prepareInit!.Call();
+                _lifecycleMode = true;
+            }
+            finally { _gate.Release(); }
+        }
+        finally { _driveGate.Release(); }
+    }
+
+    public async Task BeginTickAsync()
+    {
+        await _driveGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (!_lifecycleMode || State != ScriptState.Ready || _pendingId is not null)
+                throw new InvalidOperationException("Previous lifecycle hook has not completed.");
+            await _gate.WaitAsync().ConfigureAwait(false);
+            try { _beginTick!.Call(); }
+            finally { _gate.Release(); }
+        }
+        finally { _driveGate.Release(); }
+    }
+
+    public async Task InvokeStopHookAsync(TimeSpan timeout)
+    {
+        if (!_lifecycleMode || _lua is null) return;
+        if (timeout <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(timeout));
+        await _driveGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await _gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                _inStopHook = true;
+                Volatile.Write(ref _stopHookDeadline, Environment.TickCount64 + (long)timeout.TotalMilliseconds);
+                await Task.Run(() =>
+                {
+                    _beginStop!.Call();
+                    object[] response = _drive!.Call(new object?[] { null });
+                    var values = (LuaTable)response[1];
+                    if (values[1] is not true || !Equals(response[0], "dead"))
+                        throw new InvalidOperationException("on_stop failed or yielded.");
+                }).ConfigureAwait(false);
+            }
+            finally { _inStopHook = false; _gate.Release(); }
+        }
+        finally { _driveGate.Release(); }
+    }
 
     public object? GetConfig(string key) => _manifest?.Configuration?.GetValueOrDefault(key);
 
@@ -193,11 +292,15 @@ public sealed class LuaRuntime : IScriptRuntime
         string status = Convert.ToString(result[0], CultureInfo.InvariantCulture)!;
         var values = (LuaTable)result[1];
         if (values[1] is not true)
+        {
+            if (token.IsCancellationRequested) throw new OperationCanceledException(token);
             throw new InvalidOperationException(Convert.ToString(values[2], CultureInfo.InvariantCulture));
+        }
         if (status == "dead")
         {
-            ChangeState(ScriptState.Stopped);
-            return new(ScriptState.Stopped, values[2]);
+            ScriptState next = _lifecycleMode ? ScriptState.Ready : ScriptState.Stopped;
+            ChangeState(next);
+            return new(next, values[2]);
         }
         if (!Equals(values[2], "__rug"))
             throw new InvalidOperationException("Unexpected Lua yield; use rug.* asynchronous APIs.");
@@ -341,6 +444,9 @@ public sealed class LuaRuntime : IScriptRuntime
         try
         {
             _drive?.Dispose();
+            _prepareInit?.Dispose();
+            _beginTick?.Dispose();
+            _beginStop?.Dispose();
             _lua?.Dispose();
             _lifetime?.Dispose();
             _operations.Clear();

@@ -11,3 +11,10 @@ The same executable creates temporary plugin directories to check valid
 `manifest.json`/`config.json` parsing, all four UI control types and typed defaults,
 malformed JSON tolerance, entry path traversal rejection, sandbox global removal,
 and audited `PermissionDeniedException` behavior.
+
+Scheduler integration tests use real NLua with fake capture/input services to check
+capture startup before `on_init`, periodic `on_tick`, `on_stop` cleanup, independent
+pause/stop across three instances, and watchdog interruption of tight loops in
+both `on_init` and `on_tick`. The script also attempts to replace the cancellation
+callback, confirming the watchdog uses its private reference. A pending capture
+startup is canceled and cleaned up when the scheduler is disposed.

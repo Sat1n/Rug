@@ -16,6 +16,7 @@ public sealed record PluginManifest
     [JsonIgnore] public IReadOnlyDictionary<string, object?>? Configuration { get; init; }
     [JsonIgnore] public nint TargetWindow { get; init; }
     [JsonIgnore] public bool BackgroundInput { get; init; } = true;
+    [JsonIgnore] public string PluginDirectory { get; init; } = "";
 
     public PluginManifest() { }
 

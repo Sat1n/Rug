@@ -22,9 +22,9 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 > `Native/WindowNative.cs`, `Models/Capture.cs`, `Models/WindowInfo.cs`,
 > `Services/CaptureService.cs`, `Services/WindowSpyService.cs`, `OcrService.RecognizeFrameAsync`.
 > `FileService`/`Json` pre-exist.
-> `LuaRuntime` coroutine bridge (Task 2.1.1) and plugin manifest/config loading
-> with permission interception (Task 2.1.2) are implemented.
-> `TaskScheduler` and host lifecycle integration are subsequent Phase 2 targets.
+> `LuaRuntime` coroutine bridge (Task 2.1.1), plugin manifest/config loading and
+> permission interception (Task 2.1.2), and multi-instance lifecycle scheduling
+> with a Lua instruction watchdog (Task 2.1.3) are implemented.
 
 ## Internal Topology
 
@@ -49,8 +49,29 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 | `Services/LuaRuntime.cs` | NLua coroutine bridge: `StepAsync` yields a `rug.*` operation, starts its .NET task, and `ResumeAsync` awaits that task before resuming Lua; all Lua-state access is serialized |
 | `Abstractions/IPluginManager.cs` · `Services/PluginManager.cs` | Scan immediate plugin directories, validate manifest/entry/config, cache valid plugins and UI schema; skip malformed plugins with a warning |
 | `Security/PermissionInterceptor.cs` · `Exceptions/PermissionDeniedException.cs` | Exact-match permission checks before sensitive API tasks start; denied calls log an audit warning and fault the script |
+| `Abstractions/ITaskScheduler.cs` · `Models/TaskExecutionContext.cs` · `Services/TaskScheduler.cs` | Concurrent plugin/window instances, per-instance capture/input/runtime ownership, pause/resume/stop state and periodic lifecycle dispatch |
 | `Services/FileService.cs` · `Helpers/Json.cs` | File IO / JSON helpers |
-| `TaskScheduler` / host lifecycle integration | **planned (Phase 2)** |
+
+## Task lifecycle and watchdog (Task 2.1.3)
+
+* `TaskScheduler.StartTaskAsync(pluginId, hwnd)` gets a scanned plugin, creates
+  independent capture/input/runtime instances through factories, starts capture
+  before Lua can call `rug.capture()`, prepares the lifecycle coroutine, then
+  registers the instance and returns its ID. A background runner executes
+  `on_init()` once, followed by `on_tick()` at a configurable interval. The script
+  body defines hooks on its first run. Missing hooks are no-ops.
+* `PauseTask` suspends progress at the next coroutine boundary and preserves the
+  pending operation; `ResumeTask` continues it. `StopTaskAsync` cancels the instance,
+  awaits the runner, invokes `on_stop()` with a bounded watchdog, stops/disposes
+  capture, and disposes Lua/input resources. `on_stop()` is synchronous; yielding
+  from it is rejected during cleanup. Instances are removed after cleanup.
+* The host captures `debug.sethook` before removing Lua's `debug` and `coroutine`
+  globals. Each host-created coroutine gets a count hook that checks cancellation
+  every 10,000 Lua instructions. The hook and coroutine handles live in private
+  Lua closures held by C#, so script globals cannot replace the cancellation
+  callback or create an unhooked coroutine. A tight loop is interrupted once
+  `Stop()` cancels its token; the stop hook has its own deadline. The capture and
+  input factories must provide distinct service instances for each task.
 
 ## Plugin declarations (Task 2.1.2)
 
@@ -66,7 +87,7 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   optional. Slider fields need `min`/`max` and may set `step`; ComboBox fields need
   string `options` containing the default. `PluginConfig.Defaults` exposes validated
   Boolean, string or numeric values for host-side rendering and initialization.
-* `Configuration`, `TargetWindow`, and `BackgroundInput` on `PluginManifest` are
+* `Configuration`, `TargetWindow`, `BackgroundInput`, and `PluginDirectory` on `PluginManifest` are
   runtime fields ignored during JSON parsing. The manager fills `Configuration`
   with typed config defaults; the host may override values and supplies the window.
   Permissions are copied into `PermissionInterceptor` on initialization and checked
@@ -77,9 +98,10 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 
 ## Lua coroutine contract (Task 2.1.1)
 
-* `InitializeAsync` compiles a script into a Lua coroutine. The script body runs first;
-  a declared `on_tick()` then runs once in the same coroutine. The future scheduler
-  can create a fresh runtime for each tick. `StepAsync` begins execution and returns
+* `InitializeAsync` compiles a script into a Lua coroutine. In one-shot mode the
+  script body runs first, followed by `on_tick()` once. In scheduler mode,
+  `PrepareLifecycleAsync` changes the initial hook to `on_init()` and
+  `BeginTickAsync` creates a fresh coroutine for each tick. `StepAsync` begins execution and returns
   on the first async yield. `ResumeAsync` asynchronously waits for exactly one pending
   operation and drives the coroutine to the next yield or completion. Neither holds a
   thread during `Task.Delay` or a pending service call. `Stop()` cancels the linked
@@ -95,9 +117,9 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   `rug.get_config(key)` reads manifest configuration; `rug.log(level,message)` routes
   through `ILogger` (one argument defaults to info). Permissions default to denied.
 * Lua runs on a worker thread behind a state gate. `io`, `os`, `package`, `require`,
-  `load`, `debug`, `collectgarbage` and NLua CLR globals are removed before script
-  execution. Host services are only reachable through gated `rug.*` operations.
-  CPU preemption of non-yielding Lua and capture-session ownership are Task 2.1.3.
+  `load`, `debug`, `coroutine`, `collectgarbage` and NLua CLR globals are removed
+  before script execution. Host services are only reachable through gated `rug.*`
+  operations.
 * The bridge is exercised by [script tests](../tests/Rug.UI.Core.Script.Tests/README.md)
   using fake services; no native DLL or target window is needed.
 

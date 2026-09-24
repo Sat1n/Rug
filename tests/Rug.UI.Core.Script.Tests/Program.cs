@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Rug.UI.Core.Contracts.Services;
@@ -6,6 +7,7 @@ using Rug.UI.Core.Exceptions;
 using Rug.UI.Core.Models;
 using Rug.UI.Core.Services;
 using Rug.UI.Core.Security;
+using RugTaskScheduler = Rug.UI.Core.Services.TaskScheduler;
 
 string path = Path.Combine(AppContext.BaseDirectory, "bridge_test.lua");
 await File.WriteAllTextAsync(path, "function on_tick() rug.sleep(200); local frame = rug.capture(); assert(frame.width == 1 and frame.height == 1); rug.log('done') end");
@@ -189,23 +191,199 @@ catch (PermissionDeniedException ex)
           audit.LastLevel == LogLevel.Warning && audit.LastMessage!.Contains("audit-demo"), "permission audit details missing");
 }
 
-Console.WriteLine("Lua bridge tests passed");
+await File.WriteAllTextAsync(path, "while true do end");
+var watchdogRuntime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new FakeInput(), NullLogger<LuaRuntime>.Instance);
+await watchdogRuntime.InitializeAsync(path, new PluginManifest([]));
+Task<ScriptExecutionResult> spinning = watchdogRuntime.StepAsync();
+await Task.Delay(30);
+watchdogRuntime.Stop();
+try
+{
+    Check((await spinning.WaitAsync(TimeSpan.FromSeconds(1))).State == ScriptState.Stopped,
+        "watchdog did not stop a non-yielding Lua loop");
+}
+catch (TimeoutException)
+{
+    Environment.FailFast("watchdog did not interrupt a non-yielding Lua loop");
+}
+await watchdogRuntime.DisposeAsync();
+
+string schedulerRoot = Path.Combine(AppContext.BaseDirectory, "scheduler-test-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(schedulerRoot);
+try
+{
+    await WritePluginAsync("life", """
+        function on_init() local frame = rug.capture(); assert(frame.width == 1); rug.log('life_init') end
+        function on_tick() rug.log('life_tick') end
+        function on_stop() rug.log('life_stop') end
+        """, "\"vision.capture\"");
+    await WritePluginAsync("other", """
+        function on_init() rug.log('other_init') end
+        function on_tick() rug.log('other_tick') end
+        function on_stop() rug.log('other_stop') end
+        """);
+    await WritePluginAsync("spin", """
+        function on_init() rug.log('spin_init') end
+        function on_tick()
+          __rug_should_abort = function() return false end
+          if coroutine then coroutine.resume = function() return true end end
+          error = function() end
+          while true do end
+        end
+        function on_stop() rug.log('spin_stop') end
+        """);
+    await WritePluginAsync("spin-init", """
+        function on_init() while true do end end
+        function on_stop() rug.log('spin_init_stop') end
+        """);
+    await WritePluginAsync("bad-stop", """
+        function on_tick() rug.log('bad_stop_tick') end
+        function on_stop() while true do end end
+        """);
+
+    var events = new ConcurrentQueue<string>();
+    var captures = new ConcurrentBag<FakeCapture>();
+    var inputs = new ConcurrentBag<FakeInput>();
+    var luaLogger = new RecordingLogger<LuaRuntime>(events);
+    await using var scheduler = new RugTaskScheduler(
+        new PluginManager(NullLogger<PluginManager>.Instance), schedulerRoot,
+        () => { var c = new FakeCapture(events); captures.Add(c); return c; },
+        () => { var i = new FakeInput(); inputs.Add(i); return i; },
+        (c, i) => new LuaRuntime(c, new FakeOcr(), i, luaLogger),
+        NullLogger<RugTaskScheduler>.Instance, TimeSpan.FromMilliseconds(20));
+
+    Guid life = await scheduler.StartTaskAsync("life", 101);
+    TaskExecutionContext lifeContext = scheduler.Instances.Single(c => c.InstanceId == life);
+    await WaitUntilAsync(() => events.Any(e => e == "Lua: life_tick"));
+    string[] firstEvents = events.ToArray();
+    Check(Array.FindIndex(firstEvents, e => e == "capture-start:101") < Array.FindIndex(firstEvents, e => e == "Lua: life_init") &&
+          Array.FindIndex(firstEvents, e => e == "Lua: life_init") < Array.FindIndex(firstEvents, e => e == "Lua: life_tick"),
+          "capture/on_init/on_tick order is wrong");
+    Check(scheduler.PauseTask(life), "pause failed");
+    await Task.Delay(60);
+    int pausedTicks = events.Count(e => e == "Lua: life_tick");
+    await Task.Delay(80);
+    Check(events.Count(e => e == "Lua: life_tick") == pausedTicks, "paused instance kept ticking");
+    Check(scheduler.ResumeTask(life), "resume failed");
+    await WaitUntilAsync(() => events.Count(e => e == "Lua: life_tick") > pausedTicks);
+    await scheduler.StopTaskAsync(life);
+    Check(lifeContext.TaskStatus == AutomationTaskStatus.Stopped && events.Contains("Lua: life_stop") &&
+          events.Contains("capture-stop:101"), "on_stop or capture cleanup missing");
+
+    Guid[] concurrent = await Task.WhenAll(
+        scheduler.StartTaskAsync("life", 201),
+        scheduler.StartTaskAsync("other", 202),
+        scheduler.StartTaskAsync("life", 203));
+    Check(concurrent.Distinct().Count() == 3 && scheduler.Instances.Count == 3, "instances were not isolated");
+    await WaitUntilAsync(() => events.Contains("Lua: other_tick") && captures.Count(c => c.StartedHwnd is 201 or 202 or 203) == 3);
+    Guid other = concurrent[1];
+    Check(scheduler.PauseTask(other), "independent pause failed");
+    await Task.Delay(60);
+    int otherTicks = events.Count(e => e == "Lua: other_tick");
+    int lifeTicks = events.Count(e => e == "Lua: life_tick");
+    await Task.Delay(80);
+    Check(events.Count(e => e == "Lua: other_tick") == otherTicks &&
+          events.Count(e => e == "Lua: life_tick") > lifeTicks, "pause affected another instance");
+    await scheduler.StopTaskAsync(concurrent[0]);
+    int survivingTicks = events.Count(e => e == "Lua: life_tick");
+    await WaitUntilAsync(() => events.Count(e => e == "Lua: life_tick") > survivingTicks);
+    Check(scheduler.Instances.Count == 2, "stopping one instance affected the others");
+    await Task.WhenAll(concurrent.Skip(1).Select(scheduler.StopTaskAsync));
+    Check(scheduler.Instances.Count == 0 && captures.All(c => c.StopCalls == 1), "concurrent sessions leaked");
+
+    Guid spin = await scheduler.StartTaskAsync("spin", 303);
+    TaskExecutionContext spinContext = scheduler.Instances.Single(c => c.InstanceId == spin);
+    await WaitUntilAsync(() => spinContext.Runtime.State == ScriptState.Running);
+    var stopWatch = Stopwatch.StartNew();
+    Task stopping = scheduler.StopTaskAsync(spin);
+    Check(stopWatch.ElapsedMilliseconds < 100, "StopTaskAsync blocked its caller");
+    await stopping.WaitAsync(TimeSpan.FromSeconds(2));
+    Check(spinContext.TaskStatus == AutomationTaskStatus.Stopped && events.Contains("Lua: spin_stop") &&
+          events.Contains("capture-stop:303"), "watchdog stop did not clean up");
+
+    Guid spinInit = await scheduler.StartTaskAsync("spin-init", 304);
+    TaskExecutionContext spinInitContext = scheduler.Instances.Single(c => c.InstanceId == spinInit);
+    await WaitUntilAsync(() => spinInitContext.Runtime.State == ScriptState.Running);
+    await scheduler.StopTaskAsync(spinInit).WaitAsync(TimeSpan.FromSeconds(2));
+    Check(spinInitContext.TaskStatus == AutomationTaskStatus.Stopped && events.Contains("Lua: spin_init_stop") &&
+          events.Contains("capture-stop:304"), "on_init loop prevented stop/cleanup");
+
+    Guid badStop = await scheduler.StartTaskAsync("bad-stop", 305);
+    TaskExecutionContext badStopContext = scheduler.Instances.Single(c => c.InstanceId == badStop);
+    await WaitUntilAsync(() => events.Contains("Lua: bad_stop_tick"));
+    await scheduler.StopTaskAsync(badStop).WaitAsync(TimeSpan.FromSeconds(3));
+    Check(badStopContext.TaskStatus == AutomationTaskStatus.Faulted && badStopContext.LastError is not null &&
+          events.Contains("capture-stop:305"), "on_stop watchdog did not release capture");
+
+    var delayedCapture = new FakeCapture
+    {
+        StartGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously)
+    };
+    var delayedScheduler = new RugTaskScheduler(
+        new PluginManager(NullLogger<PluginManager>.Instance), schedulerRoot,
+        () => delayedCapture, () => new FakeInput(),
+        (c, i) => new LuaRuntime(c, new FakeOcr(), i, luaLogger),
+        NullLogger<RugTaskScheduler>.Instance);
+    Task<Guid> opening = delayedScheduler.StartTaskAsync("life", 404);
+    await WaitUntilAsync(() => delayedCapture.StartCalls == 1);
+    await delayedScheduler.DisposeAsync();
+    try { await opening; throw new Exception("disposed scheduler accepted a pending start"); }
+    catch (OperationCanceledException) { }
+    Check(delayedCapture.StopCalls == 1 && delayedCapture.Disposed, "pending start leaked capture");
+
+    async Task WritePluginAsync(string id, string script, string permissions = "")
+    {
+        string directory = Path.Combine(schedulerRoot, id);
+        Directory.CreateDirectory(directory);
+        await File.WriteAllTextAsync(Path.Combine(directory, "manifest.json"),
+            "{\"id\":\"" + id + "\",\"name\":\"" + id + "\",\"version\":\"1.0.0\",\"targetProcess\":\"Demo.exe\",\"permissions\":[" + permissions + "]}");
+        await File.WriteAllTextAsync(Path.Combine(directory, "main.lua"), script);
+    }
+}
+finally { Directory.Delete(schedulerRoot, recursive: true); }
+
+Console.WriteLine("Lua bridge and scheduler tests passed");
 
 static void Check(bool condition, string message)
 {
     if (!condition) throw new Exception(message);
 }
 
+static async Task WaitUntilAsync(Func<bool> condition)
+{
+    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+    while (!condition())
+    {
+        await Task.Delay(10, timeout.Token);
+    }
+}
+
 sealed class FakeCapture : ICaptureService
 {
     private readonly TaskCompletionSource<CapturedFrame?> _frame = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly ConcurrentQueue<string>? _events;
+    public FakeCapture(ConcurrentQueue<string>? events = null) => _events = events;
+    public nint StartedHwnd { get; private set; }
+    public int StartCalls { get; private set; }
+    public int StopCalls { get; private set; }
+    public bool Disposed { get; private set; }
+    public TaskCompletionSource<bool>? StartGate { get; init; }
     public int GrabCalls { get; private set; }
     public bool IsCapturing => true;
-    public Task StartAsync(nint hwnd, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public async Task StartAsync(nint hwnd, CancellationToken cancellationToken = default)
+    {
+        StartCalls++;
+        if (StartGate is not null) await StartGate.Task.WaitAsync(cancellationToken);
+        StartedHwnd = hwnd;
+        _events?.Enqueue("capture-start:" + hwnd);
+        if (_events is not null) Complete();
+    }
     public Task<CapturedFrame?> GrabFrameAsync(CancellationToken cancellationToken = default)
     { GrabCalls++; return _frame.Task.WaitAsync(cancellationToken); }
-    public Task StopAsync() => Task.CompletedTask;
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    public Task StopAsync()
+    { StopCalls++; _events?.Enqueue("capture-stop:" + StartedHwnd); return Task.CompletedTask; }
+    public ValueTask DisposeAsync()
+    { Disposed = true; return ValueTask.CompletedTask; }
     public void Complete() => _frame.SetResult(new CapturedFrame(new byte[4], 1, 1, 4));
 }
 
@@ -257,6 +435,19 @@ sealed class AuditLogger : ILogger
         LastMessage = formatter(state, exception);
     }
 
+    private sealed class NoopScope : IDisposable
+    {
+        public static readonly NoopScope Instance = new();
+        public void Dispose() { }
+    }
+}
+
+sealed class RecordingLogger<T>(ConcurrentQueue<string> events) : ILogger<T>
+{
+    public IDisposable BeginScope<TState>(TState state) => NoopScope.Instance;
+    public bool IsEnabled(LogLevel logLevel) => true;
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+        Func<TState, Exception?, string> formatter) => events.Enqueue(formatter(state, exception));
     private sealed class NoopScope : IDisposable
     {
         public static readonly NoopScope Instance = new();

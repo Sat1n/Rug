@@ -37,7 +37,7 @@ public sealed class PluginManager(ILogger<PluginManager> logger) : IPluginManage
                 ValidateManifest(manifest, directory);
                 if (_configs.ContainsKey(manifest.Id)) throw new InvalidDataException($"Duplicate plugin id '{manifest.Id}'.");
                 PluginConfig config = ReadConfig(directory, manifest.Id);
-                manifest = manifest with { Configuration = config.Defaults };
+                manifest = manifest with { Configuration = config.Defaults, PluginDirectory = Path.GetFullPath(directory) };
                 _configs.Add(manifest.Id, config);
                 accepted.Add(manifest);
             }
