@@ -22,8 +22,9 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 > `Native/WindowNative.cs`, `Models/Capture.cs`, `Models/WindowInfo.cs`,
 > `Services/CaptureService.cs`, `Services/WindowSpyService.cs`, `OcrService.RecognizeFrameAsync`.
 > `FileService`/`Json` pre-exist.
-> `LuaRuntime` coroutine bridge is implemented (Phase 2, Task 2.1.1).
-> `TaskScheduler` / `PluginLoader` / permission interceptor are subsequent Phase 2 targets.
+> `LuaRuntime` coroutine bridge (Task 2.1.1) and plugin manifest/config loading
+> with permission interception (Task 2.1.2) are implemented.
+> `TaskScheduler` and host lifecycle integration are subsequent Phase 2 targets.
 
 ## Internal Topology
 
@@ -43,10 +44,36 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 | `Services/InputService.cs` | Async humanized input (Task.Run / MTA): mouse move/click/drag, key press, `SendText`, dry-run `PlanTrajectoryAsync`; `SetTargetAsync(hwnd, background)` binds the window + delivery mode. Mouse coords are **client-space**, confined to the window by native |
 | `Services/CaptureService.cs` | Async WGC capture (Task.Run / MTA): start/stop a native capturer, copy each frame to managed BGRA8, free the native buffer |
 | `Services/WindowSpyService.cs` | Resolve the window under the cursor → `WindowInfo` (incl. its monitor via `MonitorFromWindow`); client-size query + `ClientPointUnderCursor` for the scripting coordinate picker. All physical pixels (PMv2-aware host) |
-| `Abstractions/IScriptRuntime.cs` · `Models/ScriptExecutionResult.cs` · `Models/PluginManifest.cs` | Script lifecycle/state contract and manifest-supplied permissions/configuration |
+| `Abstractions/IScriptRuntime.cs` · `Models/ScriptExecutionResult.cs` | Script lifecycle/state contract |
+| `Models/PluginManifest.cs` · `Models/PluginConfigSchema.cs` · `Models/Permission.cs` | Plugin identity/entry/permission declarations, UI control schema and typed defaults, exact permission names |
 | `Services/LuaRuntime.cs` | NLua coroutine bridge: `StepAsync` yields a `rug.*` operation, starts its .NET task, and `ResumeAsync` awaits that task before resuming Lua; all Lua-state access is serialized |
+| `Abstractions/IPluginManager.cs` · `Services/PluginManager.cs` | Scan immediate plugin directories, validate manifest/entry/config, cache valid plugins and UI schema; skip malformed plugins with a warning |
+| `Security/PermissionInterceptor.cs` · `Exceptions/PermissionDeniedException.cs` | Exact-match permission checks before sensitive API tasks start; denied calls log an audit warning and fault the script |
 | `Services/FileService.cs` · `Helpers/Json.cs` | File IO / JSON helpers |
-| `TaskScheduler` / `PluginLoader` / centralized permission interceptor | **planned (Phase 2)** |
+| `TaskScheduler` / host lifecycle integration | **planned (Phase 2)** |
+
+## Plugin declarations (Task 2.1.2)
+
+* Each immediate child of the plugins root may contain `manifest.json` and the
+  entry script. Required manifest properties are `id`, `name`, `version`,
+  `targetProcess`, and `permissions` (an array of exact names); `entry` defaults
+  to `main.lua`. `PluginManager.ScanPlugins` validates the entry stays inside its
+  plugin directory, rejects links and duplicate IDs, and skips malformed JSON or
+  invalid UI metadata. `GetPluginConfig(id)` returns the scanned config or throws
+  for unknown/invalid IDs. A missing `config.json` means an empty UI schema.
+* `config.json` uses `{ "fields": [...] }`. Each field has a unique `key`, `type`
+  (`CheckBox`, `TextBox`, `Slider`, or `ComboBox`), and typed `default`; `label` is
+  optional. Slider fields need `min`/`max` and may set `step`; ComboBox fields need
+  string `options` containing the default. `PluginConfig.Defaults` exposes validated
+  Boolean, string or numeric values for host-side rendering and initialization.
+* `Configuration`, `TargetWindow`, and `BackgroundInput` on `PluginManifest` are
+  runtime fields ignored during JSON parsing. The manager fills `Configuration`
+  with typed config defaults; the host may override values and supplies the window.
+  Permissions are copied into `PermissionInterceptor` on initialization and checked
+  before each `rug.*` service task. A missing grant throws
+  `PermissionDeniedException`, logs plugin/API/
+  permission details, and puts the runtime in `Faulted` state. Defined names:
+  `timer`, `vision.capture`, `vision.ocr`, `input`, `network`, `filesystem`.
 
 ## Lua coroutine contract (Task 2.1.1)
 
@@ -68,9 +95,9 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   `rug.get_config(key)` reads manifest configuration; `rug.log(level,message)` routes
   through `ILogger` (one argument defaults to info). Permissions default to denied.
 * Lua runs on a worker thread behind a state gate. `io`, `os`, `package`, `require`,
-  `load`, `debug` and NLua CLR globals are removed before script execution. The
-  permission bridge applies to `rug.*`; a full untrusted-code sandbox and
-  CPU preemption of non-yielding Lua are future work.
+  `load`, `debug`, `collectgarbage` and NLua CLR globals are removed before script
+  execution. Host services are only reachable through gated `rug.*` operations.
+  CPU preemption of non-yielding Lua and capture-session ownership are Task 2.1.3.
 * The bridge is exercised by [script tests](../tests/Rug.UI.Core.Script.Tests/README.md)
   using fake services; no native DLL or target window is needed.
 
@@ -95,8 +122,8 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 
 ## Plugin & Permission Rules
 
-* Enforce `manifest.json` permissions **before** executing any Lua API.
-* Intercept unauthorized calls and throw `PermissionDeniedException`.
+* Enforce `manifest.json` permissions before starting each sensitive `rug.*` task.
+  Unauthorized calls throw `PermissionDeniedException` and emit an audit warning.
 
 ## Constraints
 

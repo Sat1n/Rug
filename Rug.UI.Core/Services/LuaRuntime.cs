@@ -5,6 +5,7 @@ using NLua;
 using Rug.UI.Core.Abstractions;
 using Rug.UI.Core.Contracts.Services;
 using Rug.UI.Core.Models;
+using Rug.UI.Core.Security;
 
 namespace Rug.UI.Core.Services;
 
@@ -42,6 +43,7 @@ public sealed class LuaRuntime : IScriptRuntime
     private readonly Dictionary<Guid, Task<object?>> _operations = new();
     private CancellationTokenSource? _lifetime;
     private PluginManifest? _manifest;
+    private PermissionInterceptor? _permissions;
     private Lua? _lua;
     private LuaFunction? _drive;
     private CapturedFrame? _lastFrame;
@@ -64,16 +66,18 @@ public sealed class LuaRuntime : IScriptRuntime
     public async Task InitializeAsync(string scriptPath, PluginManifest manifest, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(manifest);
+        ArgumentNullException.ThrowIfNull(manifest.Permissions);
         ArgumentException.ThrowIfNullOrWhiteSpace(scriptPath);
         if (State != ScriptState.Uninitialized) throw new InvalidOperationException("Runtime is already initialized.");
         string source = await File.ReadAllTextAsync(scriptPath, ct).ConfigureAwait(false);
-        if (manifest.Permissions.Contains("input"))
+        if (manifest.Permissions.Contains(Permission.ControlInput))
         {
             if (manifest.TargetWindow == 0)
                 throw new ArgumentException("Input permission requires a bound target window.", nameof(manifest));
             await _input.SetTargetAsync(manifest.TargetWindow, manifest.BackgroundInput, ct).ConfigureAwait(false);
         }
         _manifest = manifest;
+        _permissions = new PermissionInterceptor(manifest, _logger);
         _lifetime = CancellationTokenSource.CreateLinkedTokenSource(ct);
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -87,7 +91,7 @@ public sealed class LuaRuntime : IScriptRuntime
                 _lua["__rug_source"] = source;
                 _lua.DoString("local chunk = assert(load(__rug_source, '@plugin', 't', _ENV)); __rug_thread = coroutine.create(function() chunk(); if type(on_tick) == 'function' then on_tick() end end); __rug_source = nil");
                 // Remove ambient file/process and CLR access from script globals.
-                _lua.DoString("io=nil; os=nil; package=nil; require=nil; dofile=nil; loadfile=nil; load=nil; debug=nil; luanet=nil; import=nil; load_assembly=nil");
+                _lua.DoString("io=nil; os=nil; package=nil; require=nil; dofile=nil; loadfile=nil; load=nil; debug=nil; luanet=nil; import=nil; load_assembly=nil; collectgarbage=nil");
                 _drive = (LuaFunction)_lua["__rug_drive"]!;
             }, ct).ConfigureAwait(false);
             ChangeState(ScriptState.Ready);
@@ -103,7 +107,7 @@ public sealed class LuaRuntime : IScriptRuntime
     private static readonly System.Reflection.MethodInfo GetConfigMethod = typeof(LuaRuntime).GetMethod(nameof(GetConfig))!;
     private static readonly System.Reflection.MethodInfo LogMethod = typeof(LuaRuntime).GetMethod(nameof(Log))!;
 
-    public string? GetConfig(string key) => _manifest?.Configuration?.GetValueOrDefault(key);
+    public object? GetConfig(string key) => _manifest?.Configuration?.GetValueOrDefault(key);
 
     public void Log(string level, string message)
     {
@@ -210,11 +214,11 @@ public sealed class LuaRuntime : IScriptRuntime
     {
         string permission = operation switch
         {
-            "sleep" => "timer", "capture" => "vision.capture", "ocr" => "vision.ocr",
-            "click" or "press_key" => "input", _ => throw new InvalidOperationException($"Unknown rug operation: {operation}")
+            "sleep" => Permission.Timer, "capture" => Permission.VisionCapture, "ocr" => Permission.VisionOcr,
+            "click" or "press_key" => Permission.ControlInput,
+            _ => throw new InvalidOperationException($"Unknown rug operation: {operation}")
         };
-        if (!_manifest!.Permissions.Contains(permission))
-            throw new UnauthorizedAccessException($"Plugin permission denied: {permission}");
+        _permissions!.Demand(permission, $"rug.{operation}");
         return operation switch
         {
             "sleep" => SleepAsync(Int(args[4]), ct),
