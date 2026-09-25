@@ -223,7 +223,9 @@ public sealed class UIFactory : IDisposable
     private UIElement BuildStepFlow(UISchemaNode node)
     {
         var control = new StepFlowView();
-        control.SetSteps(node.Steps);
+        control.SetSteps(node.StateKey is { } existingKey
+            ? _bus.GetState<IEnumerable<SchemaStep>>(existingKey, node.Steps)
+            : node.Steps);
         if (node.StateKey is { } key)
             Bind(key, value => { if (value is IEnumerable<SchemaStep> steps) control.SetSteps(steps); });
         return new SettingsCard { Header = node.Title, Description = node.Description, Content = control };

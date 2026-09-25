@@ -106,7 +106,6 @@ public sealed class TaskScheduler : ITaskScheduler
 
     private async Task<Guid> StartCoreAsync(string pluginId, nint hwnd, CancellationToken cancellationToken)
     {
-        if (hwnd == 0) throw new ArgumentException("Target window handle is required.", nameof(hwnd));
         var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
         ICaptureService? capture = null;
         IInputService? input = null;
@@ -114,12 +113,17 @@ public sealed class TaskScheduler : ITaskScheduler
         try
         {
             PluginManifest source = await GetPluginAsync(pluginId, cancellation.Token).ConfigureAwait(false);
+            bool needsWindow = source.Permissions.Contains(Permission.Capture) ||
+                source.Permissions.Contains(Permission.ControlInput);
+            if (needsWindow && hwnd == 0)
+                throw new ArgumentException("Target window handle is required.", nameof(hwnd));
             PluginManifest manifest = source with { TargetWindow = hwnd };
             capture = _captureFactory() ?? throw new InvalidOperationException("Capture factory returned null.");
             input = _inputFactory() ?? throw new InvalidOperationException("Input factory returned null.");
             runtime = _runtimeFactory(capture, input) ?? throw new InvalidOperationException("Runtime factory returned null.");
             // Capture is ready before Lua on_init can call rug.capture().
-            await capture.StartAsync(hwnd, cancellation.Token).ConfigureAwait(false);
+            if (hwnd != 0)
+                await capture.StartAsync(hwnd, cancellation.Token).ConfigureAwait(false);
             await runtime.InitializeAsync(Path.Combine(source.PluginDirectory, source.Entry),
                 manifest, cancellation.Token).ConfigureAwait(false);
             await runtime.PrepareLifecycleAsync().ConfigureAwait(false);

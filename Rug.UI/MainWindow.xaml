@@ -13,4 +13,25 @@
     <Window.SystemBackdrop>
         <MicaBackdrop/>
     </Window.SystemBackdrop>
+    <Grid RowDefinitions="*,Auto">
+        <NavigationView x:Name="PluginNavigation" Grid.Row="0" PaneTitle="插件" Header="Rug 自动化"
+                        IsSettingsVisible="False" SelectionChanged="PluginNavigation_SelectionChanged">
+            <NavigationView.FooterMenuItems>
+                <NavigationViewItem Content="开发工具" Tag="__devtools">
+                    <NavigationViewItem.Icon><SymbolIcon Symbol="Edit"/></NavigationViewItem.Icon>
+                </NavigationViewItem>
+            </NavigationView.FooterMenuItems>
+            <NavigationView.Content>
+                <Grid>
+                    <ContentControl x:Name="PluginContent"/>
+                    <TextBlock x:Name="EmptyMessage" Text="正在扫描插件…" HorizontalAlignment="Center"
+                               VerticalAlignment="Center" Visibility="Collapsed"/>
+                </Grid>
+            </NavigationView.Content>
+        </NavigationView>
+        <Border Grid.Row="1" Padding="16,8" BorderThickness="0,1,0,0"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+            <TextBlock x:Name="ReloadStatus" Text="监控中" Opacity="0.7"/>
+        </Border>
+    </Grid>
 </windowex:WindowEx>

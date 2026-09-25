@@ -102,6 +102,7 @@ public partial class App : Application
             services.AddSingleton<IHotReloadService>(provider => new HotReloadService(
                 PluginsRoot, provider.GetRequiredService<ITaskScheduler>(),
                 provider.GetRequiredService<ILogger<HotReloadService>>()));
+            services.AddSingleton<DemoWorkflowCoordinator>();
             // Rug.UI.Core native-backed services (the only P/Invoke boundary)
             services.AddSingleton<IOcrService>(_ => new OcrService());
             services.AddSingleton<ITemplateMatchService, TemplateMatchService>();
@@ -141,7 +142,23 @@ public partial class App : Application
 
         App.GetService<IAppNotificationService>().Show(string.Format("AppNotificationSamplePayload".GetLocalized(), AppContext.BaseDirectory));
 
+        SeedDemoPlugin();
+        _ = App.GetService<DemoWorkflowCoordinator>();
         App.GetService<IHotReloadService>().Start();
         await App.GetService<IActivationService>().ActivateAsync(args);
+    }
+
+    private static void SeedDemoPlugin()
+    {
+        if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("RUG_PLUGINS_ROOT"))) return;
+        string source = Path.Combine(AppContext.BaseDirectory, "plugins", DemoWorkflowCoordinator.PluginId);
+        if (!Directory.Exists(source)) return;
+        string destination = Path.Combine(PluginsRoot, DemoWorkflowCoordinator.PluginId);
+        Directory.CreateDirectory(destination);
+        foreach (string file in new[] { "manifest.json", "ui.json", "main.lua" })
+        {
+            string target = Path.Combine(destination, file);
+            if (!File.Exists(target)) File.Copy(Path.Combine(source, file), target);
+        }
     }
 }

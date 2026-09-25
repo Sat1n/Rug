@@ -45,6 +45,7 @@ using var subscription = bus.Subscribe("task.start_selected", (parameter, _) =>
 await bus.ExecuteCommandAsync(tabs.Tabs[1].Children[1].Command!, new[] { "capture" });
 Check(selectedTask == "capture", "schema command route");
 await HotReloadTests.RunAsync();
+if (args.Contains("--e2e", StringComparer.Ordinal)) await E2ETests.RunAsync();
 Console.WriteLine("Schema, state, and hot reload tests passed.");
 
 void ExpectInvalid(string json, string reason)

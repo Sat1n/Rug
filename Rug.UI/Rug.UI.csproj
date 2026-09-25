@@ -39,6 +39,9 @@
     <None Update="ui.json">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
+    <Content Include="..\plugins\demo_arknights\**\*"
+             Link="plugins\demo_arknights\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- Native Rug.Core.dll + its dependency DLLs (opencv_world, yaml-cpp, onnxruntime)
