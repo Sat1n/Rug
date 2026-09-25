@@ -26,7 +26,7 @@ public sealed class LuaRuntime : IScriptRuntime
         rug = {}
         function rug.sleep(ms) return luaYield('__rug', 'sleep', ms) end
         function rug.capture() return luaYield('__rug', 'capture') end
-        function rug.ocr(region, language) return luaYield('__rug', 'ocr', region, language) end
+        function rug.ocr(region, language, engine) return luaYield('__rug', 'ocr', region, language, engine) end
         function rug.find_image(path, threshold, region)
           return luaYield('__rug', 'find_image', path, threshold, region)
         end
@@ -397,7 +397,7 @@ public sealed class LuaRuntime : IScriptRuntime
         {
             "sleep" => SleepAsync(Int(args[4]), ct),
             "capture" => CaptureAsync(ct),
-            "ocr" => OcrAsync(args[4], args[5], ct),
+            "ocr" => OcrAsync(args[4], args[5], args[6], ct),
             "find_image" => FindImageAsync(args[4], args[5], args[6], ct),
             "click" => ClickAsync(Int(args[4]), Int(args[5]), ParseButton(args[6]), ParseMode(args[7]), ct),
             "press_key" => PressKeyAsync(Int(args[4]), args[5] is null ? 0 : Int(args[5]), ct),
@@ -473,7 +473,7 @@ public sealed class LuaRuntime : IScriptRuntime
         return await _visual!.FindImageAsync(template, score, ParseRegion(region), ct).ConfigureAwait(false);
     }
 
-    private async Task<object?> OcrAsync(object? first, object? second, CancellationToken ct)
+    private async Task<object?> OcrAsync(object? first, object? second, object? third, CancellationToken ct)
     {
         Rect? region = ParseRegion(first is LuaTable ? first : null);
         OcrEngineType engine = OcrEngineType.WinRt;
@@ -485,6 +485,21 @@ public sealed class LuaRuntime : IScriptRuntime
         }
         else if (first is not null && first is not LuaTable)
             throw new ArgumentException("OCR region must be a table or an engine name.");
+        if (third is string selectedEngine)
+        {
+            if (selectedEngine.Equals("paddle", StringComparison.OrdinalIgnoreCase))
+                engine = OcrEngineType.Paddle;
+            else if (selectedEngine.StartsWith("paddle:", StringComparison.OrdinalIgnoreCase) &&
+                     selectedEngine.Length > "paddle:".Length)
+            {
+                engine = OcrEngineType.Paddle;
+                language = selectedEngine["paddle:".Length..];
+            }
+            else if (!selectedEngine.Equals("winrt", StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException($"Unknown OCR engine: {selectedEngine}");
+        }
+        else if (third is not null)
+            throw new ArgumentException("OCR engine must be a string.");
         return await _visual!.OcrAsync(region, language, engine, ct).ConfigureAwait(false);
     }
 

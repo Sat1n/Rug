@@ -28,6 +28,7 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 > and the Agent rescue hook (Task 2.1.4), are implemented.
 > Task 2.2 adds the managed input bridge and physical coordinate mapper.
 > Task 2.3 connects WGC frames to in-memory template matching and OCR for Lua.
+> Task 2.4 adds a real Minecraft Chinese-menu E2E harness without fake services.
 
 ## Internal Topology
 
@@ -49,7 +50,7 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 | `Abstractions/ICoordinateMapper.cs` · `Services/CoordinateMapper.cs` | Validate a physical client point against the target HWND and project it through Win32 `ClientToScreen` for diagnostics and tests |
 | `Services/InputBridge.cs` | Permission-gated input dispatch, per-call foreground/background selection, focus guard, button selection and cancellable key hold |
 | `Services/CaptureService.cs` | Async WGC capture (Task.Run / MTA): start/stop a native capturer, copy each frame to managed BGRA8, free the native buffer |
-| `Services/WindowSpyService.cs` | Resolve the window under the cursor → `WindowInfo` (incl. its monitor via `MonitorFromWindow`); client-size query + `ClientPointUnderCursor` for the scripting coordinate picker. All physical pixels (PMv2-aware host) |
+| `Services/WindowSpyService.cs` | Resolve the window under the cursor or enumerate visible top-level windows → `WindowInfo` (incl. monitor via `MonitorFromWindow`); inspect a given HWND, check foreground state, query client size and pick client points. All physical pixels (PMv2-aware host) |
 | `Abstractions/IScriptRuntime.cs` · `Models/ScriptExecutionResult.cs` | Script lifecycle/state contract |
 | `Models/PluginManifest.cs` · `Models/PluginConfigSchema.cs` · `Models/Permission.cs` | Plugin identity/entry/permission declarations, UI control schema and typed defaults, exact permission names |
 | `Services/LuaRuntime.cs` | NLua coroutine bridge: `StepAsync` yields a `rug.*` operation, starts its .NET task, and `ResumeAsync` awaits that task before resuming Lua; all Lua-state access is serialized |
@@ -129,7 +130,7 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   `vision.match`, searches that frame with OpenCV, and returns the strongest hit's
   top-left `{x,y,similarity}` or `nil`. Both threshold and returned score are in
   `[0,1]`. A missing cached frame is an error.
-* `rug.ocr(region?, language?)` requires `vision.ocr` and returns a Lua array of
+* `rug.ocr(region?, language?, engine?)` requires `vision.ocr` and returns a Lua array of
   `{text,score,x,y,width,height}` blocks plus `.text` (joined lines) and `.blocks`.
   A region is `{x,y,width,height}` in physical client pixels. Match and OCR crop
   the frame in managed memory, then add the region origin to returned boxes so
@@ -137,6 +138,10 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   `rug.ocr('winrt')` / `rug.ocr('paddle')` engine selector remains supported.
   A WinRT language argument is a BCP-47 tag passed to the native engine; native
   falls back to user profile languages if the requested language is unavailable.
+  For a region-scoped Paddle fallback, use
+  `rug.ocr(region, nil, 'paddle:ppocr_v6_medium')`; the suffix selects the installed
+  model ID. This lets a plugin combine complementary WinRT and Paddle detections
+  when Minecraft's pixel font causes one engine to miss a character.
 * `rug.wait_image(path, timeout_ms?, threshold?, interval_ms?)` is a Lua coroutine
   helper that repeatedly captures, matches, and yields through `rug.sleep` until
   the image appears or the monotonic-clock deadline passes. It needs
@@ -205,6 +210,28 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   the bridge into the JSON incident record.
 * The bridge is exercised by [script tests](../tests/Rug.UI.Core.Script.Tests/README.md)
   using fake services; no native DLL or target window is needed.
+  The [Minecraft E2E harness](../Rug.UI.Core.Tests/README.md) instead binds a real
+  visible HWND and runs the native WGC, WinRT/Paddle OCR, OpenCV, input, scheduler,
+  Lua and anomaly path together.
+
+## Real-window Phase 2 verification (Task 2.4)
+
+* `Rug.UI.Core.Tests/E2E/Phase2EndToEndTests.cs` discovers one visible Minecraft
+  window or accepts `--hwnd`. It checks a nonblack WGC frame and runs both WinRT
+  `zh-CN` OCR and Paddle `ppocr_v6_medium`. The two OCR outputs are combined to
+  locate `选项` and `单人游戏`, since each engine may miss a different pixel glyph.
+* The harness crops a button template from the real WGC frame and verifies it with
+  native OpenCV, then copies `minecraft_cn_e2e_loop.lua` into an isolated plugin
+  directory with `vision.capture`, `vision.match`, `vision.ocr`, `input`, `timer`
+  and `agent` grants. The Lua task clicks `选项`, polls WGC until `完成` appears,
+  presses Esc, and polls for the main menu to return. Polling is necessary because
+  the first frame after input may still show the preceding screen.
+* The deliberate `rug.agent.resolve_anomaly` call must fault the task and write
+  same-basename PNG/JSON with Chinese reason, Lua traceback, null
+  `agent_resolution`, and a visually nonuniform capture. The harness also checks
+  `on_stop` and that the scheduler's capture session is released. Output lives
+  under the ignored E2E `bin/.../e2e-run/` directory. This is an explicit
+  interactive test because it sends real input to the game.
 
 ## Native Interop & Memory Safety (CRITICAL)
 

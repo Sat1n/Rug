@@ -18,6 +18,17 @@ internal static class WindowNative
     internal const uint MONITOR_DEFAULTTONEAREST = 2;
     private const int CCHDEVICENAME = 32;
 
+    internal delegate bool EnumWindowsCallback(nint hwnd, nint parameter);
+
+    [DllImport(User32)]
+    internal static extern bool EnumWindows(EnumWindowsCallback callback, nint parameter);
+
+    [DllImport(User32)]
+    internal static extern bool IsWindowVisible(nint hwnd);
+
+    [DllImport(User32)]
+    internal static extern bool IsIconic(nint hwnd);
+
     [StructLayout(LayoutKind.Sequential)]
     internal struct POINT
     {
