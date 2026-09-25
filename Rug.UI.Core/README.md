@@ -284,3 +284,9 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 * Depends downward only on `Rug.Core` (through the `Native/` P/Invoke boundary);
   never references `Rug.UI` (L1 §5.1).
 * Requires the native `Rug.Core.dll` (x64) plus its dependency DLLs at runtime.
+
+## Dynamic UI schema (Task 3.2)
+
+* `Schema/SchemaParser.cs` parses UTF-8 `ui.json` into a bounded `UISchemaNode` tree (`Page`, `Group`, `SelectorBarGroup`, `Tab` and card nodes). It rejects malformed JSON, unknown controls, duplicate IDs, wrong default types, invalid numeric ranges, duplicate option keys and empty selector groups. The parser has no WinUI dependency.
+* A node uses `type`, unique `id`, optional `title`/`description`, and type-specific properties. State controls use `stateKey` and a typed `default`; command controls use `command` and optional `parameter`. A selector group contains `tabs` of `Tab` nodes, each with `children`. `TaskSelectorCard` uses `tasks` (`id`, `title`) and a string-array default; `StepFlowView` uses `steps` (`id`, `title`, `status`, optional `thumbnail`).
+* `Rug.UI.Tests` loads the shipped example schema and checks every control kind, tab/tree structure, malformed input and state-bus round trips. The UI project owns actual WinUI construction; the core remains platform-neutral.

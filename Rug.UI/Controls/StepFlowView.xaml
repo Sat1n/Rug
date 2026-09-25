@@ -1,0 +1,6 @@
+<UserControl
+    x:Class="Rug.UI.Controls.StepFlowView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <StackPanel x:Name="StepsPanel" Spacing="10" MinWidth="280" />
+</UserControl>

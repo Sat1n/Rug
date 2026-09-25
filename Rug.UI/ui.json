@@ -1,0 +1,22 @@
+{
+  "type": "Page", "id": "rug-home", "title": "Rug 自动化",
+  "children": [{
+    "type": "SelectorBarGroup", "id": "main-tabs",
+    "tabs": [
+      { "type": "Tab", "id": "general", "title": "基础设置", "children": [
+        { "type": "InfoBanner", "id": "welcome", "title": "准备就绪", "description": "加载插件的 ui.json 即可生成控制面板。", "severity": "Informational" },
+        { "type": "ToggleCard", "id": "auto-sell", "title": "自动出售", "description": "由 Lua 和界面共享此开关。", "stateKey": "auto_sell", "default": false },
+        { "type": "SelectCard", "id": "mode", "title": "运行模式", "stateKey": "mode", "default": "safe", "options": [{ "key": "safe", "label": "稳健" }, { "key": "fast", "label": "快速" }] },
+        { "type": "SliderCard", "id": "delay", "title": "操作间隔", "stateKey": "delay_ms", "min": 100, "max": 1000, "step": 50, "default": 300 },
+        { "type": "TextCard", "id": "note", "title": "备注", "stateKey": "note", "default": "" },
+        { "type": "NumberCard", "id": "retry", "title": "重试次数", "stateKey": "retry", "min": 0, "max": 10, "step": 1, "default": 3 },
+        { "type": "ButtonCard", "id": "run", "title": "运行", "command": "task.start" }
+      ]},
+      { "type": "Tab", "id": "workflow", "title": "任务编排", "children": [
+        { "type": "PresetPickerCard", "id": "preset", "title": "预设", "stateKey": "preset", "default": "default", "options": [{ "key": "default", "label": "默认" }, { "key": "custom", "label": "自定义" }], "openFolderCommand": "preset.open_folder", "importCommand": "preset.import" },
+        { "type": "TaskSelectorCard", "id": "tasks", "title": "任务列表", "stateKey": "task_ids", "command": "task.start_selected", "default": ["capture"], "tasks": [{ "id": "capture", "title": "截图" }, { "id": "recognize", "title": "识别" }, { "id": "act", "title": "操作" }] },
+        { "type": "StepFlowView", "id": "steps", "title": "执行步骤", "stateKey": "step_flow", "steps": [{ "id": "capture", "title": "等待截图", "status": "Waiting" }, { "id": "recognize", "title": "等待识别", "status": "Waiting" }] }
+      ]}
+    ]
+  }]
+}
