@@ -1,3 +1,7 @@
 # Rug.UI.Tests
 
 Run `dotnet run --project Rug.UI.Tests/Rug.UI.Tests.csproj -c Debug` to validate the shipped `ui.json`, control-tree parsing, invalid schemas, and CommandBus state round trips. The native WinUI renderer is compiled through `Rug.UI/Rug.UI.csproj` and can be viewed on the app's main page.
+
+The hot-reload tests create a temporary plugin under the test output and use real `FileSystemWatcher` events. They check five rapid saves coalesce into one callback, `ui.json` and Lua edits reload, malformed JSON/Lua produce failures, and corrected files recover. The script integration harness additionally verifies that an active Lua task runs `on_stop`, releases capture, starts a fresh instance on the same HWND, and recovers that instance after a bad schema is fixed.
+
+Run `pwsh -File Rug.UI.Tests/HotReloadUiSmoke.ps1` from the repository root after building the x64 WinUI app. The script creates a unique disposable plugin under the test output and passes it through `RUG_PLUGINS_ROOT`, starts the app, uses Windows UI Automation to find the rendered `BeforeReload` title, rewrites `ui.json`, waits for `AfterReload`, then verifies both JSON and Lua syntax errors appear in the `InfoBar` and recover after corrected saves. It records each elapsed time. It closes only the process it started and verifies the resolved temporary path before removing the test directory. It does not edit installed plugins.

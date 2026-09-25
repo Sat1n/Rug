@@ -6,6 +6,9 @@ public interface ITaskScheduler : IAsyncDisposable
 {
     IReadOnlyCollection<TaskExecutionContext> Instances { get; }
     Task<Guid> StartTaskAsync(string pluginId, nint hwnd, CancellationToken cancellationToken = default);
+    Task<IAsyncDisposable> AcquirePluginReloadAsync(string pluginId,
+        CancellationToken cancellationToken = default);
+    Task RefreshPluginsAsync(CancellationToken cancellationToken = default);
     bool PauseTask(Guid instanceId);
     bool ResumeTask(Guid instanceId);
     Task StopTaskAsync(Guid instanceId);

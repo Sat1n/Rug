@@ -1,5 +1,6 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.UI.Xaml;
 
 using Rug.UI.Activation;
@@ -44,6 +45,9 @@ public partial class App : Application
     public static WindowEx MainWindow { get; } = new MainWindow();
 
     public static UIElement? AppTitlebar { get; set; }
+    public static string PluginsRoot { get; } = Path.GetFullPath(
+        Environment.GetEnvironmentVariable("RUG_PLUGINS_ROOT") ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Rug", "plugins"));
 
     public App()
     {
@@ -73,6 +77,8 @@ public partial class App : Application
             // Core Services
             services.AddSingleton<IFileService, FileService>();
             services.AddSingleton<StateStore>();
+            services.AddSingleton<IPluginManager, PluginManager>();
+            services.AddSingleton<IAnomalyLogger, AnomalyLogger>();
             services.AddSingleton<ICommandBus>(provider =>
             {
                 var dispatcher = MainWindow.DispatcherQueue;
@@ -81,6 +87,21 @@ public partial class App : Application
                     () => dispatcher.HasThreadAccess);
             });
 
+            services.AddSingleton<ITaskScheduler>(provider => new Rug.UI.Core.Services.TaskScheduler(
+                provider.GetRequiredService<IPluginManager>(), PluginsRoot,
+                () => new CaptureService(),
+                () => new InputService(InputMode.Win32Software, 0),
+                (capture, input) => new LuaRuntime(capture,
+                    provider.GetRequiredService<IOcrService>(), input,
+                    provider.GetRequiredService<ILogger<LuaRuntime>>(),
+                    new CoordinateMapper(),
+                    templateMatcher: provider.GetRequiredService<ITemplateMatchService>(),
+                    commandBus: provider.GetRequiredService<ICommandBus>()),
+                provider.GetRequiredService<ILogger<Rug.UI.Core.Services.TaskScheduler>>(),
+                provider.GetRequiredService<IAnomalyLogger>()));
+            services.AddSingleton<IHotReloadService>(provider => new HotReloadService(
+                PluginsRoot, provider.GetRequiredService<ITaskScheduler>(),
+                provider.GetRequiredService<ILogger<HotReloadService>>()));
             // Rug.UI.Core native-backed services (the only P/Invoke boundary)
             services.AddSingleton<IOcrService>(_ => new OcrService());
             services.AddSingleton<ITemplateMatchService, TemplateMatchService>();
@@ -120,6 +141,7 @@ public partial class App : Application
 
         App.GetService<IAppNotificationService>().Show(string.Format("AppNotificationSamplePayload".GetLocalized(), AppContext.BaseDirectory));
 
+        App.GetService<IHotReloadService>().Start();
         await App.GetService<IActivationService>().ActivateAsync(args);
     }
 }

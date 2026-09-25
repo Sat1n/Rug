@@ -13,6 +13,7 @@ using Rug.UI.Core.Models;
 using Rug.UI.Core.Native;
 using Rug.UI.Core.Services;
 using Rug.UI.Core.Security;
+using Rug.UI.Core.Schema;
 using RugTaskScheduler = Rug.UI.Core.Services.TaskScheduler;
 
 string path = Path.Combine(AppContext.BaseDirectory, "bridge_test.lua");
@@ -635,6 +636,62 @@ try
     catch (OperationCanceledException) { }
     Check(delayedCapture.StopCalls == 1 && delayedCapture.Disposed, "pending start leaked capture");
 
+    await WritePluginAsync("hot", """
+        function on_init() rug.log('hot_v1') end
+        function on_stop() rug.log('hot_stop') end
+        """);
+    string hotDirectory = Path.Combine(schedulerRoot, "hot");
+    string hotUi = Path.Combine(hotDirectory, "ui.json");
+    await File.WriteAllTextAsync(hotUi, """{"type":"Page","id":"hot-page","title":"Before"}""");
+    await scheduler.RefreshPluginsAsync();
+    Task<Guid> blockedStart;
+    await using (var lease = await scheduler.AcquirePluginReloadAsync("hot"))
+    {
+        blockedStart = scheduler.StartTaskAsync("hot", 708);
+        await Task.Delay(50);
+        Check(!blockedStart.IsCompleted, "plugin start bypassed reload lease");
+    }
+    await scheduler.StopTaskAsync(await blockedStart);
+    Guid hotOriginal = await scheduler.StartTaskAsync("hot", 707);
+    await WaitUntilAsync(() => events.Contains("Lua: hot_v1"));
+    var reloadSignals = new ConcurrentQueue<string>();
+    await using (var reloader = new HotReloadService(schedulerRoot, scheduler,
+        NullLogger<HotReloadService>.Instance, TimeSpan.FromMilliseconds(300)))
+    {
+        using var uiBinding = reloader.RegisterUiHandler("hot", async (path, token) =>
+        {
+            await new SchemaParser().ParseFileAsync(path, token);
+        });
+        reloader.Reloaded += (_, e) =>
+        {
+            if (e.PluginId == "hot") reloadSignals.Enqueue("success");
+        };
+        reloader.ReloadFailed += (_, e) =>
+        {
+            if (e.PluginId == "hot") reloadSignals.Enqueue("failure");
+        };
+        reloader.Start();
+        await File.WriteAllTextAsync(Path.Combine(hotDirectory, "main.lua"), """
+            function on_init() rug.log('hot_v2') end
+            function on_stop() rug.log('hot_stop') end
+            """);
+        await WaitUntilAsync(() => reloadSignals.Contains("success") && events.Contains("Lua: hot_v2"));
+        Check(!scheduler.Instances.Any(instance => instance.InstanceId == hotOriginal) &&
+              scheduler.Instances.Any(instance => instance.PluginId == "hot" && instance.TargetHwnd == 707) &&
+              events.Contains("Lua: hot_stop") && captures.Any(item => item.StartedHwnd == 707 && item.StopCalls == 1),
+              "hot reload did not stop/cleanup old Lua and start a fresh HWND session");
+
+        await File.WriteAllTextAsync(hotUi, "{ invalid JSON");
+        await WaitUntilAsync(() => reloadSignals.Contains("failure") &&
+            !scheduler.Instances.Any(instance => instance.PluginId == "hot"));
+        await File.WriteAllTextAsync(hotUi, """{"type":"Page","id":"hot-page","title":"Recovered"}""");
+        await WaitUntilAsync(() => reloadSignals.Count(signal => signal == "success") == 2 &&
+            scheduler.Instances.Any(instance => instance.PluginId == "hot" && instance.TargetHwnd == 707));
+        await WaitUntilAsync(() => events.Count(item => item == "Lua: hot_v2") >= 2);
+    }
+    await Task.WhenAll(scheduler.Instances.Where(instance => instance.PluginId == "hot")
+        .Select(instance => scheduler.StopTaskAsync(instance.InstanceId)));
+
     async Task WritePluginAsync(string id, string script, string permissions = "")
     {
         string directory = Path.Combine(schedulerRoot, id);
@@ -644,7 +701,16 @@ try
         await File.WriteAllTextAsync(Path.Combine(directory, "main.lua"), script);
     }
 }
-finally { Directory.Delete(schedulerRoot, recursive: true); }
+finally
+{
+    string full = Path.GetFullPath(schedulerRoot);
+    string output = Path.GetFullPath(AppContext.BaseDirectory).TrimEnd(Path.DirectorySeparatorChar)
+        + Path.DirectorySeparatorChar;
+    if (!full.StartsWith(output, StringComparison.OrdinalIgnoreCase) ||
+        !Path.GetFileName(full).StartsWith("scheduler-test-", StringComparison.Ordinal))
+        throw new InvalidOperationException("Refusing to delete a path outside the test output.");
+    Directory.Delete(full, recursive: true);
+}
 
 var stateStore = new StateStore();
 int stateNotifications = 0;

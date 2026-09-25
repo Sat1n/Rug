@@ -21,6 +21,8 @@ public sealed class TaskScheduler : ITaskScheduler
     private readonly TimeSpan _watchdogTimeout;
     private readonly SemaphoreSlim _catalogGate = new(1, 1);
     private readonly ConcurrentDictionary<Guid, TaskExecutionContext> _instances = new();
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _pluginStartGates =
+        new(StringComparer.OrdinalIgnoreCase);
     private readonly CancellationTokenSource _shutdown = new();
     private readonly object _lifecycleGate = new();
     private TaskCompletionSource<bool> _startsDrained = CompletedSignal();
@@ -50,15 +52,37 @@ public sealed class TaskScheduler : ITaskScheduler
 
     public IReadOnlyCollection<TaskExecutionContext> Instances => _instances.Values.ToArray();
 
+    /// <summary>Replace the cached catalog after a plugin file save, under the same gate used by starts.</summary>
+    public async Task RefreshPluginsAsync(CancellationToken cancellationToken = default)
+    {
+        await _catalogGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(TaskScheduler));
+            _catalog = await Task.Run(() => _plugins.ScanPlugins(_pluginsRoot)
+                .ToDictionary(p => p.Id, StringComparer.OrdinalIgnoreCase), cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally { _catalogGate.Release(); }
+    }
+
     public async Task<Guid> StartTaskAsync(string pluginId, nint hwnd, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
         lock (_lifecycleGate)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(TaskScheduler));
             if (++_starting == 1)
                 _startsDrained = new(TaskCreationOptions.RunContinuationsAsynchronously);
         }
-        try { return await StartCoreAsync(pluginId, hwnd, cancellationToken).ConfigureAwait(false); }
+        SemaphoreSlim gate = _pluginStartGates.GetOrAdd(pluginId, _ => new SemaphoreSlim(1, 1));
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
+        try
+        {
+            await gate.WaitAsync(linked.Token).ConfigureAwait(false);
+            try { return await StartCoreAsync(pluginId, hwnd, linked.Token).ConfigureAwait(false); }
+            finally { gate.Release(); }
+        }
         finally
         {
             lock (_lifecycleGate)
@@ -66,6 +90,18 @@ public sealed class TaskScheduler : ITaskScheduler
                 if (--_starting == 0) _startsDrained.TrySetResult(true);
             }
         }
+    }
+
+    /// <summary>Prevent starts of one plugin while its old runtime and catalog are replaced.</summary>
+    public async Task<IAsyncDisposable> AcquirePluginReloadAsync(string pluginId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
+        if (_disposed) throw new ObjectDisposedException(nameof(TaskScheduler));
+        SemaphoreSlim gate = _pluginStartGates.GetOrAdd(pluginId, _ => new SemaphoreSlim(1, 1));
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
+        await gate.WaitAsync(linked.Token).ConfigureAwait(false);
+        return new PluginReloadLease(gate);
     }
 
     private async Task<Guid> StartCoreAsync(string pluginId, nint hwnd, CancellationToken cancellationToken)
@@ -259,5 +295,15 @@ public sealed class TaskScheduler : ITaskScheduler
         var signal = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         signal.SetResult(true);
         return signal;
+    }
+
+    private sealed class PluginReloadLease(SemaphoreSlim gate) : IAsyncDisposable
+    {
+        private int _released;
+        public ValueTask DisposeAsync()
+        {
+            if (Interlocked.Exchange(ref _released, 1) == 0) gate.Release();
+            return ValueTask.CompletedTask;
+        }
     }
 }
