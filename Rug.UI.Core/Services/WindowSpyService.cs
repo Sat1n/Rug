@@ -17,6 +17,44 @@ namespace Rug.UI.Core.Services;
 [SupportedOSPlatform("windows10.0.17763.0")]
 public sealed class WindowSpyService : IWindowSpyService
 {
+    /// <summary>Enumerate visible top-level windows for explicit host selection.</summary>
+    public IReadOnlyList<WindowInfo> FindVisibleWindows()
+    {
+        var found = new List<WindowInfo>();
+        WindowNative.EnumWindows((hwnd, _) =>
+        {
+            if (WindowNative.IsWindowVisible(hwnd) && !WindowNative.IsIconic(hwnd))
+            {
+                WindowInfo? info = ResolveWindow(hwnd);
+                if (info is not null) found.Add(info);
+            }
+            return true;
+        }, 0);
+        return found;
+    }
+
+    /// <summary>Inspect one HWND through the managed native boundary.</summary>
+    public WindowInfo? ResolveWindow(nint hwnd)
+    {
+        if (hwnd == 0 || !WindowNative.IsWindowVisible(hwnd) || WindowNative.IsIconic(hwnd) ||
+            !TryGetClientSize(hwnd, out int cw, out int ch)) return null;
+
+        string title = GetTitle(hwnd);
+        string process = GetProcessName(hwnd);
+        int width = 0, height = 0;
+        if (WindowNative.GetWindowRect(hwnd, out WindowNative.RECT rc))
+        {
+            width = rc.Right - rc.Left;
+            height = rc.Bottom - rc.Top;
+        }
+        uint dpi = WindowNative.GetDpiForWindow(hwnd);
+        double scale = dpi > 0 ? dpi / 96.0 : 1.0;
+        GetMonitorInfo(hwnd, out string monName, out int mx, out int my, out int mw, out int mh);
+        return new WindowInfo(hwnd, title, process, width, height, scale, cw, ch, monName, mx, my, mw, mh);
+    }
+
+    public bool IsForeground(nint hwnd) => hwnd != 0 && WindowNative.GetForegroundWindow() == hwnd;
+
     public WindowInfo? ResolveAtCurrentCursor()
     {
         if (!WindowNative.GetCursorPos(out WindowNative.POINT pt)) return null;
@@ -28,23 +66,7 @@ public sealed class WindowSpyService : IWindowSpyService
         nint root = WindowNative.GetAncestor(under, WindowNative.GA_ROOT);
         nint hwnd = root != 0 ? root : under;
 
-        string title = GetTitle(hwnd);
-        string process = GetProcessName(hwnd);
-
-        int width = 0, height = 0;
-        if (WindowNative.GetWindowRect(hwnd, out WindowNative.RECT rc))
-        {
-            width = rc.Right - rc.Left;
-            height = rc.Bottom - rc.Top;
-        }
-
-        uint dpi = WindowNative.GetDpiForWindow(hwnd);
-        double scale = dpi > 0 ? dpi / 96.0 : 1.0;
-
-        TryGetClientSize(hwnd, out int cw, out int ch);
-        GetMonitorInfo(hwnd, out string monName, out int mx, out int my, out int mw, out int mh);
-
-        return new WindowInfo(hwnd, title, process, width, height, scale, cw, ch, monName, mx, my, mw, mh);
+        return ResolveWindow(hwnd);
     }
 
     /// <summary>Read the monitor a window is on: device short-name + physical bounds.</summary>
@@ -113,9 +135,9 @@ public sealed class WindowSpyService : IWindowSpyService
             using Process? p = Process.GetProcessById((int)pid);
             return p?.ProcessName ?? string.Empty;
         }
-        catch (ArgumentException)
+        catch (Exception ex) when (ex is ArgumentException or System.ComponentModel.Win32Exception or InvalidOperationException)
         {
-            return string.Empty;  // process already exited
+            return string.Empty;  // process exited or is inaccessible
         }
     }
 }

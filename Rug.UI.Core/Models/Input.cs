@@ -7,6 +7,13 @@ public enum InputMode
     HardwareKmbox = 1,
 }
 
+/// <summary>Delivery for a bound Win32 software controller.</summary>
+public enum InputDeliveryMode
+{
+    Win32SendInput,
+    Win32PostMessage,
+}
+
 /// <summary>Mouse button (mirrors the native RugMouseButton).</summary>
 public enum MouseButton
 {

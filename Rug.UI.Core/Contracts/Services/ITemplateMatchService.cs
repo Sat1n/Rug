@@ -14,4 +14,11 @@ public interface ITemplateMatchService
         string templateImagePath,
         float threshold = 0.8f,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Match directly against a managed WGC BGRA8 frame without writing it to disk.</summary>
+    Task<IReadOnlyList<TemplateMatchResult>> MatchFrameAsync(
+        CapturedFrame frame,
+        string templateImagePath,
+        float threshold = 0.8f,
+        CancellationToken cancellationToken = default);
 }
