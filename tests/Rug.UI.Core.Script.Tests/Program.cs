@@ -646,7 +646,98 @@ try
 }
 finally { Directory.Delete(schedulerRoot, recursive: true); }
 
-Console.WriteLine("Lua bridge and scheduler tests passed");
+var stateStore = new StateStore();
+int stateNotifications = 0;
+stateStore.StateChanged += (_, _) => Interlocked.Increment(ref stateNotifications);
+await Task.WhenAll(Enumerable.Range(0, 8).Select(worker => Task.Run(() =>
+{
+    for (int value = 0; value < 500; value++)
+        stateStore.SetState($"worker_{worker}", value);
+})));
+Check(stateNotifications == 4000 && Enumerable.Range(0, 8)
+    .All(worker => stateStore.GetState($"worker_{worker}", -1) == 499),
+    "concurrent state writes lost values or notifications");
+stateStore.SetState("worker_0", 499);
+Check(stateNotifications == 4000, "unchanged state emitted a duplicate notification");
+stateStore.SetState<string?>("nullable", null);
+Check(stateStore.GetState("nullable", "fallback") is null &&
+      stateStore.GetState("absent", "fallback") == "fallback",
+      "null and absent state were confused");
+stateStore.StateChanged += (_, e) =>
+{
+    if (e.Key == "parent") stateStore.SetState("child", true);
+};
+stateStore.SetState("parent", true);
+Check(stateStore.GetState("child", false), "state listener could not re-enter the store");
+
+var uiCallbacks = new ConcurrentQueue<Action>();
+bool uiAccess = false;
+using var bus = new CommandBus(stateStore,
+    action => { uiCallbacks.Enqueue(action); return true; },
+    () => uiAccess);
+int busNotifications = 0, callbackThread = 0;
+bus.StateChanged += (_, e) =>
+{
+    if (e.Key == "ui_value")
+    {
+        Interlocked.Increment(ref busNotifications);
+        callbackThread = Environment.CurrentManagedThreadId;
+    }
+};
+await Task.Run(() => bus.SetState("ui_value", 1));
+Check(bus.GetState("ui_value", 0) == 1 && busNotifications == 0 && uiCallbacks.Count == 1,
+    "background state write did not enqueue exactly one UI notification");
+Check(uiCallbacks.TryDequeue(out Action? uiAction), "queued UI callback was lost");
+uiAccess = true;
+int uiThread = Environment.CurrentManagedThreadId;
+uiAction!();
+Check(busNotifications == 1 && callbackThread == uiThread,
+    "state notification was not delivered on the UI thread");
+bus.SetState("ui_value", 2);
+Check(busNotifications == 2 && uiCallbacks.IsEmpty,
+    "UI-originated write did not notify synchronously");
+uiAccess = false;
+await Task.Run(() => bus.SetState("ui_value", 3));
+await Task.Run(() => bus.SetState("ui_value", 4));
+uiAccess = true;
+while (uiCallbacks.TryDequeue(out Action? callback)) callback();
+Check(busNotifications == 3 && bus.GetState("ui_value", 0) == 4,
+    "delayed UI notification applied an obsolete state revision");
+int routed = 0;
+using (bus.Subscribe("save", async (parameter, ct) =>
+{
+    await Task.Yield();
+    ct.ThrowIfCancellationRequested();
+    Interlocked.Add(ref routed, (int)parameter!);
+}))
+{
+    await bus.ExecuteCommandAsync("save", 7);
+}
+Check(routed == 7, "async command was not routed to its subscriber");
+try { await bus.ExecuteCommandAsync("save", 1); throw new Exception("unsubscribed command ran"); }
+catch (KeyNotFoundException) { }
+
+string stateScript = Path.Combine(AppContext.BaseDirectory, "state_bus_test.lua");
+await File.WriteAllTextAsync(stateScript, """
+    function on_tick()
+      rug.set_state('auto_sell', true)
+      assert(rug.get_state('auto_sell') == true)
+      rug.sleep(20)
+      assert(rug.get_state('auto_sell') == false)
+    end
+    """);
+await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new FakeInput(),
+    NullLogger<LuaRuntime>.Instance, commandBus: bus))
+{
+    await runtime.InitializeAsync(stateScript, new PluginManifest([Permission.Timer]));
+    Check((await runtime.StepAsync()).State == ScriptState.Yielded &&
+          bus.GetState("auto_sell", false), "Lua set_state did not update the shared C# store");
+    bus.SetState("auto_sell", false);
+    Check((await runtime.ResumeAsync()).State == ScriptState.Stopped,
+        "Lua get_state did not observe the latest C# write");
+}
+
+Console.WriteLine("Lua bridge, scheduler and state/command bus tests passed");
 
 static void Check(bool condition, string message)
 {

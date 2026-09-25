@@ -17,6 +17,8 @@ no automation pipeline and no native interop itself.
 > `ViewModels/DevToolsViewModel.cs` visualize WGC capture, OCR overlay, the Spy++-style
 > crosshair window picker, input self-tests and a 100x stress run. Native interop is
 > **not** done here — the app consumes `Rug.UI.Core` services.
+> Task 3.1.1 registers a singleton `StateStore`/`ICommandBus`; the WinUI
+> `DispatcherQueue` delivers background state notifications on the UI thread.
 
 ## Internal Topology
 
@@ -29,7 +31,7 @@ no automation pipeline and no native interop itself.
 | `Helpers/LogLevelToBrushConverter.cs` | `LogLevel` → console foreground brush |
 | `Models/DevTools.cs` | `LogLevel` / `LogEntry` / `PreviewFrame` UI-layer records |
 | `Services/` | Activation, navigation, theming, local settings |
-| (consumes) `Rug.UI.Core` | `IOcrService` / `ITemplateMatchService` / `IInputService` / `ICaptureService` / `IWindowSpyService` — no direct P/Invoke here |
+| (consumes) `Rug.UI.Core` | `IOcrService` / `ITemplateMatchService` / `IInputService` / `ICaptureService` / `IWindowSpyService` plus shared `StateStore`/`ICommandBus` — no direct P/Invoke here |
 
 ## Interop Restriction (CRITICAL)
 

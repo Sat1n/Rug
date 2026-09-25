@@ -19,7 +19,8 @@ public sealed class LuaRuntime : IScriptRuntime
     private const string Bridge = """
         local luaYield, luaCreate, luaResume, luaStatus = coroutine.yield, coroutine.create, coroutine.resume, coroutine.status
         local pack, luaType, raise = table.pack, type, error
-        local getConfig, writeLog, shouldAbort, clock = __rug_get_config, __rug_log, __rug_should_abort, __rug_ticks
+        local getConfig, getState, setState, writeLog, shouldAbort, clock =
+          __rug_get_config, __rug_get_state, __rug_set_state, __rug_log, __rug_should_abort, __rug_ticks
         local min = math.min
         local sethook, traceback = debug.sethook, debug.traceback
         local thread, chunk
@@ -55,6 +56,8 @@ public sealed class LuaRuntime : IScriptRuntime
           return luaYield('__rug', 'resolve_anomaly', reason, context, traceback('', 2))
         end
         function rug.get_config(key) return getConfig(key) end
+        function rug.get_state(key) return getState(key) end
+        function rug.set_state(key, value) return setState(key, value) end
         function rug.log(level, message)
           if message == nil then message, level = level, 'info' end
           return writeLog(level, message)
@@ -92,6 +95,8 @@ public sealed class LuaRuntime : IScriptRuntime
     private readonly ICoordinateMapper? _coordinateMapper;
     private readonly Func<nint, bool>? _ensureForeground;
     private readonly ILogger _logger;
+    private readonly ICommandBus _commandBus;
+    private readonly bool _ownsCommandBus;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly SemaphoreSlim _driveGate = new(1, 1);
     private readonly object _stateGate = new();
@@ -119,13 +124,15 @@ public sealed class LuaRuntime : IScriptRuntime
 
     public LuaRuntime(ICaptureService capture, IOcrService ocr, IInputService input, ILogger<LuaRuntime> logger,
         ICoordinateMapper? coordinateMapper = null, Func<nint, bool>? ensureForeground = null,
-        ITemplateMatchService? templateMatcher = null)
+        ITemplateMatchService? templateMatcher = null, ICommandBus? commandBus = null)
     {
         _capture = capture;
         _ocr = ocr;
         _matcher = templateMatcher ?? new TemplateMatchService();
         _input = input;
         _logger = logger;
+        _commandBus = commandBus ?? new CommandBus(new StateStore());
+        _ownsCommandBus = commandBus is null;
         _coordinateMapper = coordinateMapper;
         _ensureForeground = ensureForeground;
     }
@@ -168,6 +175,8 @@ public sealed class LuaRuntime : IScriptRuntime
                 _lua = new Lua();
                 _lua.State.Encoding = Encoding.UTF8;
                 _lua.RegisterFunction("__rug_get_config", this, GetConfigMethod);
+                _lua.RegisterFunction("__rug_get_state", this, GetStateMethod);
+                _lua.RegisterFunction("__rug_set_state", this, SetStateMethod);
                 _lua.RegisterFunction("__rug_log", this, LogMethod);
                 _lua.RegisterFunction("__rug_should_abort", this, ShouldAbortMethod);
                 _lua.RegisterFunction("__rug_ticks", this, TicksMethod);
@@ -181,7 +190,7 @@ public sealed class LuaRuntime : IScriptRuntime
                 _beginTick = (LuaFunction)_lua["__rug_begin_tick"]!;
                 _beginStop = (LuaFunction)_lua["__rug_begin_stop"]!;
                 // Remove ambient file/process and CLR access from script globals.
-                _lua.DoString("__rug_source=nil; __rug_set_chunk=nil; __rug_prepare_oneshot=nil; __rug_prepare_init=nil; __rug_begin_tick=nil; __rug_begin_stop=nil; __rug_drive=nil; __rug_should_abort=nil; __rug_get_config=nil; __rug_log=nil; __rug_ticks=nil; coroutine=nil; io=nil; os=nil; package=nil; require=nil; dofile=nil; loadfile=nil; load=nil; debug=nil; luanet=nil; import=nil; load_assembly=nil; collectgarbage=nil");
+                _lua.DoString("__rug_source=nil; __rug_set_chunk=nil; __rug_prepare_oneshot=nil; __rug_prepare_init=nil; __rug_begin_tick=nil; __rug_begin_stop=nil; __rug_drive=nil; __rug_should_abort=nil; __rug_get_config=nil; __rug_get_state=nil; __rug_set_state=nil; __rug_log=nil; __rug_ticks=nil; coroutine=nil; io=nil; os=nil; package=nil; require=nil; dofile=nil; loadfile=nil; load=nil; debug=nil; luanet=nil; import=nil; load_assembly=nil; collectgarbage=nil");
             }, ct).ConfigureAwait(false);
             ChangeState(ScriptState.Ready);
         }
@@ -194,6 +203,8 @@ public sealed class LuaRuntime : IScriptRuntime
     }
 
     private static readonly System.Reflection.MethodInfo GetConfigMethod = typeof(LuaRuntime).GetMethod(nameof(GetConfig))!;
+    private static readonly System.Reflection.MethodInfo GetStateMethod = typeof(LuaRuntime).GetMethod(nameof(GetState))!;
+    private static readonly System.Reflection.MethodInfo SetStateMethod = typeof(LuaRuntime).GetMethod(nameof(SetState))!;
     private static readonly System.Reflection.MethodInfo LogMethod = typeof(LuaRuntime).GetMethod(nameof(Log))!;
     private static readonly System.Reflection.MethodInfo ShouldAbortMethod = typeof(LuaRuntime).GetMethod(nameof(ShouldAbort))!;
     private static readonly System.Reflection.MethodInfo TicksMethod = typeof(LuaRuntime).GetMethod(nameof(Ticks))!;
@@ -262,6 +273,15 @@ public sealed class LuaRuntime : IScriptRuntime
     }
 
     public object? GetConfig(string key) => _manifest?.Configuration?.GetValueOrDefault(key);
+
+    public object? GetState(string key) => _commandBus.GetState<object?>(key);
+
+    public void SetState(string key, object? value)
+    {
+        if (value is not (null or bool or string or double or long or int))
+            throw new ArgumentException("Lua state values must be nil, Boolean, string or number.", nameof(value));
+        _commandBus.SetState(key, value);
+    }
 
     public void Log(string level, string message)
     {
@@ -626,6 +646,7 @@ public sealed class LuaRuntime : IScriptRuntime
             _operations.Clear();
             _visual?.Dispose();
             if (_inputBridge is not null) await _inputBridge.DisposeAsync().ConfigureAwait(false);
+            if (_ownsCommandBus) _commandBus.Dispose();
             _disposed = true;
         }
         finally { _gate.Release(); _driveGate.Release(); _gate.Dispose(); _driveGate.Dispose(); }

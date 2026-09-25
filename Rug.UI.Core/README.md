@@ -29,6 +29,7 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 > Task 2.2 adds the managed input bridge and physical coordinate mapper.
 > Task 2.3 connects WGC frames to in-memory template matching and OCR for Lua.
 > Task 2.4 adds a real Minecraft Chinese-menu E2E harness without fake services.
+> Task 3.1.1 adds shared state and a named-command bus for UI/Lua coordination.
 
 ## Internal Topology
 
@@ -57,6 +58,8 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 | `Abstractions/IPluginManager.cs` · `Services/PluginManager.cs` | Scan immediate plugin directories, validate manifest/entry/config, cache valid plugins and UI schema; skip malformed plugins with a warning |
 | `Security/PermissionInterceptor.cs` · `Exceptions/PermissionDeniedException.cs` | Exact-match permission checks before sensitive API tasks start; denied calls log an audit warning and fault the script |
 | `Abstractions/ITaskScheduler.cs` · `Models/TaskExecutionContext.cs` · `Services/TaskScheduler.cs` | Concurrent plugin/window instances, per-instance capture/input/runtime ownership, pause/resume/stop state and periodic lifecycle dispatch |
+| `Models/StateChangedEventArgs.cs` · `Services/StateStore.cs` | Concurrent typed key/value state, null support and change notifications |
+| `Abstractions/ICommandBus.cs` · `Services/CommandBus.cs` | Shared state access, UI-dispatched change events and async named-command subscriptions |
 | `Abstractions/IAnomalyLogger.cs` · `Models/AnomalyLogModel.cs` · `Services/AnomalyLogger.cs` | Per-instance incident capture, PNG encoding and JSON black-box records |
 | `Services/FileService.cs` · `Helpers/Json.cs` | File IO / JSON helpers |
 
@@ -232,6 +235,25 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   `on_stop` and that the scheduler's capture session is released. Output lives
   under the ignored E2E `bin/.../e2e-run/` directory. This is an explicit
   interactive test because it sends real input to the game.
+
+## Reactive state and commands (Task 3.1.1)
+
+* `StateStore.GetState<T>` reads a typed value or caller default when absent.
+  `SetState<T>` commits atomically per key and raises `StateChanged` only when
+  the value actually changes. It invokes handlers after releasing its write lock,
+  so a subscriber can safely write another key. Explicit null is distinct from
+  an absent key. A type mismatch throws `InvalidCastException`.
+* `CommandBus` wraps one shared store. C# and Lua can read/write it synchronously;
+  named command handlers are registered with an `IDisposable` subscription and
+  awaited by `ExecuteCommandAsync`. UI-facing `CommandBus.StateChanged` is raised
+  directly for UI-thread writes and enqueued for background writes using injected
+  dispatcher callbacks. The core has no WinUI dependency; `Rug.UI` supplies its
+  `DispatcherQueue` at composition time. Revisions suppress stale UI callbacks
+  if concurrent writers enqueue changes out of order.
+* `LuaRuntime` accepts an optional shared `ICommandBus` and exports
+  `rug.get_state(key)` / `rug.set_state(key, value)`. Lua values are limited to
+  nil, Boolean, string and number; unsupported CLR/Lua objects are rejected.
+  Hosts must pass the same bus to UI and runtime instances for shared state.
 
 ## Native Interop & Memory Safety (CRITICAL)
 

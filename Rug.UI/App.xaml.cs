@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml;
 
 using Rug.UI.Activation;
 using Rug.UI.Contracts.Services;
+using Rug.UI.Core.Abstractions;
 using Rug.UI.Core.Contracts.Services;
 using Rug.UI.Core.Models;
 using Rug.UI.Core.Services;
@@ -71,6 +72,14 @@ public partial class App : Application
 
             // Core Services
             services.AddSingleton<IFileService, FileService>();
+            services.AddSingleton<StateStore>();
+            services.AddSingleton<ICommandBus>(provider =>
+            {
+                var dispatcher = MainWindow.DispatcherQueue;
+                return new CommandBus(provider.GetRequiredService<StateStore>(),
+                    action => dispatcher.TryEnqueue(() => action()),
+                    () => dispatcher.HasThreadAccess);
+            });
 
             // Rug.UI.Core native-backed services (the only P/Invoke boundary)
             services.AddSingleton<IOcrService>(_ => new OcrService());

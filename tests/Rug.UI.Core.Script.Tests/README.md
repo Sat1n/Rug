@@ -39,3 +39,8 @@ current frame remains cached and older frames can be collected. The native
 Rug.Core call. The fake-based test does not measure native heap usage; run the
 `--visual-only` mode in [Rug.Core.CSharp.Tests](../Rug.Core.CSharp.Tests/README.md)
 for a synthetic-BMP OpenCV match and 1,000 native calls with memory/handle checks.
+
+Task 3.1.1 tests run concurrent state writers, exact change counts, deduplication,
+null/default semantics, reentrant listeners, UI-dispatched versus synchronous UI
+notifications, async named-command subscriptions, and a live NLua/C# round trip
+through the same `CommandBus` instance.
