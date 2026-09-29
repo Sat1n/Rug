@@ -86,6 +86,7 @@ await bus.ExecuteCommandAsync(tabs.Tabs[1].Children[1].Command!, new[] { "captur
 Check(selectedTask == "capture", "schema command route");
 await HotReloadTests.RunAsync();
 if (args.Contains("--e2e", StringComparer.Ordinal)) await E2ETests.RunAsync();
+if (args.Contains("--instance-ui", StringComparer.Ordinal)) await E2ETests.RunInstanceUiAsync();
 Console.WriteLine("Schema, state, and hot reload tests passed.");
 
 void ExpectInvalid(string json, string reason)

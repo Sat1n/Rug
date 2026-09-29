@@ -5,6 +5,8 @@ namespace Rug.UI.Core.Abstractions;
 
 public interface ITaskScheduler : IAsyncDisposable
 {
+    /// <summary>Raised after a run enters or leaves the active instance collection.</summary>
+    event EventHandler? InstancesChanged;
     IReadOnlyCollection<TaskExecutionContext> Instances { get; }
     Task<Guid> StartTaskAsync(string pluginId, nint hwnd, CancellationToken cancellationToken = default);
     Task<Guid> StartTaskAsync(string pluginId, nint hwnd,

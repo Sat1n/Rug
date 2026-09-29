@@ -77,6 +77,9 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   awaits the runner, invokes `on_stop()` with a bounded watchdog, stops/disposes
   capture, and disposes Lua/input resources. `on_stop()` is synchronous; yielding
   from it is rejected during cleanup. Instances are removed after cleanup.
+  `ITaskScheduler.InstancesChanged` fires after an instance enters or leaves the
+  active collection; the WinUI host marshals it to its dispatcher and rereads
+  `Instances` to bind the selected run. A failed UI subscriber cannot fail the run.
 * The host captures `debug.sethook` before removing Lua's `debug` and `coroutine`
   globals. Each host-created coroutine gets a count hook that checks cancellation
   every 10,000 Lua instructions. The hook and coroutine handles live in private

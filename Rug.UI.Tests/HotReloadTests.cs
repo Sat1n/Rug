@@ -100,6 +100,7 @@ internal static class HotReloadTests
 
     private sealed class FakeScheduler : ITaskScheduler
     {
+        public event EventHandler? InstancesChanged { add { } remove { } }
         public int RefreshCount { get; private set; }
         public IReadOnlyCollection<TaskExecutionContext> Instances => [];
         public Task<Guid> StartTaskAsync(string pluginId, nint hwnd, CancellationToken cancellationToken = default)

@@ -54,6 +54,7 @@ public sealed class TaskScheduler : ITaskScheduler
     }
 
     public IReadOnlyCollection<TaskExecutionContext> Instances => _instances.Values.ToArray();
+    public event EventHandler? InstancesChanged;
 
     /// <summary>Replace the cached catalog after a plugin file save, under the same gate used by starts.</summary>
     public async Task RefreshPluginsAsync(CancellationToken cancellationToken = default)
@@ -169,6 +170,7 @@ public sealed class TaskScheduler : ITaskScheduler
                 if (!_instances.TryAdd(id, context)) throw new InvalidOperationException("Duplicate instance id.");
                 context.Runner = Task.Run(() => RunAsync(context));
             }
+            NotifyInstancesChanged();
             return id;
         }
         catch
@@ -298,7 +300,14 @@ public sealed class TaskScheduler : ITaskScheduler
             context.SetStatus(context.LastError is null ? AutomationTaskStatus.Stopped : AutomationTaskStatus.Faulted);
             _instances.TryRemove(context.InstanceId, out _);
             context.Cancellation.Dispose();
+            NotifyInstancesChanged();
         }
+    }
+
+    private void NotifyInstancesChanged()
+    {
+        try { InstancesChanged?.Invoke(this, EventArgs.Empty); }
+        catch (Exception error) { _logger.LogWarning(error, "Instance-list notification failed"); }
     }
 
     private void RecordCleanupError(TaskExecutionContext context, Exception ex, string stage)

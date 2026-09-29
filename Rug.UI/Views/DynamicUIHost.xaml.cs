@@ -15,7 +15,9 @@ public sealed partial class DynamicUIHost : Page
     private IDisposable? _hotReloadRegistration;
     private string? _pluginId;
     private ICommandBus? _bus;
-    private DemoWorkflowCoordinator? _demo;
+    private RunIdentity? _activeIdentity;
+    private IReadOnlyDictionary<string, IReadOnlyList<SchemaStep>> _displayFallbacks =
+        new Dictionary<string, IReadOnlyList<SchemaStep>>();
     private CancellationTokenSource? _noticeTimer;
 
     public DynamicUIHost()
@@ -24,7 +26,6 @@ public sealed partial class DynamicUIHost : Page
         Unloaded += (_, _) =>
         {
             DetachHotReload();
-            DetachDemo();
             Clear();
         };
     }
@@ -44,33 +45,22 @@ public sealed partial class DynamicUIHost : Page
         Render(schema, bus ?? App.GetService<ICommandBus>());
     }
 
-    public void AttachDemo(DemoWorkflowCoordinator demo)
+    /// <summary>Bind this plugin's current run; null clears its live InstanceState binding.</summary>
+    public void SetActiveInstance(RunIdentity? identity,
+        IReadOnlyDictionary<string, IReadOnlyList<SchemaStep>>? displayFallbacks = null)
     {
-        DetachDemo();
-        _demo = demo;
-        demo.TimelineChanged += OnTimelineChanged;
-        BindDemoTimeline();
-    }
-
-    private void OnTimelineChanged(object? sender, EventArgs args) => RunOnUi(() =>
-    {
-        BindDemoTimeline();
-    });
-
-    private void BindDemoTimeline()
-    {
-        if (_demo is not { } demo) return;
-        _factory?.SetActiveInstance(demo.ActiveInstanceId,
-            new Dictionary<string, IReadOnlyList<SchemaStep>>(StringComparer.Ordinal)
-            {
-                [DemoWorkflowCoordinator.TimelineStateKey] = demo.CurrentSteps
-            });
-    }
-
-    private void DetachDemo()
-    {
-        if (_demo is not null) _demo.TimelineChanged -= OnTimelineChanged;
-        _demo = null;
+        if (identity is not null && _pluginId is not null &&
+            !string.Equals(identity.PluginId, _pluginId, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("Run identity belongs to a different plugin.", nameof(identity));
+        var detached = displayFallbacks?.ToDictionary(pair => pair.Key,
+            pair => (IReadOnlyList<SchemaStep>)pair.Value.ToArray(), StringComparer.Ordinal)
+            ?? new Dictionary<string, IReadOnlyList<SchemaStep>>();
+        RunOnUi(() =>
+        {
+            _activeIdentity = identity;
+            _displayFallbacks = detached;
+            _factory?.SetActiveInstance(identity?.InstanceId, detached);
+        });
     }
 
     public void ShowLoadError(Exception error) =>
@@ -119,8 +109,7 @@ public sealed partial class DynamicUIHost : Page
         }
         Clear();
         _factory = nextFactory;
-        if (_demo is not null)
-            BindDemoTimeline();
+        _factory.SetActiveInstance(_activeIdentity?.InstanceId, _displayFallbacks);
         _factory.CommandFailed += OnCommandFailed;
         DynamicContent.Children.Add(tree);
         ErrorBanner.IsOpen = false;

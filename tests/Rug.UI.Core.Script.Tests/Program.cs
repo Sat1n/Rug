@@ -521,6 +521,8 @@ try
         (c, i) => new LuaRuntime(c, new FakeOcr(), i, luaLogger, commandBus: scopedBus),
         NullLogger<RugTaskScheduler>.Instance, anomalyLogger, TimeSpan.FromMilliseconds(20),
         commandBus: scopedBus);
+    int instanceListNotifications = 0;
+    scheduler.InstancesChanged += (_, _) => Interlocked.Increment(ref instanceListNotifications);
 
     Guid life = await scheduler.StartTaskAsync("life", 101);
     TaskExecutionContext lifeContext = scheduler.Instances.Single(c => c.InstanceId == life);
@@ -537,6 +539,7 @@ try
     Check(scheduler.ResumeTask(life), "resume failed");
     await WaitUntilAsync(() => events.Count(e => e == "Lua: life_tick") > pausedTicks);
     await scheduler.StopTaskAsync(life);
+    Check(instanceListNotifications >= 2, "instance add/remove did not notify the host");
     Check(lifeContext.TaskStatus == AutomationTaskStatus.Stopped && events.Contains("Lua: life_stop") &&
           events.Contains("capture-stop:101"), "on_stop or capture cleanup missing");
     Guid rebound = await scheduler.StartTaskAsync("life", 101);
