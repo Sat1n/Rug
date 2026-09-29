@@ -15,6 +15,7 @@ public sealed partial class DynamicUIHost : Page
     private IDisposable? _hotReloadRegistration;
     private string? _pluginId;
     private ICommandBus? _bus;
+    private DemoWorkflowCoordinator? _demo;
     private CancellationTokenSource? _noticeTimer;
 
     public DynamicUIHost()
@@ -23,6 +24,7 @@ public sealed partial class DynamicUIHost : Page
         Unloaded += (_, _) =>
         {
             DetachHotReload();
+            DetachDemo();
             Clear();
         };
     }
@@ -34,10 +36,31 @@ public sealed partial class DynamicUIHost : Page
     }
 
     public async Task LoadFileAsync(string path, ICommandBus? bus = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, string? pluginId = null)
     {
         UISchemaNode schema = await _parser.ParseFileAsync(path, cancellationToken);
+        _pluginId = pluginId ?? _pluginId ??
+            Path.GetFileName(Path.GetDirectoryName(Path.GetFullPath(path))) ?? "preview";
         Render(schema, bus ?? App.GetService<ICommandBus>());
+    }
+
+    public void AttachDemo(DemoWorkflowCoordinator demo)
+    {
+        DetachDemo();
+        _demo = demo;
+        demo.TimelineChanged += OnTimelineChanged;
+        _factory?.SetActiveInstance(demo.ActiveInstanceId, demo.CurrentSteps);
+    }
+
+    private void OnTimelineChanged(object? sender, EventArgs args) => RunOnUi(() =>
+    {
+        if (_demo is { } demo) _factory?.SetActiveInstance(demo.ActiveInstanceId, demo.CurrentSteps);
+    });
+
+    private void DetachDemo()
+    {
+        if (_demo is not null) _demo.TimelineChanged -= OnTimelineChanged;
+        _demo = null;
     }
 
     public void ShowLoadError(Exception error) =>
@@ -76,7 +99,7 @@ public sealed partial class DynamicUIHost : Page
     private void Render(UISchemaNode schema, ICommandBus bus)
     {
         // Build the replacement before removing the old view. Invalid schemas keep the last good UI.
-        var nextFactory = new UIFactory(bus);
+        var nextFactory = new UIFactory(bus, _pluginId ?? "preview");
         UIElement tree;
         try { tree = nextFactory.Build(schema); }
         catch
@@ -86,6 +109,8 @@ public sealed partial class DynamicUIHost : Page
         }
         Clear();
         _factory = nextFactory;
+        if (_demo is not null)
+            _factory.SetActiveInstance(_demo.ActiveInstanceId, _demo.CurrentSteps);
         _factory.CommandFailed += OnCommandFailed;
         DynamicContent.Children.Add(tree);
         ErrorBanner.IsOpen = false;

@@ -17,8 +17,9 @@ no automation pipeline and no native interop itself.
 > `ViewModels/DevToolsViewModel.cs` visualize WGC capture, OCR overlay, the Spy++-style
 > crosshair window picker, input self-tests and a 100x stress run. Native interop is
 > **not** done here — the app consumes `Rug.UI.Core` services.
-> Task 3.1.1 registers a singleton `StateStore`/`ICommandBus`; the WinUI
-> `DispatcherQueue` delivers background state notifications on the UI thread.
+> Task 3.1.1 registers a singleton `StateStore`/`ICommandBus`; Task 3.5-02
+> structurally partitions its data by application, plugin and run. The WinUI
+> `DispatcherQueue` delivers scoped background notifications on the UI thread.
 
 ## Internal Topology
 
@@ -65,7 +66,7 @@ no automation pipeline and no native interop itself.
 ## Dynamic UI renderer (Task 3.2)
 
 * `Services/UIFactory.cs` maps validated `UISchemaNode` trees to WinUI 3 controls. Settings cards use Windows Community Toolkit `SettingsCard`; navigation uses the native `SelectorBar`. `Controls/TaskSelectorCard` provides selection, ordering, select-all, clear and command dispatch; `Controls/StepFlowView` renders status and optional app-owned thumbnail URIs. `InfoBanner` maps to `InfoBar`.
-* `Views/DynamicUIHost` accepts JSON text or a file plus the shared `ICommandBus`. The factory initializes missing keys from schema defaults, forwards user edits through the bus, applies bus notifications to controls on the UI dispatcher and detaches event subscriptions when the page unloads. Command failures surface in the host `InfoBar`.
+* `Views/DynamicUIHost` accepts JSON text or a file plus `ICommandBus`. Settings controls read/write the selected plugin's `PluginConfig` scope; the timeline is associated with the active run's `InstanceState`. The factory initializes missing keys from schema defaults, applies exact-scope UI notifications on the dispatcher and detaches subscriptions when replaced or unloaded. Command failures surface in the host `InfoBar`.
 * `MainWindow` now hosts the plugin navigation and `DynamicUIHost`; the older `MainPage` remains a legacy page. A plugin supplies `ui.json` to `DynamicUIHost.LoadFileAsync` without recompiling. Command failures appear in the error banner.
 * `Rug.UI` targets Windows SDK 22621 and pins Windows App SDK 1.5 plus SettingsControls 8.1 because `SelectorBar` first appears in 1.5 and this toolkit build requires the 22621 target framework.
 
@@ -84,10 +85,10 @@ no automation pipeline and no native interop itself.
 
 ## Plugin hot reload (Task 3.3)
 
-* The app watches `%LOCALAPPDATA%/Rug/plugins/` by default; set `RUG_PLUGINS_ROOT` to use an isolated directory. `MainWindow` lists scanned plugins and attaches the selected `DynamicUIHost` to its plugin ID. Changing JSON or Lua rebuilds the card tree on the WinUI dispatcher while the app stays open. The old factory unsubscribes from `CommandBus` before its controls are removed; shared state values persist across reloads.
+* The app watches `%LOCALAPPDATA%/Rug/plugins/` by default; set `RUG_PLUGINS_ROOT` to use an isolated directory. `MainWindow` lists scanned plugins and attaches the selected `DynamicUIHost` to its plugin ID. Changing JSON or Lua rebuilds the card tree on the WinUI dispatcher while the app stays open. The old factory unsubscribes before its controls are removed. PluginConfig values persist in memory across reloads; InstanceState is discarded when the old run stops.
 * The host displays a success `InfoBar` for two seconds, or a persistent error with the JSON/Lua exception stack. A failed parse keeps the last good UI in place; correcting the file triggers another reload. UI and script changes are validated before new instances start.
 
 ## Phase 3 MVP integration (Task 3.4)
 
 * `MainWindow` owns the plugin sidebar, selected dynamic host, hot-reload status and a footer entry for DevTools. The bundled `plugins/demo_arknights` is copied into the app output and seeded into the default local plugin directory only when absent; an explicit `RUG_PLUGINS_ROOT` is never modified.
-* `DemoWorkflowCoordinator` subscribes to `demo.start_selected`, starts an isolated Lua task, and turns `rug.set_state("demo.step_event", json)` updates into `SchemaStep[]` at `demo.steps`. `StepFlowView` reads the current state when rebuilt, preserving the timeline on hot reload. The demo uses only `timer` permission and simulates wake/OCR steps without controlling an external app.
+* `DemoWorkflowCoordinator` subscribes to `demo.start_selected` and passes the selected task IDs as that run's launch input. Its per-instance state subscription converts `rug.set_state("demo.step_event", json)` into `SchemaStep[]` at the same instance's `demo.steps`; the subscription is released on stop. The UI keeps a detached display copy of the completed timeline so a card rebuild can still show it, while the stopped InstanceState remains cleared. The demo uses only `timer` permission and simulates wake/OCR steps without controlling an external app.

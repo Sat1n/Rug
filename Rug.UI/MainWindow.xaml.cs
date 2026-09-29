@@ -90,9 +90,11 @@ public sealed partial class MainWindow : WindowEx
             .FirstOrDefault(item => item.Id == pluginId);
         if (plugin is null) return;
         var next = new DynamicUIHost();
-        try { await next.LoadFileAsync(Path.Combine(plugin.PluginDirectory, "ui.json")); }
+        try { await next.LoadFileAsync(Path.Combine(plugin.PluginDirectory, "ui.json"), pluginId: plugin.Id); }
         catch (Exception error) { next.ShowLoadError(error); }
         next.AttachHotReload(App.GetService<IHotReloadService>(), pluginId);
+        if (pluginId == Services.DemoWorkflowCoordinator.PluginId)
+            next.AttachDemo(App.GetService<Services.DemoWorkflowCoordinator>());
         PluginContent.Content = next;
         _host = next;
         _activePlugin = pluginId;

@@ -13,22 +13,24 @@ public sealed class TaskExecutionContext
     private TaskCompletionSource<bool> _resume = CompletedSignal();
     private AutomationTaskStatus _status = AutomationTaskStatus.Starting;
 
-    internal TaskExecutionContext(Guid instanceId, string pluginId, nint targetHwnd,
+    internal TaskExecutionContext(RunIdentity identity,
         CancellationTokenSource cancellation, IScriptRuntime runtime,
         ICaptureService capture, IInputService input)
     {
-        InstanceId = instanceId;
-        PluginId = pluginId;
-        TargetHwnd = targetHwnd;
+        Identity = identity;
         Cancellation = cancellation;
         Runtime = runtime;
         Capture = capture;
         Input = input;
     }
 
-    public Guid InstanceId { get; }
-    public string PluginId { get; }
-    public nint TargetHwnd { get; }
+    public RunIdentity Identity { get; }
+    public Guid InstanceId => Identity.InstanceId;
+    public string PluginId => Identity.PluginId;
+    public long RunGeneration => Identity.RunGeneration;
+    public Guid? TargetBindingId => Identity.TargetBindingId;
+    public nint TargetHwnd => Identity.TargetHwnd;
+    public StateScope InstanceScope => Identity.InstanceScope;
     public CancellationTokenSource Cancellation { get; }
     public IScriptRuntime Runtime { get; }
     public AutomationTaskStatus TaskStatus { get { lock (_gate) return _status; } }

@@ -97,6 +97,8 @@ public sealed class LuaRuntime : IScriptRuntime
     private readonly ILogger _logger;
     private readonly ICommandBus _commandBus;
     private readonly bool _ownsCommandBus;
+    private StateScope _instanceScope = StateScope.Instance("standalone", Guid.NewGuid());
+    private IReadOnlyDictionary<string, object?>? _configSnapshot;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly SemaphoreSlim _driveGate = new(1, 1);
     private readonly object _stateGate = new();
@@ -139,6 +141,21 @@ public sealed class LuaRuntime : IScriptRuntime
 
     public ScriptState State { get { lock (_stateGate) return _state; } }
     public event EventHandler<ScriptStateChangedEventArgs>? StateChanged;
+
+    public void ConfigureState(RunIdentity identity, IReadOnlyDictionary<string, object?> launchInputs,
+        IReadOnlyDictionary<string, object?> pluginConfig)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentNullException.ThrowIfNull(launchInputs);
+        ArgumentNullException.ThrowIfNull(pluginConfig);
+        if (State != ScriptState.Uninitialized) throw new InvalidOperationException("State identity must be bound before initialization.");
+        _instanceScope = identity.InstanceScope;
+        var copy = new StateStore();
+        StateScope configurationScope = StateScope.Plugin(identity.PluginId);
+        foreach (var pair in pluginConfig) copy.SetState(configurationScope, pair.Key, pair.Value);
+        _configSnapshot = copy.Snapshot(configurationScope);
+        foreach (var pair in launchInputs) _commandBus.SetState(_instanceScope, pair.Key, pair.Value);
+    }
 
     public void ConfigureAnomalyHandler(Func<string, string, Task<string>> handler)
     {
@@ -272,15 +289,16 @@ public sealed class LuaRuntime : IScriptRuntime
         finally { _driveGate.Release(); }
     }
 
-    public object? GetConfig(string key) => _manifest?.Configuration?.GetValueOrDefault(key);
+    public object? GetConfig(string key) => StateStore.CloneValue(
+        (_configSnapshot ?? _manifest?.Configuration)?.GetValueOrDefault(key));
 
-    public object? GetState(string key) => _commandBus.GetState<object?>(key);
+    public object? GetState(string key) => _commandBus.GetState<object?>(_instanceScope, key);
 
     public void SetState(string key, object? value)
     {
         if (value is not (null or bool or string or double or long or int))
             throw new ArgumentException("Lua state values must be nil, Boolean, string or number.", nameof(value));
-        _commandBus.SetState(key, value);
+        _commandBus.SetState(_instanceScope, key, value);
     }
 
     public void Log(string level, string message)
@@ -646,6 +664,7 @@ public sealed class LuaRuntime : IScriptRuntime
             _operations.Clear();
             _visual?.Dispose();
             if (_inputBridge is not null) await _inputBridge.DisposeAsync().ConfigureAwait(false);
+            _commandBus.CloseInstance(_instanceScope);
             if (_ownsCommandBus) _commandBus.Dispose();
             _disposed = true;
         }

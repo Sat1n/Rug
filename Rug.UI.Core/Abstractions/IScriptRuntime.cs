@@ -8,6 +8,9 @@ public interface IScriptRuntime : IAsyncDisposable
 {
     ScriptState State { get; }
     event EventHandler<ScriptStateChangedEventArgs>? StateChanged;
+    /// <summary>Bind structural identity, launch inputs and a plugin config snapshot before initialization.</summary>
+    void ConfigureState(RunIdentity identity, IReadOnlyDictionary<string, object?> launchInputs,
+        IReadOnlyDictionary<string, object?> pluginConfig) { }
     Task InitializeAsync(string scriptPath, PluginManifest manifest, CancellationToken ct = default);
     /// <summary>Bind the owning task's black-box handler before execution begins.</summary>
     void ConfigureAnomalyHandler(Func<string, string, Task<string>> handler);

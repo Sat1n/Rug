@@ -510,14 +510,16 @@ try
     var captures = new ConcurrentBag<FakeCapture>();
     var inputs = new ConcurrentBag<FakeInput>();
     var luaLogger = new RecordingLogger<LuaRuntime>(events);
+    using var scopedBus = new CommandBus(new StateStore());
     string anomalyDirectory = Path.Combine(schedulerRoot, "logs", "anomalies");
     var anomalyLogger = new AnomalyLogger(new RecordingLogger<AnomalyLogger>(events), anomalyDirectory);
     await using var scheduler = new RugTaskScheduler(
         new PluginManager(NullLogger<PluginManager>.Instance), schedulerRoot,
         () => { var c = new FakeCapture(events); captures.Add(c); return c; },
         () => { var i = new FakeInput(); inputs.Add(i); return i; },
-        (c, i) => new LuaRuntime(c, new FakeOcr(), i, luaLogger),
-        NullLogger<RugTaskScheduler>.Instance, anomalyLogger, TimeSpan.FromMilliseconds(20));
+        (c, i) => new LuaRuntime(c, new FakeOcr(), i, luaLogger, commandBus: scopedBus),
+        NullLogger<RugTaskScheduler>.Instance, anomalyLogger, TimeSpan.FromMilliseconds(20),
+        commandBus: scopedBus);
 
     Guid life = await scheduler.StartTaskAsync("life", 101);
     TaskExecutionContext lifeContext = scheduler.Instances.Single(c => c.InstanceId == life);
@@ -536,6 +538,14 @@ try
     await scheduler.StopTaskAsync(life);
     Check(lifeContext.TaskStatus == AutomationTaskStatus.Stopped && events.Contains("Lua: life_stop") &&
           events.Contains("capture-stop:101"), "on_stop or capture cleanup missing");
+    Guid rebound = await scheduler.StartTaskAsync("life", 101);
+    TaskExecutionContext reboundContext = scheduler.Instances.Single(item => item.InstanceId == rebound);
+    Check(reboundContext.InstanceId != lifeContext.InstanceId &&
+          reboundContext.RunGeneration > lifeContext.RunGeneration &&
+          reboundContext.TargetBindingId is not null &&
+          reboundContext.TargetBindingId != lifeContext.TargetBindingId,
+          "same HWND was reused as run or target-binding identity");
+    await scheduler.StopTaskAsync(rebound);
 
     Guid[] concurrent = await Task.WhenAll(
         scheduler.StartTaskAsync("life", 201),
@@ -557,6 +567,49 @@ try
     Check(scheduler.Instances.Count == 2, "stopping one instance affected the others");
     await Task.WhenAll(concurrent.Skip(1).Select(scheduler.StopTaskAsync));
     Check(scheduler.Instances.Count == 0 && captures.All(c => c.StopCalls == 1), "concurrent sessions leaked");
+
+    await WritePluginAsync("scoped-a", """
+        function on_init()
+          rug.set_state('same_key', rug.get_state('launch'))
+          rug.set_state('config_at_start', rug.get_config('level'))
+        end
+        """);
+    await WritePluginAsync("scoped-b", """
+        function on_init() rug.set_state('same_key', rug.get_state('launch')) end
+        """);
+    await scheduler.RefreshPluginsAsync();
+    var pluginA = StateScope.Plugin("scoped-a");
+    scopedBus.SetState(pluginA, "level", "before");
+    Guid[] scoped = await Task.WhenAll(
+        scheduler.StartTaskAsync("scoped-a", 0, new Dictionary<string, object?> { ["launch"] = "one" }),
+        scheduler.StartTaskAsync("scoped-a", 0, new Dictionary<string, object?> { ["launch"] = "two" }),
+        scheduler.StartTaskAsync("scoped-b", 0, new Dictionary<string, object?> { ["launch"] = "three" }));
+    var scopedContexts = scoped.Select(id => scheduler.Instances.Single(item => item.InstanceId == id)).ToArray();
+    await WaitUntilAsync(() => scoped.All(id => scopedBus.Contains(
+        scopedContexts.Single(item => item.InstanceId == id).InstanceScope, "same_key")));
+    Check(scopedBus.GetState(scopedContexts[0].InstanceScope, "same_key", "") == "one" &&
+          scopedBus.GetState(scopedContexts[1].InstanceScope, "same_key", "") == "two" &&
+          scopedBus.GetState(scopedContexts[2].InstanceScope, "same_key", "") == "three" &&
+          scopedContexts[0].RunGeneration != scopedContexts[1].RunGeneration &&
+          scopedContexts.All(item => item.TargetBindingId is null && item.TargetHwnd == 0),
+          "windowless runs shared state or identity");
+    Check(scopedBus.GetState(scopedContexts[0].InstanceScope, "config_at_start", "") == "before" &&
+          scopedBus.GetState(scopedContexts[1].InstanceScope, "config_at_start", "") == "before",
+          "plugin config startup snapshot was not isolated");
+    scopedBus.SetState(pluginA, "level", "after");
+    Check(scopedBus.GetState(scopedContexts[0].InstanceScope, "config_at_start", "") == "before",
+          "running instance observed later plugin config write");
+    await Task.WhenAll(scoped.Select(scheduler.StopTaskAsync));
+    Check(!scopedBus.Contains(scopedContexts[0].InstanceScope, "same_key") &&
+          scopedBus.GetState(pluginA, "level", "") == "after", "stop did not clear instance state or keep plugin config");
+    try { scopedBus.SetState(scopedContexts[0].InstanceScope, "late", true); throw new Exception("old run wrote after stop"); }
+    catch (ObjectDisposedException) { }
+    Guid fresh = await scheduler.StartTaskAsync("scoped-a", 0);
+    TaskExecutionContext freshContext = scheduler.Instances.Single(item => item.InstanceId == fresh);
+    Check(freshContext.RunGeneration > scopedContexts[1].RunGeneration &&
+          !scopedBus.Contains(freshContext.InstanceScope, "launch"), "restart inherited old launch inputs");
+    await WaitUntilAsync(() => scopedBus.GetState(freshContext.InstanceScope, "config_at_start", "") == "after");
+    await scheduler.StopTaskAsync(fresh);
 
     Guid spin = await scheduler.StartTaskAsync("spin", 303);
     TaskExecutionContext spinContext = scheduler.Instances.Single(c => c.InstanceId == spin);
@@ -736,6 +789,58 @@ stateStore.StateChanged += (_, e) =>
 stateStore.SetState("parent", true);
 Check(stateStore.GetState("child", false), "state listener could not re-enter the store");
 
+var tenantA = StateScope.Instance("alpha", Guid.NewGuid());
+var tenantB = StateScope.Instance("alpha", Guid.NewGuid());
+var tenantC = StateScope.Instance("beta", Guid.NewGuid());
+stateStore.SetState(StateScope.Plugin("alpha"), "level", "alpha-only");
+stateStore.SetState(StateScope.Plugin("beta"), "level", "beta-only");
+Check(stateStore.GetState(StateScope.Plugin("alpha"), "level", "") == "alpha-only" &&
+      stateStore.GetState(StateScope.Plugin("beta"), "level", "") == "beta-only",
+      "plugin configurations shared a key");
+Check(StateScope.Plugin("ALPHA") == StateScope.Plugin("alpha"),
+      "plugin scope casing diverged from catalog identity");
+var tenantEvents = new ConcurrentQueue<StateChangedEventArgs>();
+stateStore.StateChanged += (_, change) => tenantEvents.Enqueue(change);
+await Task.WhenAll(Enumerable.Range(0, 3).Select(index => Task.Run(() =>
+{
+    StateScope scope = new[] { tenantA, tenantB, tenantC }[index];
+    for (int value = 0; value < 100; value++) stateStore.SetState(scope, "shared", value);
+})));
+Check(new[] { tenantA, tenantB, tenantC }.All(scope =>
+    stateStore.GetState(scope, "shared", -1) == 99) &&
+    tenantEvents.Count(change => change.Key == "shared" && change.Scope == tenantA) == 100 &&
+    tenantEvents.Count(change => change.Key == "shared" && change.Scope == tenantB) == 100 &&
+    tenantEvents.Count(change => change.Key == "shared" && change.Scope == tenantC) == 100,
+    "structural scopes mixed values or events");
+Check(tenantEvents.Where(change => change.Scope == tenantA && change.Key == "shared")
+    .Select(change => change.Revision).Distinct().Count() == 100,
+    "scope revisions were not unique");
+stateStore.SetState<string?>(tenantA, "explicit_null", null);
+Check(stateStore.Contains(tenantA, "explicit_null") && !stateStore.Contains(tenantB, "explicit_null") &&
+      stateStore.GetState(tenantA, "explicit_null", "fallback") is null &&
+      stateStore.GetState(tenantA, "missing", "fallback") == "fallback",
+      "scoped null and missing semantics are wrong");
+string[] mutable = ["original"];
+stateStore.SetState(tenantA, "array", mutable);
+mutable[0] = "changed";
+string[] detached = stateStore.GetState(tenantA, "array", Array.Empty<string>());
+detached[0] = "changed again";
+var detachedSnapshot = stateStore.Snapshot(tenantA);
+((string[])detachedSnapshot["array"]!)[0] = "changed in snapshot";
+Check(stateStore.GetState(tenantA, "array", Array.Empty<string>())[0] == "original" &&
+      tenantEvents.Last(change => change.Key == "array").Value is JsonElement,
+      "mutable state leaked through a snapshot or event");
+try { stateStore.SetState(tenantA, "too_large", new string('x', StateStore.MaxValueBytes));
+    throw new Exception("oversized state was accepted"); }
+catch (ArgumentOutOfRangeException) { }
+try { stateStore.SetState(tenantA, "unsupported", (Action)(() => { }));
+    throw new Exception("unsupported state was accepted"); }
+catch (ArgumentException) { }
+object deep = "leaf";
+for (int depth = 0; depth < StateStore.MaxDepth + 2; depth++) deep = new object[] { deep };
+try { stateStore.SetState(tenantA, "too_deep", deep); throw new Exception("deep state was accepted"); }
+catch (ArgumentException) { }
+
 var uiCallbacks = new ConcurrentQueue<Action>();
 bool uiAccess = false;
 using var bus = new CommandBus(stateStore,
@@ -769,6 +874,33 @@ uiAccess = true;
 while (uiCallbacks.TryDequeue(out Action? callback)) callback();
 Check(busNotifications == 3 && bus.GetState("ui_value", 0) == 4,
     "delayed UI notification applied an obsolete state revision");
+int scopedNotifications = 0;
+int otherScopeNotifications = 0;
+using var scopedSubscription = bus.SubscribeState(tenantA, (_, change) =>
+{
+    if (change.Scope == tenantA && change.Key == "queued") scopedNotifications++;
+});
+using var otherScopeSubscription = bus.SubscribeState(tenantB, (_, change) =>
+{
+    if (change.Key == "queued") otherScopeNotifications++;
+});
+uiAccess = false;
+await Task.Run(() => bus.SetState(tenantA, "queued", 1));
+await Task.Run(() => bus.SetState(tenantA, "queued", 2));
+await Task.Run(() => bus.SetState(tenantB, "queued", 3));
+uiAccess = true;
+while (uiCallbacks.TryDequeue(out Action? callback)) callback();
+Check(scopedNotifications == 1 && otherScopeNotifications == 1 &&
+      bus.GetState(tenantA, "queued", 0) == 2,
+    "late UI notification overwrote a scoped revision or crossed instances");
+uiAccess = false;
+await Task.Run(() => bus.SetState(tenantA, "queued", 3));
+bus.CloseInstance(tenantA);
+uiAccess = true;
+int beforeDrain = scopedNotifications;
+while (uiCallbacks.TryDequeue(out Action? callback)) callback();
+Check(scopedNotifications == beforeDrain && !bus.Contains(tenantA, "queued"),
+    "stopped instance delivered a queued callback");
 int routed = 0;
 using (bus.Subscribe("save", async (parameter, ct) =>
 {
@@ -784,8 +916,10 @@ try { await bus.ExecuteCommandAsync("save", 1); throw new Exception("unsubscribe
 catch (KeyNotFoundException) { }
 
 string stateScript = Path.Combine(AppContext.BaseDirectory, "state_bus_test.lua");
+bus.SetState("host_only", true);
 await File.WriteAllTextAsync(stateScript, """
     function on_tick()
+      assert(rug.get_state('host_only') == nil)
       rug.set_state('auto_sell', true)
       assert(rug.get_state('auto_sell') == true)
       rug.sleep(20)
@@ -795,10 +929,12 @@ await File.WriteAllTextAsync(stateScript, """
 await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new FakeInput(),
     NullLogger<LuaRuntime>.Instance, commandBus: bus))
 {
+    var identity = new RunIdentity("state-test", Guid.NewGuid(), 1, null, 0);
+    runtime.ConfigureState(identity, new Dictionary<string, object?>(), new Dictionary<string, object?>());
     await runtime.InitializeAsync(stateScript, new PluginManifest([Permission.Timer]));
     Check((await runtime.StepAsync()).State == ScriptState.Yielded &&
-          bus.GetState("auto_sell", false), "Lua set_state did not update the shared C# store");
-    bus.SetState("auto_sell", false);
+          bus.GetState(identity.InstanceScope, "auto_sell", false), "Lua set_state did not update its C# instance state");
+    bus.SetState(identity.InstanceScope, "auto_sell", false);
     Check((await runtime.ResumeAsync()).State == ScriptState.Stopped,
         "Lua get_state did not observe the latest C# write");
 }

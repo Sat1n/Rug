@@ -16,6 +16,8 @@ public sealed class CommandBus : ICommandBus
     private readonly Func<bool>? _hasUiAccess;
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<long,
         Func<object?, CancellationToken, Task>>> _handlers = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<StateScope, ConcurrentDictionary<long,
+        EventHandler<StateChangedEventArgs>>> _stateHandlers = new();
     private long _nextSubscriptionId;
     private volatile bool _disposed;
 
@@ -42,6 +44,50 @@ public sealed class CommandBus : ICommandBus
     {
         ThrowIfDisposed();
         _store.SetState(key, value);
+    }
+
+    public T GetState<T>(StateScope scope, string key, T defaultValue = default!)
+    {
+        ThrowIfDisposed();
+        return _store.GetState(scope, key, defaultValue);
+    }
+
+    public void SetState<T>(StateScope scope, string key, T value)
+    {
+        ThrowIfDisposed();
+        _store.SetState(scope, key, value);
+    }
+
+    public bool Contains(StateScope scope, string key)
+    {
+        ThrowIfDisposed();
+        return _store.Contains(scope, key);
+    }
+
+    public IReadOnlyDictionary<string, object?> Snapshot(StateScope scope)
+    {
+        ThrowIfDisposed();
+        return _store.Snapshot(scope);
+    }
+
+    public void CloseInstance(StateScope scope)
+    {
+        ThrowIfDisposed();
+        _store.CloseInstance(scope);
+        _stateHandlers.TryRemove(scope, out _);
+    }
+
+    public IDisposable SubscribeState(StateScope scope, EventHandler<StateChangedEventArgs> handler)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(handler);
+        _store.Snapshot(scope); // validate the structural scope
+        if (_store.IsClosed(scope)) return new StateSubscription(this, scope, -1);
+        long id = Interlocked.Increment(ref _nextSubscriptionId);
+        _stateHandlers.GetOrAdd(scope, _ => new()).TryAdd(id, handler);
+        var subscription = new StateSubscription(this, scope, id);
+        if (_store.IsClosed(scope)) subscription.Dispose();
+        return subscription;
     }
 
     public IDisposable Subscribe(string commandName, Func<object?, CancellationToken, Task> handler)
@@ -84,8 +130,12 @@ public sealed class CommandBus : ICommandBus
     {
         // Concurrent writers can call StateStore handlers out of order. A delayed
         // UI callback must never replace a newer visible value with an older one.
-        if (!_disposed && _store.GetRevision(change.Key) == change.Revision)
-            StateChanged?.Invoke(this, change);
+        if (!_disposed && _store.GetRevision(change.Scope, change.Key) == change.Revision)
+        {
+            if (change.Scope == StateScope.App) StateChanged?.Invoke(this, change);
+            if (_stateHandlers.TryGetValue(change.Scope, out var handlers))
+                foreach (var handler in handlers.Values) handler(this, change);
+        }
     }
 
     private void ThrowIfDisposed()
@@ -99,6 +149,7 @@ public sealed class CommandBus : ICommandBus
         _disposed = true;
         _store.StateChanged -= OnStoreChanged;
         _handlers.Clear();
+        _stateHandlers.Clear();
     }
 
     private sealed class Subscription(CommandBus bus, string name, long id) : IDisposable
@@ -108,6 +159,17 @@ public sealed class CommandBus : ICommandBus
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
             if (bus._handlers.TryGetValue(name, out var subscribers))
+                subscribers.TryRemove(id, out _);
+        }
+    }
+
+    private sealed class StateSubscription(CommandBus bus, StateScope scope, long id) : IDisposable
+    {
+        private int _disposed;
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            if (bus._stateHandlers.TryGetValue(scope, out var subscribers))
                 subscribers.TryRemove(id, out _);
         }
     }

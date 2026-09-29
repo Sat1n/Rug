@@ -98,7 +98,8 @@ public partial class App : Application
                     templateMatcher: provider.GetRequiredService<ITemplateMatchService>(),
                     commandBus: provider.GetRequiredService<ICommandBus>()),
                 provider.GetRequiredService<ILogger<Rug.UI.Core.Services.TaskScheduler>>(),
-                provider.GetRequiredService<IAnomalyLogger>()));
+                provider.GetRequiredService<IAnomalyLogger>(),
+                commandBus: provider.GetRequiredService<ICommandBus>()));
             services.AddSingleton<IHotReloadService>(provider => new HotReloadService(
                 PluginsRoot, provider.GetRequiredService<ITaskScheduler>(),
                 provider.GetRequiredService<ILogger<HotReloadService>>()));

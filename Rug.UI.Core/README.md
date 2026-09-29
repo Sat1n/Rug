@@ -11,7 +11,7 @@ tags: [host, logic, interop, vision, lua, plugins]
 Managed host logic between the native core and the UI. It is the **single managed
 P/Invoke boundary** to `Rug.Core.dll` and exposes safe, async vision services
 (OCR, template matching, WGC capture) plus model discovery, humanized input
-synthesis and OS window inspection; it will also host task scheduling, plugin
+synthesis and OS window inspection; it also hosts task scheduling, plugin
 loading and the sandboxed Lua runtime. It contains no XAML.
 
 > **Status:** native interop + vision services implemented (Phase 1, Task 1.4):
@@ -29,7 +29,8 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 > Task 2.2 adds the managed input bridge and physical coordinate mapper.
 > Task 2.3 connects WGC frames to in-memory template matching and OCR for Lua.
 > Task 2.4 adds a real Minecraft Chinese-menu E2E harness without fake services.
-> Task 3.1.1 adds shared state and a named-command bus for UI/Lua coordination.
+> Task 3.1.1 adds state and a named-command bus; Task 3.5-02 partitions state by
+> application, plugin and run identity.
 
 ## Internal Topology
 
@@ -57,9 +58,9 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 | `Services/LuaRuntime.cs` | NLua coroutine bridge: `StepAsync` yields a `rug.*` operation, starts its .NET task, and `ResumeAsync` awaits that task before resuming Lua; all Lua-state access is serialized |
 | `Abstractions/IPluginManager.cs` · `Services/PluginManager.cs` | Scan immediate plugin directories, validate manifest/entry/config, cache valid plugins and UI schema; skip malformed plugins with a warning |
 | `Security/PermissionInterceptor.cs` · `Exceptions/PermissionDeniedException.cs` | Exact-match permission checks before sensitive API tasks start; denied calls log an audit warning and fault the script |
-| `Abstractions/ITaskScheduler.cs` · `Models/TaskExecutionContext.cs` · `Services/TaskScheduler.cs` | Concurrent plugin/window instances, per-instance capture/input/runtime ownership, pause/resume/stop state and periodic lifecycle dispatch |
-| `Models/StateChangedEventArgs.cs` · `Services/StateStore.cs` | Concurrent typed key/value state, null support and change notifications |
-| `Abstractions/ICommandBus.cs` · `Services/CommandBus.cs` | Shared state access, UI-dispatched change events and async named-command subscriptions |
+| `Abstractions/ITaskScheduler.cs` · `Models/TaskExecutionContext.cs` · `Models/RunIdentity.cs` · `Services/TaskScheduler.cs` | Concurrent plugin/window runs, independent run generation and target-binding identity, per-instance service ownership and lifecycle dispatch |
+| `Models/StateScope.cs` · `Models/StateChangedEventArgs.cs` · `Services/StateStore.cs` | Structural AppState/PluginConfig/InstanceState partitions, bounded JSON values, scoped revisions and detached events |
+| `Abstractions/ICommandBus.cs` · `Services/CommandBus.cs` | Scoped state subscriptions with stale UI callback rejection and async named-command routing |
 | `Abstractions/IAnomalyLogger.cs` · `Models/AnomalyLogModel.cs` · `Services/AnomalyLogger.cs` | Per-instance incident capture, PNG encoding and JSON black-box records |
 | `Services/FileService.cs` · `Helpers/Json.cs` | File IO / JSON helpers |
 
@@ -236,24 +237,39 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   under the ignored E2E `bin/.../e2e-run/` directory. This is an explicit
   interactive test because it sends real input to the game.
 
-## Reactive state and commands (Task 3.1.1)
+## Scoped state and commands (Tasks 3.1.1, 3.5-02)
 
-* `StateStore.GetState<T>` reads a typed value or caller default when absent.
-  `SetState<T>` commits atomically per key and raises `StateChanged` only when
-  the value actually changes. It invokes handlers after releasing its write lock,
-  so a subscriber can safely write another key. Explicit null is distinct from
-  an absent key. A type mismatch throws `InvalidCastException`.
-* `CommandBus` wraps one shared store. C# and Lua can read/write it synchronously;
-  named command handlers are registered with an `IDisposable` subscription and
-  awaited by `ExecuteCommandAsync`. UI-facing `CommandBus.StateChanged` is raised
-  directly for UI-thread writes and enqueued for background writes using injected
-  dispatcher callbacks. The core has no WinUI dependency; `Rug.UI` supplies its
-  `DispatcherQueue` at composition time. Revisions suppress stale UI callbacks
-  if concurrent writers enqueue changes out of order.
-* `LuaRuntime` accepts an optional shared `ICommandBus` and exports
-  `rug.get_state(key)` / `rug.set_state(key, value)`. Lua values are limited to
-  nil, Boolean, string and number; unsupported CLR/Lua objects are rejected.
-  Hosts must pass the same bus to UI and runtime instances for shared state.
+* `StateScope` is a structural address, separate from the user key; plugin IDs
+  are normalized case-insensitively to match catalog lookup. `AppState`
+  belongs to the application host for its lifetime; only host code uses the
+  unscoped compatibility API. `PluginConfig` belongs to one plugin and is writable
+  by the host/UI; it survives task stop and hot reload in the process, but this
+  task does not persist it to disk. Lua reads a detached startup snapshot through
+  `rug.get_config`, so later UI edits affect only future starts. `InstanceState`
+  belongs to one `(pluginId, instanceId)` run; the host and that run's Lua may
+  write it. Stop closes and clears the partition. A new run never inherits it.
+* A missing key returns the caller's default and is absent from `Snapshot`;
+  explicit JSON null is present and reads as `default(T)` (null for nullable or
+  reference types). `Contains` and `HadPreviousValue` distinguish it from absence.
+  Values must serialize to JSON
+  within 64 KiB and 16 levels. Stored bytes, typed reads, snapshots and complex
+  event payloads are detached; complex event values are immutable `JsonElement`
+  copies. Type mismatches throw `InvalidCastException`. Identical JSON writes do
+  not notify. Each partition owns a monotonically increasing revision; per-key
+  latest revisions suppress delayed UI notifications. Closed partitions reject
+  writes and invalidate queued callbacks.
+* `CommandBus.SubscribeState(scope, handler)` delivers only that scope and returns
+  a disposable subscription; `CloseInstance` removes its subscribers. The legacy
+  `StateChanged` event is AppState-only. Named commands remain host-routed. The
+  core takes dispatcher delegates; `Rug.UI` supplies `DispatcherQueue`.
+* A start creates a new `RunIdentity`: plugin ID, fresh instance GUID, per-plugin
+  monotonic run generation within the scheduler lifetime, and a separate target-binding GUID for windowed
+  runs. Windowless runs explicitly have no target binding. HWND is never used as
+  identity. Launch inputs are copied into InstanceState before Lua starts;
+  `ConfigureState` binds Lua to that scope. Lua `rug.get_state/set_state` cannot
+  address AppState, PluginConfig or another instance. Lua values remain limited
+  to nil, Boolean, string and number. Hot reload still stops the old run and
+  starts a new one without preserving its Lua stack or InstanceState.
 
 ## Native Interop & Memory Safety (CRITICAL)
 

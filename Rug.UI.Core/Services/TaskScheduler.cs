@@ -17,10 +17,12 @@ public sealed class TaskScheduler : ITaskScheduler
     private readonly Func<IInputService> _inputFactory;
     private readonly Func<ICaptureService, IInputService, IScriptRuntime> _runtimeFactory;
     private readonly ILogger _logger;
+    private readonly ICommandBus? _commandBus;
     private readonly TimeSpan _tickInterval;
     private readonly TimeSpan _watchdogTimeout;
     private readonly SemaphoreSlim _catalogGate = new(1, 1);
     private readonly ConcurrentDictionary<Guid, TaskExecutionContext> _instances = new();
+    private readonly ConcurrentDictionary<string, long> _generations = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _pluginStartGates =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly CancellationTokenSource _shutdown = new();
@@ -34,7 +36,7 @@ public sealed class TaskScheduler : ITaskScheduler
         Func<ICaptureService> captureFactory, Func<IInputService> inputFactory,
         Func<ICaptureService, IInputService, IScriptRuntime> runtimeFactory,
         ILogger<TaskScheduler> logger, IAnomalyLogger anomalies, TimeSpan? tickInterval = null,
-        TimeSpan? watchdogTimeout = null)
+        TimeSpan? watchdogTimeout = null, ICommandBus? commandBus = null)
     {
         _plugins = plugins ?? throw new ArgumentNullException(nameof(plugins));
         _anomalies = anomalies ?? throw new ArgumentNullException(nameof(anomalies));
@@ -44,6 +46,7 @@ public sealed class TaskScheduler : ITaskScheduler
         _inputFactory = inputFactory ?? throw new ArgumentNullException(nameof(inputFactory));
         _runtimeFactory = runtimeFactory ?? throw new ArgumentNullException(nameof(runtimeFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _commandBus = commandBus;
         _tickInterval = tickInterval ?? TimeSpan.FromMilliseconds(50);
         _watchdogTimeout = watchdogTimeout ?? TimeSpan.FromSeconds(1);
         if (_tickInterval <= TimeSpan.Zero || _watchdogTimeout <= TimeSpan.Zero)
@@ -66,9 +69,24 @@ public sealed class TaskScheduler : ITaskScheduler
         finally { _catalogGate.Release(); }
     }
 
-    public async Task<Guid> StartTaskAsync(string pluginId, nint hwnd, CancellationToken cancellationToken = default)
+    public Task<Guid> StartTaskAsync(string pluginId, nint hwnd, CancellationToken cancellationToken = default) =>
+        StartTaskWithReadyAsync(pluginId, hwnd, new Dictionary<string, object?>(), null, cancellationToken);
+
+    public Task<Guid> StartTaskAsync(string pluginId, nint hwnd,
+        IReadOnlyDictionary<string, object?> launchInputs, CancellationToken cancellationToken = default) =>
+        StartTaskWithReadyAsync(pluginId, hwnd, launchInputs, null, cancellationToken);
+
+    public Task<Guid> StartTaskAsync(string pluginId, nint hwnd,
+        IReadOnlyDictionary<string, object?> launchInputs, Action<RunIdentity> onReady,
+        CancellationToken cancellationToken = default) =>
+        StartTaskWithReadyAsync(pluginId, hwnd, launchInputs, onReady, cancellationToken);
+
+    private async Task<Guid> StartTaskWithReadyAsync(string pluginId, nint hwnd,
+        IReadOnlyDictionary<string, object?> launchInputs, Action<RunIdentity>? onReady,
+        CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
+        ArgumentNullException.ThrowIfNull(launchInputs);
         lock (_lifecycleGate)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(TaskScheduler));
@@ -80,7 +98,7 @@ public sealed class TaskScheduler : ITaskScheduler
         try
         {
             await gate.WaitAsync(linked.Token).ConfigureAwait(false);
-            try { return await StartCoreAsync(pluginId, hwnd, linked.Token).ConfigureAwait(false); }
+            try { return await StartCoreAsync(pluginId, hwnd, launchInputs, onReady, linked.Token).ConfigureAwait(false); }
             finally { gate.Release(); }
         }
         finally
@@ -104,12 +122,15 @@ public sealed class TaskScheduler : ITaskScheduler
         return new PluginReloadLease(gate);
     }
 
-    private async Task<Guid> StartCoreAsync(string pluginId, nint hwnd, CancellationToken cancellationToken)
+    private async Task<Guid> StartCoreAsync(string pluginId, nint hwnd,
+        IReadOnlyDictionary<string, object?> launchInputs, Action<RunIdentity>? onReady,
+        CancellationToken cancellationToken)
     {
         var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
         ICaptureService? capture = null;
         IInputService? input = null;
         IScriptRuntime? runtime = null;
+        RunIdentity? identity = null;
         try
         {
             PluginManifest source = await GetPluginAsync(pluginId, cancellation.Token).ConfigureAwait(false);
@@ -117,19 +138,30 @@ public sealed class TaskScheduler : ITaskScheduler
                 source.Permissions.Contains(Permission.ControlInput);
             if (needsWindow && hwnd == 0)
                 throw new ArgumentException("Target window handle is required.", nameof(hwnd));
+            Guid id = Guid.NewGuid();
+            long generation = _generations.AddOrUpdate(source.Id, 1, (_, previous) => checked(previous + 1));
+            identity = new RunIdentity(source.Id, id, generation,
+                hwnd == 0 ? null : Guid.NewGuid(), hwnd);
             PluginManifest manifest = source with { TargetWindow = hwnd };
+            var configuration = source.Configuration is null
+                ? new Dictionary<string, object?>(StringComparer.Ordinal)
+                : new Dictionary<string, object?>(source.Configuration, StringComparer.Ordinal);
+            if (_commandBus is not null)
+                foreach (var pair in _commandBus.Snapshot(StateScope.Plugin(source.Id)))
+                    configuration[pair.Key] = pair.Value;
             capture = _captureFactory() ?? throw new InvalidOperationException("Capture factory returned null.");
             input = _inputFactory() ?? throw new InvalidOperationException("Input factory returned null.");
             runtime = _runtimeFactory(capture, input) ?? throw new InvalidOperationException("Runtime factory returned null.");
+            runtime.ConfigureState(identity, launchInputs, configuration);
             // Capture is ready before Lua on_init can call rug.capture().
             if (hwnd != 0)
                 await capture.StartAsync(hwnd, cancellation.Token).ConfigureAwait(false);
             await runtime.InitializeAsync(Path.Combine(source.PluginDirectory, source.Entry),
                 manifest, cancellation.Token).ConfigureAwait(false);
             await runtime.PrepareLifecycleAsync().ConfigureAwait(false);
-            Guid id = Guid.NewGuid();
-            var context = new TaskExecutionContext(id, source.Id, hwnd, cancellation, runtime, capture, input);
+            var context = new TaskExecutionContext(identity, cancellation, runtime, capture, input);
             runtime.ConfigureAnomalyHandler((reason, detail) => _anomalies.LogAnomalyAsync(context, reason, detail));
+            onReady?.Invoke(identity);
             lock (_lifecycleGate)
             {
                 if (_disposed) throw new ObjectDisposedException(nameof(TaskScheduler));
@@ -141,6 +173,7 @@ public sealed class TaskScheduler : ITaskScheduler
         catch
         {
             cancellation.Cancel();
+            if (identity is not null) _commandBus?.CloseInstance(identity.InstanceScope);
             if (runtime is not null)
             {
                 runtime.Stop();
@@ -260,6 +293,7 @@ public sealed class TaskScheduler : ITaskScheduler
         }
         finally
         {
+            _commandBus?.CloseInstance(context.InstanceScope);
             context.SetStatus(context.LastError is null ? AutomationTaskStatus.Stopped : AutomationTaskStatus.Faulted);
             _instances.TryRemove(context.InstanceId, out _);
             context.Cancellation.Dispose();

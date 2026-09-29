@@ -44,3 +44,10 @@ Task 3.1.1 tests run concurrent state writers, exact change counts, deduplicatio
 null/default semantics, reentrant listeners, UI-dispatched versus synchronous UI
 notifications, async named-command subscriptions, and a live NLua/C# round trip
 through the same `CommandBus` instance.
+
+Task 3.5-02 adds structural AppState/PluginConfig/InstanceState tests: same-plugin
+and cross-plugin identical keys, concurrent scoped writes and revisions, explicit
+null versus missing keys, detached arrays/events, oversized/deep/unsupported JSON,
+stale UI notifications, and writes/callbacks after instance close. Scheduler tests
+cover windowless launch inputs, per-plugin configuration startup snapshots,
+generation/binding identity and a fresh state partition after restart.
