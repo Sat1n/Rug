@@ -49,13 +49,23 @@ public sealed partial class DynamicUIHost : Page
         DetachDemo();
         _demo = demo;
         demo.TimelineChanged += OnTimelineChanged;
-        _factory?.SetActiveInstance(demo.ActiveInstanceId, demo.CurrentSteps);
+        BindDemoTimeline();
     }
 
     private void OnTimelineChanged(object? sender, EventArgs args) => RunOnUi(() =>
     {
-        if (_demo is { } demo) _factory?.SetActiveInstance(demo.ActiveInstanceId, demo.CurrentSteps);
+        BindDemoTimeline();
     });
+
+    private void BindDemoTimeline()
+    {
+        if (_demo is not { } demo) return;
+        _factory?.SetActiveInstance(demo.ActiveInstanceId,
+            new Dictionary<string, IReadOnlyList<SchemaStep>>(StringComparer.Ordinal)
+            {
+                [DemoWorkflowCoordinator.TimelineStateKey] = demo.CurrentSteps
+            });
+    }
 
     private void DetachDemo()
     {
@@ -110,7 +120,7 @@ public sealed partial class DynamicUIHost : Page
         Clear();
         _factory = nextFactory;
         if (_demo is not null)
-            _factory.SetActiveInstance(_demo.ActiveInstanceId, _demo.CurrentSteps);
+            BindDemoTimeline();
         _factory.CommandFailed += OnCommandFailed;
         DynamicContent.Children.Add(tree);
         ErrorBanner.IsOpen = false;

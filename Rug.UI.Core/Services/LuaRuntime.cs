@@ -135,6 +135,7 @@ public sealed class LuaRuntime : IScriptRuntime
         _logger = logger;
         _commandBus = commandBus ?? new CommandBus(new StateStore());
         _ownsCommandBus = commandBus is null;
+        _commandBus.OpenInstance(_instanceScope);
         _coordinateMapper = coordinateMapper;
         _ensureForeground = ensureForeground;
     }
@@ -149,7 +150,9 @@ public sealed class LuaRuntime : IScriptRuntime
         ArgumentNullException.ThrowIfNull(launchInputs);
         ArgumentNullException.ThrowIfNull(pluginConfig);
         if (State != ScriptState.Uninitialized) throw new InvalidOperationException("State identity must be bound before initialization.");
+        _commandBus.CloseInstance(_instanceScope);
         _instanceScope = identity.InstanceScope;
+        _commandBus.OpenInstance(_instanceScope);
         var copy = new StateStore();
         StateScope configurationScope = StateScope.Plugin(identity.PluginId);
         foreach (var pair in pluginConfig) copy.SetState(configurationScope, pair.Key, pair.Value);

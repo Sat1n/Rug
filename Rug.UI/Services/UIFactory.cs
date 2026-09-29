@@ -17,8 +17,9 @@ public sealed class UIFactory : IDisposable
     private readonly IDisposable _pluginSubscription;
     private IDisposable? _instanceSubscription;
     private StateScope? _instanceScope;
-    private IReadOnlyList<SchemaStep> _instanceSteps = [];
-    private readonly List<StepFlowView> _stepViews = [];
+    private IReadOnlyDictionary<string, IReadOnlyList<SchemaStep>> _stepFallbacks =
+        new Dictionary<string, IReadOnlyList<SchemaStep>>();
+    private readonly List<(StepFlowView View, StepFlowStateBinding Binding)> _stepViews = [];
     private readonly Dictionary<string, List<Action<object?>>> _bindings = new(StringComparer.Ordinal);
     private bool _disposed;
 
@@ -31,7 +32,8 @@ public sealed class UIFactory : IDisposable
         _pluginSubscription = _bus.SubscribeState(_pluginScope, OnStateChanged);
     }
 
-    public void SetActiveInstance(Guid? instanceId, IReadOnlyList<SchemaStep> steps)
+    public void SetActiveInstance(Guid? instanceId,
+        IReadOnlyDictionary<string, IReadOnlyList<SchemaStep>>? displayFallbacks = null)
     {
         StateScope? next = instanceId is Guid id ? StateScope.Instance(_pluginScope.PluginId!, id) : null;
         if (next != _instanceScope)
@@ -41,8 +43,11 @@ public sealed class UIFactory : IDisposable
                 ? _bus.SubscribeState(scope, OnStateChanged) : null;
             _instanceScope = next;
         }
-        _instanceSteps = steps.ToArray();
-        foreach (var view in _stepViews) view.SetSteps(_instanceSteps);
+        _stepFallbacks = displayFallbacks?.ToDictionary(pair => pair.Key,
+            pair => (IReadOnlyList<SchemaStep>)pair.Value.ToArray(), StringComparer.Ordinal)
+            ?? new Dictionary<string, IReadOnlyList<SchemaStep>>();
+        foreach (var (view, binding) in _stepViews)
+            view.SetSteps(binding.Read(_bus, _instanceScope, _stepFallbacks));
     }
 
     public UIElement Build(UISchemaNode node) => node.Type switch
@@ -244,8 +249,9 @@ public sealed class UIFactory : IDisposable
     private UIElement BuildStepFlow(UISchemaNode node)
     {
         var control = new StepFlowView();
-        _stepViews.Add(control);
-        control.SetSteps(_instanceSteps.Count == 0 ? node.Steps : _instanceSteps);
+        var binding = new StepFlowStateBinding(node.StateKey, node.Steps);
+        _stepViews.Add((control, binding));
+        control.SetSteps(binding.Read(_bus, _instanceScope, _stepFallbacks));
         return new SettingsCard { Header = node.Title, Description = node.Description, Content = control };
     }
 
@@ -267,10 +273,11 @@ public sealed class UIFactory : IDisposable
 
     private void OnStateChanged(object? sender, StateChangedEventArgs e)
     {
-        if (!_disposed && _instanceScope == e.Scope && e.Key == "demo.steps")
+        if (!_disposed && _instanceScope == e.Scope)
         {
-            _instanceSteps = _bus.GetState<SchemaStep[]>(e.Scope, e.Key, []);
-            foreach (var view in _stepViews) view.SetSteps(_instanceSteps);
+            foreach (var (view, binding) in _stepViews)
+                if (binding.Matches(e, _instanceScope))
+                    view.SetSteps(binding.Read(_bus, _instanceScope, _stepFallbacks));
         }
         if (!_disposed && e.Scope == _pluginScope && _bindings.TryGetValue(e.Key, out var actions))
             foreach (var action in actions) action(_bus.GetState<object?>(_pluginScope, e.Key));

@@ -510,7 +510,8 @@ try
     var captures = new ConcurrentBag<FakeCapture>();
     var inputs = new ConcurrentBag<FakeInput>();
     var luaLogger = new RecordingLogger<LuaRuntime>(events);
-    using var scopedBus = new CommandBus(new StateStore());
+    var scopedStore = new StateStore();
+    using var scopedBus = new CommandBus(scopedStore);
     string anomalyDirectory = Path.Combine(schedulerRoot, "logs", "anomalies");
     var anomalyLogger = new AnomalyLogger(new RecordingLogger<AnomalyLogger>(events), anomalyDirectory);
     await using var scheduler = new RugTaskScheduler(
@@ -546,6 +547,21 @@ try
           reboundContext.TargetBindingId != lifeContext.TargetBindingId,
           "same HWND was reused as run or target-binding identity");
     await scheduler.StopTaskAsync(rebound);
+    int stablePartitionCount = scopedStore.ActivePartitionCount;
+    StateScope? stoppedScope = null;
+    for (int run = 0; run < 24; run++)
+    {
+        Guid repeated = await scheduler.StartTaskAsync("other", 0);
+        StateScope scope = scheduler.Instances.Single(item => item.InstanceId == repeated).InstanceScope;
+        scopedBus.SetState(scope, "repeat", run);
+        await scheduler.StopTaskAsync(repeated);
+        stoppedScope = scope;
+        Check(scopedStore.ActivePartitionCount == stablePartitionCount,
+            "repeated starts and stops retained instance partitions");
+    }
+    try { scopedBus.SetState(stoppedScope!.Value, "late", true);
+        throw new Exception("stopped run accepted a late write"); }
+    catch (ObjectDisposedException) { }
 
     Guid[] concurrent = await Task.WhenAll(
         scheduler.StartTaskAsync("life", 201),
@@ -792,6 +808,9 @@ Check(stateStore.GetState("child", false), "state listener could not re-enter th
 var tenantA = StateScope.Instance("alpha", Guid.NewGuid());
 var tenantB = StateScope.Instance("alpha", Guid.NewGuid());
 var tenantC = StateScope.Instance("beta", Guid.NewGuid());
+stateStore.OpenInstance(tenantA);
+stateStore.OpenInstance(tenantB);
+stateStore.OpenInstance(tenantC);
 stateStore.SetState(StateScope.Plugin("alpha"), "level", "alpha-only");
 stateStore.SetState(StateScope.Plugin("beta"), "level", "beta-only");
 Check(stateStore.GetState(StateScope.Plugin("alpha"), "level", "") == "alpha-only" &&
@@ -896,11 +915,33 @@ Check(scopedNotifications == 1 && otherScopeNotifications == 1 &&
 uiAccess = false;
 await Task.Run(() => bus.SetState(tenantA, "queued", 3));
 bus.CloseInstance(tenantA);
+var replacementScope = StateScope.Instance("alpha", Guid.NewGuid());
+bus.OpenInstance(replacementScope);
+int replacementNotifications = 0;
+using var replacementSubscription = bus.SubscribeState(replacementScope, (_, change) =>
+{
+    if (change.Key == "queued") replacementNotifications++;
+});
+bus.SetState(replacementScope, "queued", 4);
 uiAccess = true;
 int beforeDrain = scopedNotifications;
 while (uiCallbacks.TryDequeue(out Action? callback)) callback();
-Check(scopedNotifications == beforeDrain && !bus.Contains(tenantA, "queued"),
-    "stopped instance delivered a queued callback");
+Check(scopedNotifications == beforeDrain && replacementNotifications == 1 &&
+      !bus.Contains(tenantA, "queued") && bus.GetState(replacementScope, "queued", 0) == 4,
+    "stopped instance delivered a queued callback or changed the replacement run");
+bus.CloseInstance(replacementScope);
+try { bus.SetState(tenantA, "late", true); throw new Exception("closed instance accepted a late write"); }
+catch (ObjectDisposedException) { }
+int partitionsBeforeChurn = stateStore.ActivePartitionCount;
+for (int run = 0; run < 1000; run++)
+{
+    StateScope scope = StateScope.Instance("alpha", Guid.NewGuid());
+    bus.OpenInstance(scope);
+    bus.SetState(scope, "value", run);
+    bus.CloseInstance(scope);
+}
+Check(stateStore.ActivePartitionCount == partitionsBeforeChurn,
+    "closed partitions or revisions accumulated after repeated runs");
 int routed = 0;
 using (bus.Subscribe("save", async (parameter, ct) =>
 {

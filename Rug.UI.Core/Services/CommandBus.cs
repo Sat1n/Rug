@@ -77,6 +77,12 @@ public sealed class CommandBus : ICommandBus
         _stateHandlers.TryRemove(scope, out _);
     }
 
+    public void OpenInstance(StateScope scope)
+    {
+        ThrowIfDisposed();
+        _store.OpenInstance(scope);
+    }
+
     public IDisposable SubscribeState(StateScope scope, EventHandler<StateChangedEventArgs> handler)
     {
         ThrowIfDisposed();
@@ -86,7 +92,11 @@ public sealed class CommandBus : ICommandBus
         long id = Interlocked.Increment(ref _nextSubscriptionId);
         _stateHandlers.GetOrAdd(scope, _ => new()).TryAdd(id, handler);
         var subscription = new StateSubscription(this, scope, id);
-        if (_store.IsClosed(scope)) subscription.Dispose();
+        if (_store.IsClosed(scope))
+        {
+            subscription.Dispose();
+            _stateHandlers.TryRemove(scope, out _);
+        }
         return subscription;
     }
 

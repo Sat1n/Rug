@@ -13,6 +13,9 @@ public sealed class StateStore
     private static readonly JsonSerializerOptions JsonOptions = new() { MaxDepth = MaxDepth };
     private readonly ConcurrentDictionary<StateScope, Bucket> _buckets = new();
 
+    /// <summary>Number of live state partitions, exposed for lifecycle diagnostics.</summary>
+    public int ActivePartitionCount => _buckets.Count;
+
     public event EventHandler<StateChangedEventArgs>? StateChanged;
 
     public static object? CloneValue(object? value)
@@ -57,7 +60,10 @@ public sealed class StateStore
     {
         Validate(scope, key);
         byte[] encoded = Encode(value);
-        Bucket bucket = _buckets.GetOrAdd(scope, _ => new Bucket());
+        Bucket bucket = scope.Domain == StateDomain.InstanceState
+            ? _buckets.TryGetValue(scope, out Bucket? active) ? active
+                : throw new ObjectDisposedException(nameof(StateScope), "Instance state is not active.")
+            : _buckets.GetOrAdd(scope, _ => new Bucket());
         StateChangedEventArgs change;
         lock (bucket.Gate)
         {
@@ -82,15 +88,25 @@ public sealed class StateStore
             return bucket.Values.ToDictionary(pair => pair.Key, pair => Decode(pair.Value), StringComparer.Ordinal);
     }
 
-    /// <summary>Close a stopped instance permanently and invalidate queued notifications.</summary>
+    /// <summary>Open the state partition for a fresh run before its first write.</summary>
+    public void OpenInstance(StateScope scope)
+    {
+        if (scope.Domain != StateDomain.InstanceState) throw new ArgumentException("Only instances can open.", nameof(scope));
+        ValidateScope(scope);
+        _buckets.GetOrAdd(scope, _ => new Bucket());
+    }
+
+    /// <summary>Close a stopped instance and evict its partition, invalidating queued notifications.</summary>
     public void CloseInstance(StateScope scope)
     {
         if (scope.Domain != StateDomain.InstanceState) throw new ArgumentException("Only instances can close.", nameof(scope));
-        Bucket bucket = _buckets.GetOrAdd(scope, _ => new Bucket());
+        ValidateScope(scope);
+        if (!_buckets.TryGetValue(scope, out Bucket? bucket)) return;
         lock (bucket.Gate)
         {
             bucket.Closed = true;
             bucket.Values.Clear();
+            _buckets.TryRemove(new KeyValuePair<StateScope, Bucket>(scope, bucket));
         }
     }
 
@@ -106,7 +122,7 @@ public sealed class StateStore
 
     internal bool IsClosed(StateScope scope)
     {
-        if (!_buckets.TryGetValue(scope, out Bucket? bucket)) return false;
+        if (!_buckets.TryGetValue(scope, out Bucket? bucket)) return scope.Domain == StateDomain.InstanceState;
         lock (bucket.Gate) return bucket.Closed;
     }
 

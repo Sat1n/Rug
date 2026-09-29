@@ -9,6 +9,7 @@ namespace Rug.UI.Services;
 public sealed class DemoWorkflowCoordinator : IDisposable
 {
     public const string PluginId = "demo_arknights";
+    public const string TimelineStateKey = "demo.steps";
     private readonly ICommandBus _bus;
     private readonly ITaskScheduler _scheduler;
     private readonly IDisposable _subscription;
@@ -99,7 +100,7 @@ public sealed class DemoWorkflowCoordinator : IDisposable
                 snapshot = steps.ToArray();
                 current = _activeInstanceId == change.Scope.InstanceId;
             }
-            _bus.SetState(change.Scope, "demo.steps", snapshot);
+            _bus.SetState(change.Scope, TimelineStateKey, snapshot);
             if (current) TimelineChanged?.Invoke(this, EventArgs.Empty);
         }
         catch (JsonException) { }

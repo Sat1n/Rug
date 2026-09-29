@@ -14,6 +14,7 @@ public interface ICommandBus : IDisposable
     void SetState<T>(StateScope scope, string key, T value);
     bool Contains(StateScope scope, string key);
     IReadOnlyDictionary<string, object?> Snapshot(StateScope scope);
+    void OpenInstance(StateScope scope);
     void CloseInstance(StateScope scope);
     IDisposable SubscribeState(StateScope scope, EventHandler<StateChangedEventArgs> handler);
     IDisposable Subscribe(string commandName, Func<object?, CancellationToken, Task> handler);

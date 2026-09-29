@@ -152,6 +152,7 @@ public sealed class TaskScheduler : ITaskScheduler
             capture = _captureFactory() ?? throw new InvalidOperationException("Capture factory returned null.");
             input = _inputFactory() ?? throw new InvalidOperationException("Input factory returned null.");
             runtime = _runtimeFactory(capture, input) ?? throw new InvalidOperationException("Runtime factory returned null.");
+            _commandBus?.OpenInstance(identity.InstanceScope);
             runtime.ConfigureState(identity, launchInputs, configuration);
             // Capture is ready before Lua on_init can call rug.capture().
             if (hwnd != 0)

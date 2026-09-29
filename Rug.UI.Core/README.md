@@ -247,7 +247,10 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   task does not persist it to disk. Lua reads a detached startup snapshot through
   `rug.get_config`, so later UI edits affect only future starts. `InstanceState`
   belongs to one `(pluginId, instanceId)` run; the host and that run's Lua may
-  write it. Stop closes and clears the partition. A new run never inherits it.
+  write it. The host opens the partition before launch inputs are written. Stop
+  closes and evicts it, including its subscription registry; a missing instance
+  partition rejects delayed writes, so no tombstone pool grows with run count.
+  A new run never inherits it. `ActivePartitionCount` reports live partitions.
 * A missing key returns the caller's default and is absent from `Snapshot`;
   explicit JSON null is present and reads as `default(T)` (null for nullable or
   reference types). `Contains` and `HadPreviousValue` distinguish it from absence.
@@ -316,7 +319,7 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 ## Dynamic UI schema (Task 3.2)
 
 * `Schema/SchemaParser.cs` parses UTF-8 `ui.json` into a bounded `UISchemaNode` tree (`Page`, `Group`, `SelectorBarGroup`, `Tab` and card nodes). It rejects malformed JSON, unknown controls, duplicate IDs, wrong default types, invalid numeric ranges, duplicate option keys and empty selector groups. The parser has no WinUI dependency.
-* A node uses `type`, unique `id`, optional `title`/`description`, and type-specific properties. State controls use `stateKey` and a typed `default`; command controls use `command` and optional `parameter`. A selector group contains `tabs` of `Tab` nodes, each with `children`. `TaskSelectorCard` uses `tasks` (`id`, `title`) and a string-array default; `StepFlowView` uses `steps` (`id`, `title`, `status`, optional `thumbnail`).
+* A node uses `type`, unique `id`, optional `title`/`description`, and type-specific properties. State controls use `stateKey` and a typed `default`; command controls use `command` and optional `parameter`. A selector group contains `tabs` of `Tab` nodes, each with `children`. `TaskSelectorCard` uses `tasks` (`id`, `title`) and a string-array default; `StepFlowView` uses `steps` (`id`, `title`, `status`, optional `thumbnail`) as defaults and reads its optional `stateKey` from the active InstanceState. `StepFlowStateBinding` matches notifications by both instance scope and schema key.
 * `Rug.UI.Tests` loads the shipped example schema and checks every control kind, tab/tree structure, malformed input and state-bus round trips. The UI project owns actual WinUI construction; the core remains platform-neutral.
 
 ## Plugin hot reload (Task 3.3)
