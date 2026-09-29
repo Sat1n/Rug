@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient
-$testOutput = (Resolve-Path 'Rug.UI.Tests\bin\Debug\net9.0').Path
+$testOutput = (Resolve-Path 'Rug.UI.Tests\bin\x64\Debug\net10.0').Path
 $root = Join-Path $testOutput ('hot-ui-smoke-' + [Guid]::NewGuid().ToString('N'))
 $directory = Join-Path $root 'plugin'
 $previousRootEnv = $env:RUG_PLUGINS_ROOT
@@ -13,7 +13,7 @@ try {
     [System.IO.File]::WriteAllText((Join-Path $directory 'ui.json'),
         '{"type":"Page","id":"root","title":"BeforeReload"}')
     $env:RUG_PLUGINS_ROOT = $root
-    $appPath = (Resolve-Path 'Rug.UI\bin\x64\Debug\net9.0-windows10.0.22621.0\win-x64\Rug.UI.exe').Path
+    $appPath = (Resolve-Path 'Rug.UI\bin\x64\Debug\net10.0-windows10.0.22621.0\win-x64\Rug.UI.exe').Path
     $appProcess = Start-Process -FilePath $appPath -WorkingDirectory (Split-Path $appPath) -WindowStyle Hidden -PassThru
     Start-Sleep -Seconds 3
     $appProcess.Refresh()

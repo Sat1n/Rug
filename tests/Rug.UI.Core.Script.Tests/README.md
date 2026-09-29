@@ -1,6 +1,6 @@
 # Lua coroutine bridge tests
 
-Run `dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj`.
+Run `dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64` with the root-pinned .NET SDK `10.0.401`.
 The console test uses fake capture, OCR and input services, so no native Rug.Core
 DLL or target window is required. It verifies that sleep and capture yield without
 blocking, resume carries frame/OCR values into Lua, stop cancels pending sleep,

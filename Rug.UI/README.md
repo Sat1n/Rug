@@ -69,6 +69,19 @@ no automation pipeline and no native interop itself.
 * `MainWindow` now hosts the plugin navigation and `DynamicUIHost`; the older `MainPage` remains a legacy page. A plugin supplies `ui.json` to `DynamicUIHost.LoadFileAsync` without recompiling. Command failures appear in the error banner.
 * `Rug.UI` targets Windows SDK 22621 and pins Windows App SDK 1.5 plus SettingsControls 8.1 because `SelectorBar` first appears in 1.5 and this toolkit build requires the 22621 target framework.
 
+## .NET 10 x64 build and verification (Task 3.5-01)
+
+* The app targets `net10.0-windows10.0.22621.0` with the existing
+  `TargetPlatformMinVersion` of `10.0.17763.0`; root `global.json` pins SDK
+  `10.0.401`. Existing NuGet versions need no migration-specific upgrades.
+* Run `dotnet build Rug.UI/Rug.UI.csproj -c Debug -p:Platform=x64 -warnaserror`
+  and repeat with `-c Release`. The x64 native DLLs from
+  `x64/$(Configuration)/` are copied next to `Rug.UI.exe` under
+  `Rug.UI/bin/x64/$(Configuration)/net10.0-windows10.0.22621.0/win-x64/`.
+* Run the non-interactive UI schema suite with
+  `dotnet run --project Rug.UI.Tests/Rug.UI.Tests.csproj -c Debug -p:Platform=x64`.
+  See [UI tests](../Rug.UI.Tests/README.md) for desktop smoke and Phase 3 E2E runs.
+
 ## Plugin hot reload (Task 3.3)
 
 * The app watches `%LOCALAPPDATA%/Rug/plugins/` by default; set `RUG_PLUGINS_ROOT` to use an isolated directory. `MainWindow` lists scanned plugins and attaches the selected `DynamicUIHost` to its plugin ID. Changing JSON or Lua rebuilds the card tree on the WinUI dispatcher while the app stays open. The old factory unsubscribes from `CommandBus` before its controls are removed; shared state values persist across reloads.

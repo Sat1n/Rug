@@ -30,11 +30,12 @@ Exit code is `0` on success, `1` if any check failed, `2` if no test image is fo
 ## Run
 
 ```bat
-dotnet build ..\..\Rug.slnx -c Debug            :: or build Rug.Core in VS first
-dotnet run --project Rug.Core.CSharp.Tests.csproj -c Debug
-dotnet run --project Rug.Core.CSharp.Tests.csproj -c Debug -- --visual-only
+dotnet build Rug.Core.CSharp.Tests.csproj -c Debug -p:Platform=x64
+dotnet run --project Rug.Core.CSharp.Tests.csproj -c Debug -p:Platform=x64
+dotnet run --project Rug.Core.CSharp.Tests.csproj -c Debug -p:Platform=x64 -- --visual-only
 ```
 
 The process is x64 (`PlatformTarget=x64`) to match the native DLL. Paths are
 resolved by walking up to the directory containing `Rug.slnx`, so the working
-directory does not matter.
+directory does not matter. This harness targets `net10.0` under root-pinned SDK
+`10.0.401`; copied native DLLs land in `bin/x64/Debug/net10.0/`.

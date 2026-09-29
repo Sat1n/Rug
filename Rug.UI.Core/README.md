@@ -285,6 +285,18 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   never references `Rug.UI` (L1 §5.1).
 * Requires the native `Rug.Core.dll` (x64) plus its dependency DLLs at runtime.
 
+## .NET 10 x64 build and verification (Task 3.5-01)
+
+* The host targets `net10.0`; root `global.json` pins SDK `10.0.401`.
+  Existing NuGet versions remain unchanged after Debug/Release x64 builds.
+* Build with `dotnet build Rug.UI.Core/Rug.UI.Core.csproj -c Debug -p:Platform=x64 -warnaserror`
+  (or use `Release`). Run the Lua/scheduler suite with
+  `dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64`.
+* With `x64/Debug/Rug.Core.dll` available, run the C# C-ABI visual path via
+  `dotnet run --project tests/Rug.Core.CSharp.Tests/Rug.Core.CSharp.Tests.csproj -c Debug -p:Platform=x64 -- --visual-only`.
+  The test project copies native DLLs from `x64/$(Configuration)/` next to its
+  executable under `bin/x64/$(Configuration)/net10.0/`.
+
 ## Dynamic UI schema (Task 3.2)
 
 * `Schema/SchemaParser.cs` parses UTF-8 `ui.json` into a bounded `UISchemaNode` tree (`Page`, `Group`, `SelectorBarGroup`, `Tab` and card nodes). It rejects malformed JSON, unknown controls, duplicate IDs, wrong default types, invalid numeric ranges, duplicate option keys and empty selector groups. The parser has no WinUI dependency.
