@@ -983,6 +983,54 @@ await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new 
         "Lua get_state did not observe the latest C# write");
 }
 
+// Use the same cloned JSON launch inputs as host.start_windowless, with real NLua execution.
+Dictionary<string, object?> jsonLaunchInputs;
+using (var launchDocument = JsonDocument.Parse("""
+    {"label":"中文启动", "count":42, "fraction":1.25, "negative":-3,
+     "enabled":true, "disabled":false, "empty":null,
+     "custom.timeline":[{"Id":"launch","Title":"Structured step","Status":"Succeeded","Thumbnail":null}],
+     "options":{"enabled":false,"nested":[1,null,"value"]}}
+    """))
+{
+    jsonLaunchInputs = launchDocument.RootElement.EnumerateObject()
+        .ToDictionary(property => property.Name, property => (object?)property.Value.Clone());
+}
+string jsonLaunchScript = Path.Combine(AppContext.BaseDirectory, "json_launch_test.lua");
+await File.WriteAllTextAsync(jsonLaunchScript, """
+    function on_tick()
+        assert(type(rug.get_state('label')) == 'string' and rug.get_state('label') == '中文启动')
+        assert(type(rug.get_state('count')) == 'number' and rug.get_state('count') == 42)
+        assert(type(rug.get_state('fraction')) == 'number' and rug.get_state('fraction') == 1.25)
+        assert(type(rug.get_state('negative')) == 'number' and rug.get_state('negative') == -3)
+        assert(type(rug.get_state('enabled')) == 'boolean' and rug.get_state('enabled') == true)
+        assert(type(rug.get_state('disabled')) == 'boolean' and rug.get_state('disabled') == false)
+        assert(type(rug.get_state('empty')) == 'nil' and rug.get_state('empty') == nil)
+        assert(rug.get_state('missing') == nil)
+        if rug.get_state('disabled') then
+            error('JSON false must not enter the true branch')
+        else
+            rug.set_state('false_branch', true)
+        end
+        assert(rug.get_state('custom.timeline') ~= nil)
+        assert(rug.get_state('options') ~= nil)
+    end
+    """);
+await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new FakeInput(),
+    NullLogger<LuaRuntime>.Instance, commandBus: bus))
+{
+    var identity = new RunIdentity("json-launch-test", Guid.NewGuid(), 1, null, 0);
+    runtime.ConfigureState(identity, jsonLaunchInputs, new Dictionary<string, object?>());
+    await runtime.InitializeAsync(jsonLaunchScript, new PluginManifest([Permission.Timer]));
+    Check((await DriveToEndAsync(runtime)).State == ScriptState.Stopped, "JSON launch Lua script completed");
+    Check(bus.GetState(identity.InstanceScope, "false_branch", false), "JSON false takes the Lua else branch");
+    SchemaStep[] launchSteps = bus.GetState<SchemaStep[]>(identity.InstanceScope, "custom.timeline", []);
+    Check(launchSteps.Length == 1 && launchSteps[0].Title == "Structured step" &&
+        launchSteps[0].Status == "Succeeded", "JSON launch arrays remain readable by StepFlow bindings");
+    JsonElement launchOptions = bus.GetState<JsonElement>(identity.InstanceScope, "options");
+    Check(launchOptions.GetProperty("enabled").ValueKind == JsonValueKind.False &&
+        launchOptions.GetProperty("nested")[1].ValueKind == JsonValueKind.Null,
+        "JSON launch objects retain their nested structure");
+}
 Console.WriteLine("Lua bridge, scheduler and state/command bus tests passed");
 
 static void Check(bool condition, string message)

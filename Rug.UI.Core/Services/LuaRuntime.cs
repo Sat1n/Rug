@@ -1,6 +1,7 @@
 #nullable enable
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using NLua;
 using Rug.UI.Core.Abstractions;
@@ -295,7 +296,23 @@ public sealed class LuaRuntime : IScriptRuntime
     public object? GetConfig(string key) => StateStore.CloneValue(
         (_configSnapshot ?? _manifest?.Configuration)?.GetValueOrDefault(key));
 
-    public object? GetState(string key) => _commandBus.GetState<object?>(_instanceScope, key);
+    public object? GetState(string key)
+    {
+        object? value = _commandBus.GetState<object?>(_instanceScope, key);
+        if (value is not JsonElement json) return value;
+        // NLua treats boxed JsonElement scalars as userdata, including a truthy false.
+        // Keep containers structured so typed host bindings can still read them.
+        return json.ValueKind switch
+        {
+            JsonValueKind.String => json.GetString(),
+            JsonValueKind.Number when json.TryGetInt64(out long integer) => integer,
+            JsonValueKind.Number => json.GetDouble(),
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Null or JsonValueKind.Undefined => null,
+            _ => json
+        };
+    }
 
     public void SetState(string key, object? value)
     {

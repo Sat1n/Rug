@@ -273,8 +273,13 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   runs. Windowless runs explicitly have no target binding. HWND is never used as
   identity. Launch inputs are copied into InstanceState before Lua starts;
   `ConfigureState` binds Lua to that scope. Lua `rug.get_state/set_state` cannot
-  address AppState, PluginConfig or another instance. Lua values remain limited
-  to nil, Boolean, string and number. Hot reload still stops the old run and
+  address AppState, PluginConfig or another instance. JSON launch scalars are
+  unwrapped at the Lua read boundary: string, number, Boolean and null become
+  Lua string, number, boolean and nil (including false taking the false branch).
+  Arrays and objects remain detached structured JSON, preserving typed host
+  reads such as StepFlow steps. Lua writes remain limited to nil, Boolean,
+  string and number; actual Lua tests cover scalar types/values and structured
+  launch inputs. Hot reload still stops the old run and
   starts a new one without preserving its Lua stack or InstanceState.
 
 ## Native Interop & Memory Safety (CRITICAL)
