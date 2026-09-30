@@ -8,9 +8,9 @@ tags: [authorization, permissions, revocation]
 
 # Explicit plugin grants (Task 3.5-04)
 
-[IPluginAuthorization](Rug.UI.Core/Abstractions/IPluginAuthorization.cs#interface:IPluginAuthorization)
+[IPluginAuthorization](Abstractions/IPluginAuthorization.cs#interface:IPluginAuthorization)
 is a trusted host management contract. The default
-[PluginAuthorization](Rug.UI.Core/Services/PluginAuthorization.cs#class:PluginAuthorization)
+[PluginAuthorization](Services/PluginAuthorization.cs#class:PluginAuthorization)
 stores grants only in process memory, outside all StateStore domains. Scripts,
 schema commands and external request parameters cannot invoke management methods.
 Host composition supplies verified catalog manifests; adapter code receives a
