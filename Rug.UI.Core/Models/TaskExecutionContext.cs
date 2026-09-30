@@ -39,6 +39,8 @@ public sealed class TaskExecutionContext
     internal ICaptureService Capture { get; }
     internal IInputService Input { get; }
     internal Task? Runner { get; set; }
+    internal AuthorizationLease? AuthorizationLease { get; set; }
+    internal CancellationTokenRegistration AuthorizationCancellation { get; set; }
 
     internal void SetStatus(AutomationTaskStatus status)
     {

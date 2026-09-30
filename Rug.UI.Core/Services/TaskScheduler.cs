@@ -37,7 +37,7 @@ public sealed class TaskScheduler : ITaskScheduler
         Func<ICaptureService, IInputService, IScriptRuntime> runtimeFactory,
         ILogger<TaskScheduler> logger, IAnomalyLogger anomalies, TimeSpan? tickInterval = null,
         TimeSpan? watchdogTimeout = null, ICommandBus? commandBus = null,
-        IAutomationPermissionChecker? permissionChecker = null)
+        IAutomationPermissionChecker? permissionChecker = null, IPluginAuthorization? authorization = null)
     {
         _plugins = plugins ?? throw new ArgumentNullException(nameof(plugins));
         _anomalies = anomalies ?? throw new ArgumentNullException(nameof(anomalies));
@@ -59,7 +59,7 @@ public sealed class TaskScheduler : ITaskScheduler
                 await StartTaskWithReadyAsync(plugin, hwnd, inputs,
                     identity => { started = identity; ready?.Invoke(identity); }, token).ConfigureAwait(false);
                 return started!;
-            }, stop: StopTaskAsync, pause: PauseTask, resume: ResumeTask);
+            }, stop: StopTaskAsync, pause: PauseTask, resume: ResumeTask, authorization: authorization);
     }
 
     public AutomationGateway Gateway { get; }
@@ -76,6 +76,7 @@ public sealed class TaskScheduler : ITaskScheduler
             _catalog = await Task.Run(() => _plugins.ScanPlugins(_pluginsRoot)
                 .ToDictionary(p => p.Id, StringComparer.OrdinalIgnoreCase), cancellationToken)
                 .ConfigureAwait(false);
+            foreach (var manifest in _catalog.Values) Gateway.Authorization.Register(manifest);
         }
         finally { _catalogGate.Release(); }
     }
@@ -142,9 +143,15 @@ public sealed class TaskScheduler : ITaskScheduler
         IInputService? input = null;
         IScriptRuntime? runtime = null;
         RunIdentity? identity = null;
+        AuthorizationLease? authorizationLease = null;
+        CancellationTokenRegistration authorizationCancellation = default;
         try
         {
             PluginManifest source = await GetPluginAsync(pluginId, cancellation.Token).ConfigureAwait(false);
+            var ticket = Gateway.Authorization.Bind(source);
+            authorizationLease = Gateway.Authorization.Admit(ticket, source.Permissions);
+            authorizationCancellation = authorizationLease.Token.Register(() => cancellation.Cancel());
+            cancellation.Token.ThrowIfCancellationRequested();
             bool needsWindow = source.Permissions.Contains(Permission.Capture) ||
                 source.Permissions.Contains(Permission.ControlInput);
             if (needsWindow && hwnd == 0)
@@ -174,10 +181,14 @@ public sealed class TaskScheduler : ITaskScheduler
             await runtime.PrepareLifecycleAsync().ConfigureAwait(false);
             var context = new TaskExecutionContext(identity, cancellation, runtime, capture, input);
             runtime.ConfigureAnomalyHandler((reason, detail) => _anomalies.LogAnomalyAsync(context, reason, detail));
+            cancellation.Token.ThrowIfCancellationRequested();
+            context.AuthorizationLease = authorizationLease;
+            context.AuthorizationCancellation = authorizationCancellation;
             onReady?.Invoke(identity);
             lock (_lifecycleGate)
             {
                 if (_disposed) throw new ObjectDisposedException(nameof(TaskScheduler));
+                cancellation.Token.ThrowIfCancellationRequested();
                 if (!_instances.TryAdd(id, context)) throw new InvalidOperationException("Duplicate instance id.");
                 context.Runner = Task.Run(() => RunAsync(context));
             }
@@ -200,6 +211,8 @@ public sealed class TaskScheduler : ITaskScheduler
             }
             if (input is not null)
                 await TryCleanupAsync(() => input.DisposeAsync().AsTask(), "input startup disposal").ConfigureAwait(false);
+            authorizationCancellation.Dispose();
+            authorizationLease?.Dispose();
             cancellation.Dispose();
             throw;
         }
@@ -227,8 +240,10 @@ public sealed class TaskScheduler : ITaskScheduler
         {
             _catalog ??= await Task.Run(() => _plugins.ScanPlugins(_pluginsRoot)
                 .ToDictionary(p => p.Id, StringComparer.OrdinalIgnoreCase), ct).ConfigureAwait(false);
-            return _catalog.TryGetValue(pluginId, out PluginManifest? manifest)
-                ? manifest : throw new KeyNotFoundException($"Plugin '{pluginId}' was not found.");
+            if (!_catalog.TryGetValue(pluginId, out PluginManifest? manifest))
+                throw new KeyNotFoundException($"Plugin '{pluginId}' was not found.");
+            Gateway.Authorization.Register(manifest);
+            return manifest;
         }
         finally { _catalogGate.Release(); }
     }
@@ -310,6 +325,8 @@ public sealed class TaskScheduler : ITaskScheduler
             _commandBus?.CloseInstance(context.InstanceScope);
             context.SetStatus(context.LastError is null ? AutomationTaskStatus.Stopped : AutomationTaskStatus.Faulted);
             _instances.TryRemove(context.InstanceId, out _);
+            context.AuthorizationCancellation.Dispose();
+            context.AuthorizationLease?.Dispose();
             context.Cancellation.Dispose();
             NotifyInstancesChanged();
         }

@@ -23,7 +23,7 @@ await using (var runtime = new LuaRuntime(capture, new FakeOcr(), new FakeInput(
 {
     var states = new List<ScriptState>();
     runtime.StateChanged += (_, e) => states.Add(e.Current);
-    await runtime.InitializeAsync(path, new PluginManifest(new HashSet<string> { "timer", "vision.capture" }));
+    await TestAuthorizationHost.InitializeAsync(runtime, path, new PluginManifest(new HashSet<string> { "timer", "vision.capture" }));
     var watch = Stopwatch.StartNew();
     Check((await runtime.StepAsync()).State == ScriptState.Yielded, "sleep must yield");
     Check(watch.ElapsedMilliseconds < 150, "StepAsync blocked on sleep");
@@ -40,7 +40,7 @@ await using (var runtime = new LuaRuntime(capture, new FakeOcr(), new FakeInput(
 await File.WriteAllTextAsync(path, "function on_tick() rug.sleep(5000) end");
 await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new FakeInput(), NullLogger<LuaRuntime>.Instance))
 {
-    await runtime.InitializeAsync(path, new PluginManifest(new HashSet<string> { "timer" }));
+    await TestAuthorizationHost.InitializeAsync(runtime, path, new PluginManifest(new HashSet<string> { "timer" }));
     Check((await runtime.StepAsync()).State == ScriptState.Yielded, "long sleep must yield");
     Task<ScriptExecutionResult> pending = runtime.ResumeAsync();
     runtime.Stop();
@@ -52,7 +52,7 @@ var readyCapture = new FakeCapture();
 readyCapture.Complete();
 await using (var runtime = new LuaRuntime(readyCapture, new FakeOcr(), new FakeInput(), NullLogger<LuaRuntime>.Instance))
 {
-    await runtime.InitializeAsync(path, new PluginManifest(new HashSet<string> { "vision.capture", "vision.ocr" }));
+    await TestAuthorizationHost.InitializeAsync(runtime, path, new PluginManifest(new HashSet<string> { "vision.capture", "vision.ocr" }));
     Check((await runtime.StepAsync()).State == ScriptState.Yielded, "capture must yield");
     Check((await runtime.ResumeAsync()).State == ScriptState.Yielded, "OCR must yield");
     Check((await runtime.ResumeAsync()).State == ScriptState.Stopped, "OCR result must reach Lua");
@@ -60,7 +60,7 @@ await using (var runtime = new LuaRuntime(readyCapture, new FakeOcr(), new FakeI
 
 await using (var runtime = new LuaRuntime(readyCapture, new FakeOcr(), new FakeInput(), NullLogger<LuaRuntime>.Instance))
 {
-    await runtime.InitializeAsync(path, new PluginManifest(new HashSet<string>()));
+    await TestAuthorizationHost.InitializeAsync(runtime, path, new PluginManifest(new HashSet<string>()));
     ScriptExecutionResult denied = await runtime.StepAsync();
     Check(denied.State == ScriptState.Faulted && denied.Error is PermissionDeniedException { Permission: Permission.VisionCapture }, "capture permission must be enforced");
 }
@@ -79,7 +79,7 @@ foreach ((string call, string permission) in new[]
     await File.WriteAllTextAsync(path, "function on_tick() " + call + " end");
     var deniedCapture = new FakeCapture();
     await using var runtime = new LuaRuntime(deniedCapture, new FakeOcr(), new FakeInput(), NullLogger<LuaRuntime>.Instance);
-    await runtime.InitializeAsync(path, new PluginManifest([]) { Id = "denied-test" });
+    await TestAuthorizationHost.InitializeAsync(runtime, path, new PluginManifest([]) { Id = "denied-test" });
     ScriptExecutionResult result = await runtime.StepAsync();
     Check(result.State == ScriptState.Faulted && result.Error is PermissionDeniedException ex &&
           ex.Permission == permission && ex.Api == "rug." + call.Split('(')[0][4..],
@@ -95,7 +95,7 @@ try
     await File.WriteAllTextAsync(Path.Combine(visionRoot, "broken.png"), "not an image");
     var visionManifest = new PluginManifest([Permission.VisionCapture, Permission.VisionMatch, Permission.VisionOcr,
         Permission.Timer]) { PluginDirectory = visionRoot };
-    var visionGate = new PermissionInterceptor(visionManifest, NullLogger.Instance);
+    var visionGate = TestAuthorizationHost.Gate(visionManifest, NullLogger.Instance);
     var matcher = new FakeTemplateMatch();
     var ocr = new FakeOcr();
     var directCapture = new SequenceCapture(_ => VisualFrame(true));
@@ -124,7 +124,7 @@ try
     }
 
     using (var deniedVisual = new VisualEngineBridge(new SequenceCapture(_ => VisualFrame(true)),
-        new FakeOcr(), matcher, new PermissionInterceptor(new PluginManifest([]), NullLogger.Instance), visionRoot))
+        new FakeOcr(), matcher, TestAuthorizationHost.Gate(new PluginManifest([]), NullLogger.Instance), visionRoot))
     {
         try { await deniedVisual.CaptureAsync(); throw new Exception("capture without grant succeeded"); }
         catch (PermissionDeniedException ex) when (ex.Permission == Permission.VisionCapture) { }
@@ -147,7 +147,7 @@ try
     await using (var runtime = new LuaRuntime(new SequenceCapture(_ => VisualFrame(true)),
         new FakeOcr(), new FakeInput(), NullLogger<LuaRuntime>.Instance, templateMatcher: matcher))
     {
-        await runtime.InitializeAsync(path, visionManifest);
+        await TestAuthorizationHost.InitializeAsync(runtime, path, visionManifest);
         ScriptExecutionResult result = await DriveToEndAsync(runtime);
         Check(result.State == ScriptState.Stopped, "Lua visual result tables lost coordinates or OCR text");
     }
@@ -162,7 +162,7 @@ try
     await using (var runtime = new LuaRuntime(appearing, new FakeOcr(), new FakeInput(),
         NullLogger<LuaRuntime>.Instance, templateMatcher: matcher))
     {
-        await runtime.InitializeAsync(path, visionManifest);
+        await TestAuthorizationHost.InitializeAsync(runtime, path, visionManifest);
         ScriptExecutionResult result = await DriveToEndAsync(runtime);
         Check(result.State == ScriptState.Stopped && appearing.GrabCalls == 3,
               "wait_image did not return promptly when the template appeared");
@@ -177,7 +177,7 @@ try
     await using (var runtime = new LuaRuntime(absent, new FakeOcr(), new FakeInput(),
         NullLogger<LuaRuntime>.Instance, templateMatcher: matcher))
     {
-        await runtime.InitializeAsync(path, visionManifest);
+        await TestAuthorizationHost.InitializeAsync(runtime, path, visionManifest);
         var watch = Stopwatch.StartNew();
         ScriptExecutionResult result = await DriveToEndAsync(runtime);
         Check(result.State == ScriptState.Stopped && absent.GrabCalls >= 2 &&
@@ -218,7 +218,7 @@ var anomalyGate = new TaskCompletionSource<string>(TaskCreationOptions.RunContin
 await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new FakeInput(), NullLogger<LuaRuntime>.Instance))
 {
     runtime.ConfigureAnomalyHandler((_, _) => anomalyGate.Task);
-    await runtime.InitializeAsync(path, new PluginManifest([Permission.Agent]));
+    await TestAuthorizationHost.InitializeAsync(runtime, path, new PluginManifest([Permission.Agent]));
     Check((await runtime.StepAsync()).State == ScriptState.Yielded, "agent hook must yield before persistence finishes");
     Task<ScriptExecutionResult> pending = runtime.ResumeAsync();
     await Task.Delay(20);
@@ -233,7 +233,7 @@ await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new 
 await File.WriteAllTextAsync(path, "function on_tick() rug.sleep(10); rug.log('resumed') end");
 await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new FakeInput(), NullLogger<LuaRuntime>.Instance))
 {
-    await runtime.InitializeAsync(path, new PluginManifest(new HashSet<string> { "timer" }));
+    await TestAuthorizationHost.InitializeAsync(runtime, path, new PluginManifest(new HashSet<string> { "timer" }));
     Check((await runtime.StepAsync()).State == ScriptState.Yielded, "pause fixture must yield");
     runtime.Pause();
     await Task.Delay(20);
@@ -258,7 +258,7 @@ var fakeMapper = new FakeCoordinateMapper();
 var inputAudit = new AuditLogger();
 var deniedInput = new FakeInput();
 await using (var bridge = new InputBridge(deniedInput,
-    new PermissionInterceptor(new PluginManifest([]) { Id = "input-denied" }, inputAudit), fakeMapper))
+    TestAuthorizationHost.Gate(new PluginManifest([]) { Id = "input-denied" }, inputAudit), fakeMapper))
 {
     try { await bridge.ClickAsync(100, 100); throw new Exception("ungranted input was dispatched"); }
     catch (PermissionDeniedException ex)
@@ -271,7 +271,7 @@ await using (var bridge = new InputBridge(deniedInput,
 
 var bridgedInput = new FakeInput();
 await using (var bridge = new InputBridge(bridgedInput,
-    new PermissionInterceptor(new PluginManifest([Permission.ControlInput]), NullLogger.Instance),
+    TestAuthorizationHost.Gate(new PluginManifest([Permission.ControlInput]), NullLogger.Instance),
     fakeMapper, _ => true))
 {
     await bridge.BindAsync(123, InputDeliveryMode.Win32PostMessage);
@@ -299,7 +299,7 @@ await using (var bridge = new InputBridge(bridgedInput,
 
 var unfocusedInput = new FakeInput();
 await using (var bridge = new InputBridge(unfocusedInput,
-    new PermissionInterceptor(new PluginManifest([Permission.ControlInput]), NullLogger.Instance),
+    TestAuthorizationHost.Gate(new PluginManifest([Permission.ControlInput]), NullLogger.Instance),
     fakeMapper, _ => false))
 {
     await bridge.BindAsync(123, InputDeliveryMode.Win32PostMessage);
@@ -322,7 +322,7 @@ var input = new FakeInput();
 await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), input,
     NullLogger<LuaRuntime>.Instance, fakeMapper, _ => true))
 {
-    await runtime.InitializeAsync(path, new PluginManifest(new HashSet<string> { "input" }, TargetWindow: 123));
+    await TestAuthorizationHost.InitializeAsync(runtime, path, new PluginManifest(new HashSet<string> { "input" }, TargetWindow: 123));
     Check((await runtime.StepAsync()).State == ScriptState.Yielded, "click must yield");
     Check((await runtime.ResumeAsync()).State == ScriptState.Yielded, "key must yield");
     Check((await runtime.ResumeAsync()).State == ScriptState.Stopped, "input script must finish");
@@ -337,7 +337,7 @@ var manifestInput = new FakeInput();
 await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), manifestInput,
     NullLogger<LuaRuntime>.Instance, fakeMapper, _ => true))
 {
-    await runtime.InitializeAsync(path, new PluginManifest([Permission.ControlInput], TargetWindow: 123)
+    await TestAuthorizationHost.InitializeAsync(runtime, path, new PluginManifest([Permission.ControlInput], TargetWindow: 123)
     {
         InputDelivery = InputDeliveryMode.Win32SendInput
     });
@@ -350,7 +350,7 @@ await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), mani
 await File.WriteAllTextAsync(path, "assert(os == nil and io == nil and package == nil and debug == nil and luanet == nil and load == nil)");
 await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new FakeInput(), NullLogger<LuaRuntime>.Instance))
 {
-    await runtime.InitializeAsync(path, new PluginManifest([]));
+    await TestAuthorizationHost.InitializeAsync(runtime, path, new PluginManifest([]));
     Check((await runtime.StepAsync()).State == ScriptState.Stopped, "dangerous Lua globals must be absent");
 }
 
@@ -424,7 +424,7 @@ try
           Equals(config.Defaults["speed"], 2.5d) && Equals(config.Defaults["mode"], "fast"), "config schema/default parsing failed");
     await using (var configRuntime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new FakeInput(), NullLogger<LuaRuntime>.Instance))
     {
-        await configRuntime.InitializeAsync(Path.Combine(valid, plugins[0].Entry), plugins[0]);
+        await TestAuthorizationHost.InitializeAsync(configRuntime, Path.Combine(valid, plugins[0].Entry), plugins[0]);
         Check((await configRuntime.StepAsync()).State == ScriptState.Stopped, "typed config defaults did not reach Lua");
     }
     Check(!plugins.Any(p => p.Id == "escape"), "entry traversal was accepted");
@@ -435,7 +435,7 @@ try
 finally { Directory.Delete(pluginsRoot, recursive: true); }
 
 var audit = new AuditLogger();
-var gate = new PermissionInterceptor(new PluginManifest([Permission.Timer]) { Id = "audit-demo" }, audit);
+var gate = TestAuthorizationHost.Gate(new PluginManifest([Permission.Timer]) { Id = "audit-demo" }, audit);
 gate.Demand(Permission.Timer, "rug.sleep");
 try
 {
@@ -450,7 +450,7 @@ catch (PermissionDeniedException ex)
 
 await File.WriteAllTextAsync(path, "while true do end");
 var watchdogRuntime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new FakeInput(), NullLogger<LuaRuntime>.Instance);
-await watchdogRuntime.InitializeAsync(path, new PluginManifest([]));
+await TestAuthorizationHost.InitializeAsync(watchdogRuntime, path, new PluginManifest([]));
 Task<ScriptExecutionResult> spinning = watchdogRuntime.StepAsync();
 await Task.Delay(30);
 watchdogRuntime.Stop();
@@ -467,6 +467,7 @@ await watchdogRuntime.DisposeAsync();
 
 string schedulerRoot = Path.Combine(AppContext.BaseDirectory, "scheduler-test-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(schedulerRoot);
+var schedulerAuthorization = new PluginAuthorization();
 try
 {
     await WritePluginAsync("life", """
@@ -520,7 +521,7 @@ try
         () => { var i = new FakeInput(); inputs.Add(i); return i; },
         (c, i) => new LuaRuntime(c, new FakeOcr(), i, luaLogger, commandBus: scopedBus),
         NullLogger<RugTaskScheduler>.Instance, anomalyLogger, TimeSpan.FromMilliseconds(20),
-        commandBus: scopedBus);
+        commandBus: scopedBus, authorization: schedulerAuthorization);
     int instanceListNotifications = 0;
     scheduler.InstancesChanged += (_, _) => Interlocked.Increment(ref instanceListNotifications);
 
@@ -700,7 +701,7 @@ try
         new PluginManager(NullLogger<PluginManager>.Instance), schedulerRoot,
         () => delayedCapture, () => new FakeInput(),
         (c, i) => new LuaRuntime(c, new FakeOcr(), i, luaLogger),
-        NullLogger<RugTaskScheduler>.Instance, anomalyLogger);
+        NullLogger<RugTaskScheduler>.Instance, anomalyLogger, authorization: schedulerAuthorization);
     Task<Guid> opening = delayedScheduler.StartTaskAsync("life", 404);
     await WaitUntilAsync(() => delayedCapture.StartCalls == 1);
     await delayedScheduler.DisposeAsync();
@@ -771,6 +772,7 @@ try
         await File.WriteAllTextAsync(Path.Combine(directory, "manifest.json"),
             "{\"id\":\"" + id + "\",\"name\":\"" + id + "\",\"version\":\"1.0.0\",\"targetProcess\":\"Demo.exe\",\"permissions\":[" + permissions + "]}");
         await File.WriteAllTextAsync(Path.Combine(directory, "main.lua"), script);
+        TestAuthorizationHost.ApproveCatalog(schedulerAuthorization, schedulerRoot);
     }
 }
 finally
@@ -975,7 +977,7 @@ await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new 
 {
     var identity = new RunIdentity("state-test", Guid.NewGuid(), 1, null, 0);
     runtime.ConfigureState(identity, new Dictionary<string, object?>(), new Dictionary<string, object?>());
-    await runtime.InitializeAsync(stateScript, new PluginManifest([Permission.Timer]));
+    await TestAuthorizationHost.InitializeAsync(runtime, stateScript, new PluginManifest([Permission.Timer]));
     Check((await runtime.StepAsync()).State == ScriptState.Yielded &&
           bus.GetState(identity.InstanceScope, "auto_sell", false), "Lua set_state did not update its C# instance state");
     bus.SetState(identity.InstanceScope, "auto_sell", false);
@@ -1012,15 +1014,29 @@ await File.WriteAllTextAsync(jsonLaunchScript, """
             rug.set_state('false_branch', true)
         end
         assert(rug.get_state('custom.timeline') ~= nil)
-        assert(rug.get_state('options') ~= nil)
+        local options = rug.get_state('options')
+        assert(type(options) == 'table' and options.enabled == false)
+        assert(type(options.nested) == 'table' and options.nested[1] == 1 and options.nested[2] == nil)
+        assert(options.nested[3] == 'value' and options.GetType == nil)
+        local timeline = rug.get_state('custom.timeline')
+        assert(type(timeline) == 'table' and timeline[1].Title == 'Structured step')
+        assert(timeline.GetType == nil and timeline[1].GetType == nil)
+        assert(type(rug.get_config('structured')) == 'table' and rug.get_config('structured').GetType == nil)
+        local ok, err = pcall(rug.get_state, '')
+        assert(not ok and type(err) == 'string', 'safe host error: ok=' .. tostring(ok) .. ', type=' .. type(err))
+        ok, err = pcall(rug.set_state, '', true)
+        assert(not ok and type(err) == 'string', 'safe host error: ok=' .. tostring(ok) .. ', type=' .. type(err))
+        ok, err = pcall(rug.get_config, {})
+        assert(not ok and type(err) == 'string', 'safe host error: ok=' .. tostring(ok) .. ', type=' .. type(err))
     end
     """);
 await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new FakeInput(),
     NullLogger<LuaRuntime>.Instance, commandBus: bus))
 {
     var identity = new RunIdentity("json-launch-test", Guid.NewGuid(), 1, null, 0);
-    runtime.ConfigureState(identity, jsonLaunchInputs, new Dictionary<string, object?>());
-    await runtime.InitializeAsync(jsonLaunchScript, new PluginManifest([Permission.Timer]));
+    runtime.ConfigureState(identity, jsonLaunchInputs, new Dictionary<string, object?>
+    { ["structured"] = new Dictionary<string, object?> { ["approved"] = false } });
+    await TestAuthorizationHost.InitializeAsync(runtime, jsonLaunchScript, new PluginManifest([Permission.Timer]));
     Check((await DriveToEndAsync(runtime)).State == ScriptState.Stopped, "JSON launch Lua script completed");
     Check(bus.GetState(identity.InstanceScope, "false_branch", false), "JSON false takes the Lua else branch");
     SchemaStep[] launchSteps = bus.GetState<SchemaStep[]>(identity.InstanceScope, "custom.timeline", []);
@@ -1032,6 +1048,7 @@ await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new 
         "JSON launch objects retain their nested structure");
 }
 await GatewayTests.RunAsync();
+await AuthorizationTests.RunAsync();
 Console.WriteLine("Lua bridge, scheduler and state/command bus tests passed");
 
 static void Check(bool condition, string message)

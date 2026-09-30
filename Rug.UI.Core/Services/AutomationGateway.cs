@@ -26,7 +26,7 @@ public sealed class ManifestAutomationPermissionChecker : IAutomationPermissionC
 /// <summary>Host capability validation, bounded deduplication and cancellation for all plugin operations.</summary>
 public sealed class AutomationGateway : IAutomationGateway
 {
-    private sealed record Run(RunIdentity Identity, string[] Permissions, CancellationToken Token,
+    private sealed record Run(RunIdentity Identity, PluginInstallation Installation, string[] Permissions, CancellationToken Token,
         Func<AutomationOperation, JsonElement, CancellationToken, Task<object?>> Execute);
     private sealed class Entry(string fingerprint)
     {
@@ -35,7 +35,7 @@ public sealed class AutomationGateway : IAutomationGateway
         public bool WorkInFlight { get; set; }
         public TaskCompletionSource<OperationResult> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
-    private readonly record struct Key(string Principal, AutomationSource Source, string Plugin,
+    private readonly record struct Key(string Principal, AutomationSource Source, PluginInstallation Installation, string Plugin,
         Guid? BoundInstance, Guid? Instance, long? Generation, Guid? Binding, Guid OperationId);
     private readonly object _gate = new();
     private readonly Dictionary<Guid, Run> _runs = [];
@@ -49,6 +49,7 @@ public sealed class AutomationGateway : IAutomationGateway
     private readonly Func<Guid, Task>? _stop;
     private readonly Func<Guid, bool>? _pause, _resume;
     private int _activeWork;
+    private readonly Func<Task>? _waitForDispatch;
     public const int Capacity = 4096;
     public const int ActiveCapacity = 256;
     public const int RecordCapacity = 256;
@@ -58,12 +59,15 @@ public sealed class AutomationGateway : IAutomationGateway
         Func<string, CancellationToken, Task<PluginManifest>>? getPlugin = null,
         Func<string, nint, IReadOnlyDictionary<string, object?>, Action<RunIdentity>?, CancellationToken, Task<RunIdentity>>? start = null,
         Func<Guid, Task>? stop = null, Func<Guid, bool>? pause = null, Func<Guid, bool>? resume = null,
-        TimeProvider? clock = null)
+        TimeProvider? clock = null, IPluginAuthorization? authorization = null, Func<Task>? waitForDispatch = null)
     {
         _logger = logger; _permissions = permissions ?? new ManifestAutomationPermissionChecker();
         _getPlugin = getPlugin; _start = start; _stop = stop; _pause = pause; _resume = resume;
         _clock = clock ?? TimeProvider.System;
+        Authorization = authorization ?? new PluginAuthorization();
+        _waitForDispatch = waitForDispatch;
     }
+    public IPluginAuthorization Authorization { get; }
     public int RetainedOperationCount { get { lock (_gate) { Prune(); return _entries.Count; } } }
     public int RegisteredRunCount { get { lock (_gate) return _runs.Count; } }
     public int ActiveWorkCount { get { lock (_gate) return _activeWork; } }
@@ -74,22 +78,23 @@ public sealed class AutomationGateway : IAutomationGateway
     /// @source plugin: Services/TaskScheduler.cs#function:GetPluginAsync</summary>
     public async Task<AutomationCallContext> CreateContextAsync(string pluginId, string principal,
         AutomationSource source, RunIdentity? boundRun = null, nint startHwnd = 0,
-        Action<RunIdentity>? onReady = null, CancellationToken cancellationToken = default)
+        Action<RunIdentity>? onReady = null, CancellationToken cancellationToken = default,
+        IEnumerable<string>? capabilities = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(principal);
         if (_getPlugin is null) throw new InvalidOperationException("No plugin catalog is bound.");
         PluginManifest manifest = await _getPlugin(pluginId, cancellationToken).ConfigureAwait(false);
         if (boundRun is not null && !SamePlugin(manifest.Id, boundRun.PluginId))
             throw new ArgumentException("Caller run does not belong to this plugin.");
-        return BindContext(manifest, principal, source, boundRun, startHwnd, onReady);
+        return BindContext(manifest, principal, source, boundRun, startHwnd, onReady, capabilities);
     }
     internal AutomationCallContext BindContext(PluginManifest manifest, string principal, AutomationSource source,
-        RunIdentity? run = null, nint hwnd = 0, Action<RunIdentity>? onReady = null) =>
-        new(this, principal, source, manifest.Id, manifest.Permissions.ToArray(), run, hwnd, onReady);
+        RunIdentity? run = null, nint hwnd = 0, Action<RunIdentity>? onReady = null, IEnumerable<string>? capabilities = null) =>
+        new(this, principal, source, manifest.Id, manifest.Permissions.ToArray(), Authorization.Bind(manifest, capabilities), run, hwnd, onReady);
     internal void RegisterRun(RunIdentity identity, PluginManifest manifest, CancellationToken token,
         Func<AutomationOperation, JsonElement, CancellationToken, Task<object?>> execute)
     {
-        lock (_gate) _runs.Add(identity.InstanceId, new(identity, manifest.Permissions.ToArray(), token, execute));
+        lock (_gate) _runs.Add(identity.InstanceId, new(identity, PluginInstallation.From(manifest), manifest.Permissions.ToArray(), token, execute));
     }
     internal void EndRun(Guid instanceId)
     {
@@ -101,11 +106,37 @@ public sealed class AutomationGateway : IAutomationGateway
         }
     }
     private static bool SamePlugin(string first, string second) => string.Equals(first, second, StringComparison.OrdinalIgnoreCase);
+    private IEnumerable<string> Required(AutomationCallContext caller, OperationRequest request)
+    {
+        if (request.Operation == AutomationOperation.Start) return Authorization.Query(caller.Authorization.Installation).Requested;
+        if (ManifestAutomationPermissionChecker.RequiredPermission(request.Operation) is not { } required) return [];
+        if (request.Operation == AutomationOperation.FindImage && request.Parameters.TryGetProperty("path", out var path) &&
+            path.ValueKind == JsonValueKind.String)
+        {
+            try
+            {
+                string root = caller.Authorization.Installation.Directory;
+                string full = Path.GetFullPath(Path.Combine(root, path.GetString()!));
+                if (!full.StartsWith(root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                    return [required, Permission.FileSystem];
+            }
+            catch (ArgumentException) { /* Static parameter/bridge validation reports malformed paths. */ }
+        }
+        return [required];
+    }
+    private IReadOnlyList<string> Missing(AutomationCallContext caller, OperationRequest request, Run? run)
+    {
+        var required = Required(caller, request).ToArray();
+        return Authorization.Missing(caller.Authorization, required).Concat(
+            required.Where(p => run is not null && !run.Permissions.Contains(p))).Concat(
+            _permissions.IsAllowed(caller, run?.Permissions ?? caller.Permissions, request.Operation) ? [] : required)
+            .Distinct(StringComparer.Ordinal).ToArray();
+    }
     /// <summary>@shape caller: host capability; request: untrusted JSON/target; run: registered executor or null.
     /// @source identity: Models/RunIdentity.cs#class:RunIdentity</summary>
-    private OperationError Validate(AutomationCallContext caller, OperationRequest request, out Run? run)
+    private OperationError Validate(AutomationCallContext caller, OperationRequest request, out Run? run, out string[] missing)
     {
-        run = null;
+        run = null; missing = [];
         if (!ReferenceEquals(caller.Owner, this) || !SamePlugin(caller.PluginId, request.Target.PluginId))
             return OperationError.InvalidCaller;
         if (!Enum.IsDefined(request.Operation)) return OperationError.UnsupportedOperation;
@@ -124,6 +155,7 @@ public sealed class AutomationGateway : IAutomationGateway
         {
             if (request.Target.InstanceId is not { } id || !_runs.TryGetValue(id, out run) || run.Token.IsCancellationRequested)
                 return OperationError.InstanceNotFound;
+            if (caller.Authorization.Installation != run.Installation) return OperationError.InvalidCaller;
             if (!SamePlugin(run.Identity.PluginId, request.Target.PluginId)) return OperationError.InvalidCaller;
             if (request.Target.RunGeneration != run.Identity.RunGeneration) return OperationError.StaleRun;
             if (request.Target.TargetBindingId != run.Identity.TargetBindingId) return OperationError.BindingMismatch;
@@ -131,6 +163,8 @@ public sealed class AutomationGateway : IAutomationGateway
             if (caller.Source == AutomationSource.Lua && request.Operation is AutomationOperation.Stop or AutomationOperation.Pause or AutomationOperation.Resume)
                 return OperationError.UnsupportedOperation;
         }
+        missing = Missing(caller, request, run).ToArray();
+        if (missing.Length > 0) return OperationError.PermissionDenied;
         if (!_permissions.IsAllowed(caller, run?.Permissions ?? caller.Permissions, request.Operation))
             return OperationError.PermissionDenied;
         return OperationError.None;
@@ -147,9 +181,9 @@ public sealed class AutomationGateway : IAutomationGateway
         lock (_gate)
         {
             Prune();
-            OperationError error = Validate(caller, request, out run);
-            if (error != OperationError.None) return FinishImmediate(caller, request, OperationStatus.Rejected, error);
-            key = new(caller.Principal, caller.Source, caller.PluginId.ToUpperInvariant(), caller.BoundRun?.InstanceId,
+            OperationError error = Validate(caller, request, out run, out var missing);
+            if (error != OperationError.None) return FinishImmediate(caller, request, OperationStatus.Rejected, error, missing);
+            key = new(caller.Principal, caller.Source, caller.Authorization.Installation, caller.PluginId.ToUpperInvariant(), caller.BoundRun?.InstanceId,
                 request.Target.InstanceId, request.Target.RunGeneration, request.Target.TargetBindingId, request.OperationId);
             string fingerprint = request.Operation + ":" + request.Parameters.GetRawText();
             if (_entries.TryGetValue(key, out entry!))
@@ -170,9 +204,11 @@ public sealed class AutomationGateway : IAutomationGateway
         return entry.Completion.Task;
     }
     private Task<OperationResult> FinishImmediate(AutomationCallContext caller, OperationRequest request,
-        OperationStatus status, OperationError error)
+        OperationStatus status, OperationError error, string[]? missing = null)
     {
-        var result = new OperationResult(status, error); Record(caller, request, result); return Task.FromResult(result);
+        missing ??= [];
+        var result = new OperationResult(status, error, DeniedPermission: missing.FirstOrDefault(),
+            MissingPermissions: Array.AsReadOnly(missing)); Record(caller, request, result); return Task.FromResult(result);
     }
     /// <summary>@shape entry: one deduplication completion; work: cancellable or noncooperative service Task.
     /// @source request: AutomationGateway.ExecuteAsync</summary>
@@ -196,8 +232,8 @@ public sealed class AutomationGateway : IAutomationGateway
             Task<object?> work;
             lock (_gate)
             {
-                OperationError error = Validate(caller, request, out _);
-                if (error != OperationError.None) throw new GatewayRejectedException(error);
+                OperationError error = Validate(caller, request, out _, out var missing);
+                if (error != OperationError.None) throw new GatewayRejectedException(error, missing);
                 linked.Token.ThrowIfCancellationRequested();
                 if (request.Deadline <= _clock.GetUtcNow())
                 {
@@ -209,8 +245,25 @@ public sealed class AutomationGateway : IAutomationGateway
                 work = Task.Run(() =>
                 {
                     executionToken.ThrowIfCancellationRequested();
-                    Volatile.Write(ref started, 1);
-                    return DispatchAsync(caller, request, run, executionToken);
+                    return AuthorizedDispatchAsync();
+                    async Task<object?> AuthorizedDispatchAsync()
+                    {
+                        if (_waitForDispatch is not null) await _waitForDispatch().ConfigureAwait(false);
+                        executionToken.ThrowIfCancellationRequested();
+                        lock (_gate)
+                        {
+                            OperationError error = Validate(caller, request, out _, out var missing);
+                            if (error != OperationError.None) throw new GatewayRejectedException(error, missing);
+                        }
+                        // Acquisition is the actual admission boundary; no handler runs under the authorization lock.
+                        using var admission = Authorization.Admit(caller.Authorization, Required(caller, request));
+                        using var dispatchToken = CancellationTokenSource.CreateLinkedTokenSource(executionToken, admission.Token);
+                        dispatchToken.Token.ThrowIfCancellationRequested();
+                        Volatile.Write(ref started, 1);
+                        object? value = await DispatchAsync(caller, request, run, dispatchToken.Token).ConfigureAwait(false);
+                        dispatchToken.Token.ThrowIfCancellationRequested();
+                        return value;
+                    }
                 });
                 entry.WorkInFlight = true;
                 _activeWork++;
@@ -232,8 +285,10 @@ public sealed class AutomationGateway : IAutomationGateway
             result = new(timedOut ? OperationStatus.TimedOut : OperationStatus.Cancelled,
                 timedOut ? OperationError.DeadlineExceeded : OperationError.Cancelled, OutcomeUncertain: Volatile.Read(ref started) != 0);
         }
-        catch (GatewayRejectedException error) { result = new(OperationStatus.Rejected, error.Error); }
-        catch (PermissionDeniedException error) { result = new(OperationStatus.Rejected, OperationError.PermissionDenied, DeniedPermission: error.Permission); }
+        catch (GatewayRejectedException error) { result = new(OperationStatus.Rejected, error.Error,
+            DeniedPermission: error.Missing.FirstOrDefault(),
+            MissingPermissions: error.Missing); }
+        catch (PermissionDeniedException error) { result = new(OperationStatus.Rejected, OperationError.PermissionDenied, DeniedPermission: error.Permission, MissingPermissions: error.MissingPermissions); }
         catch (KeyNotFoundException) { result = new(OperationStatus.Rejected, OperationError.InvalidParameters); }
         catch (Exception error) when (error is ArgumentException or JsonException or InvalidCastException or FormatException or OverflowException)
         { result = new(OperationStatus.Rejected, OperationError.InvalidParameters); }
@@ -284,6 +339,9 @@ public sealed class AutomationGateway : IAutomationGateway
         if (result.Error == OperationError.PermissionDenied)
             _logger.LogWarning("Permission denied: plugin={PluginId}, operation={OperationId}, type={Type}", caller.PluginId, request.OperationId, request.Operation);
     }
-    private sealed class GatewayRejectedException(OperationError error) : Exception
-    { public OperationError Error { get; } = error; }
+    private sealed class GatewayRejectedException(OperationError error, string[]? missing = null) : Exception
+    {
+        public OperationError Error { get; } = error;
+        public IReadOnlyList<string> Missing { get; } = Array.AsReadOnly(missing ?? []);
+    }
 }

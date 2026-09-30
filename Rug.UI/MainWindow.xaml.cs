@@ -133,6 +133,13 @@ public sealed partial class MainWindow : WindowEx
         ReloadStatus.Text = "监控中 · " + plugin.Name;
     }
 
+    private async void PluginPermissions_Click(object sender, RoutedEventArgs args)
+    {
+        if (_activePlugin is null) return;
+        try { await App.GetService<Services.PluginPermissionConsent>().ShowGrantsAsync(_activePlugin); }
+        catch (Exception error) { ReloadStatus.Text = error.Message; }
+    }
+
     private void OnInstancesChanged(object? sender, EventArgs args) =>
         DispatcherQueue.TryEnqueue(RefreshInstancePicker);
 

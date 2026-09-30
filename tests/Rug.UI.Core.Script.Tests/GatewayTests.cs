@@ -16,7 +16,7 @@ internal static class GatewayTests
         {
             string script = Path.Combine(root, "main.lua");
             await File.WriteAllTextAsync(script, "function on_tick() rug.sleep(1); local f=rug.capture(); assert(f.width==1) end");
-            var manifest = new PluginManifest([Permission.Capture, Permission.Timer]) { Id = "gateway" };
+            var manifest = new PluginManifest([Permission.Capture, Permission.Timer]) { Id = "gateway", PluginDirectory = root };
             var checker = new DenyingChecker();
             var clock = new TestClock();
             var gateway = new AutomationGateway(NullLogger.Instance, checker,
@@ -27,8 +27,8 @@ internal static class GatewayTests
             var captureB = new ControlledCapture(2);
             await using var runtimeA = Runtime(captureA, gateway, first);
             await using var runtimeB = Runtime(captureB, gateway, second);
-            await runtimeA.InitializeAsync(script, manifest);
-            await runtimeB.InitializeAsync(script, manifest);
+            await TestAuthorizationHost.InitializeAsync(runtimeA, script, manifest);
+            await TestAuthorizationHost.InitializeAsync(runtimeB, script, manifest);
 
             var ui = await gateway.CreateContextAsync(manifest.Id, "host-ui", AutomationSource.PluginUI);
             var agent = await gateway.CreateContextAsync(manifest.Id, "trusted-agent", AutomationSource.Agent);
@@ -49,7 +49,7 @@ internal static class GatewayTests
             var deniedCapture = new ControlledCapture(1);
             await using (var deniedRuntime = Runtime(deniedCapture, gateway, deniedIdentity))
             {
-                await deniedRuntime.InitializeAsync(script, manifest with { Permissions = [] });
+                await TestAuthorizationHost.InitializeAsync(deniedRuntime, script, manifest with { Permissions = [] });
                 var forgedGrants = Request(AutomationOperation.Capture, deniedIdentity,
                     new { principal = "admin", source = "host", permissions = new[] { Permission.Capture } });
                 Expect((await gateway.ExecuteAsync(agent, forgedGrants)).Error == OperationError.PermissionDenied && deniedCapture.Calls == 0,
@@ -152,7 +152,7 @@ internal static class GatewayTests
             var luaIdentity = new RunIdentity(manifest.Id, Guid.NewGuid(), 3, null, 0);
             await using (var luaRuntime = Runtime(new ControlledCapture(1), gateway, luaIdentity))
             {
-                await luaRuntime.InitializeAsync(script, manifest);
+                await TestAuthorizationHost.InitializeAsync(luaRuntime, script, manifest);
                 Expect((await luaRuntime.StepAsync()).State == ScriptState.Yielded, "real Lua sleep did not yield");
                 Expect((await luaRuntime.ResumeAsync()).State == ScriptState.Yielded, "real Lua capture did not yield");
                 Expect((await luaRuntime.ResumeAsync()).State == ScriptState.Stopped, "real Lua gateway values failed");
@@ -166,7 +166,7 @@ internal static class GatewayTests
             var badIdentity = new RunIdentity(manifest.Id, Guid.NewGuid(), 4, null, 0);
             await using (var invalidRuntime = Runtime(new ControlledCapture(1), gateway, badIdentity))
             {
-                await invalidRuntime.InitializeAsync(invalidScript, manifest);
+                await TestAuthorizationHost.InitializeAsync(invalidRuntime, invalidScript, manifest);
                 Expect((await invalidRuntime.StepAsync()).State == ScriptState.Faulted && gateway.Records.Any(record =>
                     record.Target.InstanceId == badIdentity.InstanceId && record.Error == OperationError.InvalidParameters),
                     "invalid Lua arguments bypassed gateway error mapping/records");
@@ -197,7 +197,7 @@ internal static class GatewayTests
             {
                 var identity = new RunIdentity(manifest.Id, Guid.NewGuid(), i + 3, null, 0);
                 await using var runtime = Runtime(new ControlledCapture(1), gateway, identity);
-                await runtime.InitializeAsync(script, manifest);
+                await TestAuthorizationHost.InitializeAsync(runtime, script, manifest);
                 await gateway.ExecuteAsync(ui, Request(AutomationOperation.Capture, identity));
                 runtime.Stop();
             }
@@ -231,6 +231,7 @@ internal static class GatewayTests
             () => new ControlledCapture(1), () => new FakeInput(),
             (capture, input) => new LuaRuntime(capture, new FakeOcr(), input, NullLogger<LuaRuntime>.Instance),
             NullLogger<Scheduler>.Instance, new NoAnomaly());
+        TestAuthorizationHost.ApproveCatalog(scheduler.Gateway.Authorization, root);
         var caller = await scheduler.Gateway.CreateContextAsync("life", "ui", AutomationSource.PluginUI);
         OperationRequest Request(AutomationOperation operation, OperationTarget target) =>
             new(operation, JsonSerializer.SerializeToElement(new { }), Guid.NewGuid(), "lifecycle", target, DateTimeOffset.UtcNow.AddSeconds(5));
@@ -252,7 +253,7 @@ internal static class GatewayTests
     {
         string script = Path.Combine(root, "late.lua");
         await File.WriteAllTextAsync(script, "function on_tick() rug.capture(); rug.set_state('late', true) end");
-        var manifest = new PluginManifest([Permission.Capture]) { Id = "late" };
+        var manifest = new PluginManifest([Permission.Capture]) { Id = "late", PluginDirectory = root };
         var gateway = new AutomationGateway(NullLogger.Instance);
         using var bus = new CommandBus(new StateStore());
         var capture = new ControlledCapture(1) { Hold = true };
@@ -260,7 +261,7 @@ internal static class GatewayTests
         await using var runtime = new LuaRuntime(capture, new FakeOcr(), new FakeInput(), NullLogger<LuaRuntime>.Instance, commandBus: bus);
         runtime.ConfigureGateway(gateway);
         runtime.ConfigureState(old, new Dictionary<string, object?>(), new Dictionary<string, object?>());
-        await runtime.InitializeAsync(script, manifest);
+        await TestAuthorizationHost.InitializeAsync(runtime, script, manifest);
         Expect((await runtime.StepAsync()).State == ScriptState.Yielded, "late Lua capture did not yield");
         await UntilAsync(() => capture.Calls == 1);
         Task<ScriptExecutionResult> pending = runtime.ResumeAsync();

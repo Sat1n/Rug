@@ -38,6 +38,9 @@ function Await-NotName($window, [string]$name, [int]$seconds = 6) {
 }
 function Invoke-Button($window, [string]$name) {
     $button = Await-Name $window $name 6 ([System.Windows.Automation.ControlType]::Button)
+    $ready = [System.Diagnostics.Stopwatch]::StartNew()
+    while (-not $button.Current.IsEnabled -and $ready.Elapsed.TotalSeconds -lt 6) { Start-Sleep -Milliseconds 25 }
+    if (-not $button.Current.IsEnabled) { throw "UI button is disabled: $name" }
     $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
 }
 
@@ -77,6 +80,11 @@ try {
     $null = Await-Name $window 'Timeline Probe'
     $null = Await-Name $window 'Custom timeline test'
     Invoke-Button $window 'Start A'
+    Invoke-Button $window 'Deny permissions'
+    Start-Sleep -Milliseconds 200
+    if ($null -ne (Find-Name $window 'Run A step')) { throw 'Denied plugin started.' }
+    Invoke-Button $window 'Start A'
+    Invoke-Button $window 'Allow permissions'
     $null = Await-Name $window 'Run A step'
     Invoke-Button $window 'Start B'
     Invoke-Button $window 'Next instance'
@@ -96,7 +104,22 @@ try {
     $null = Await-Name $window 'Run A step'
     Invoke-Button $window 'Stop selected'
     Await-NotName $window 'Run A step'
-    Write-Output 'generic-instance-ui-ok customKey=probe.timeline'
+    Invoke-Button $window 'Start A'
+    Invoke-Button $window 'Next instance'
+    $null = Await-Name $window 'Run A step'
+    Invoke-Button $window 'Plugin permissions'
+    Invoke-Button $window 'Revoke permissions'
+    Await-NotName $window 'Run A step'
+    Invoke-Button $window 'Start B'
+    Invoke-Button $window 'Deny permissions'
+    Start-Sleep -Milliseconds 200
+    if ($null -ne (Find-Name $window 'Run B step')) { throw 'Revoked plugin restarted without approval.' }
+    Invoke-Button $window 'Start B'
+    Invoke-Button $window 'Allow permissions'
+    $null = Await-Name $window 'Run B step'
+    Invoke-Button $window 'Stop selected'
+    Await-NotName $window 'Run B step'
+    Write-Output 'generic-instance-ui-ok customKey=probe.timeline consent=allow/deny/revoke/regrant'
 }
 finally {
     $env:RUG_PLUGINS_ROOT = $previous

@@ -47,6 +47,7 @@ public sealed class VisualEngineBridge : IDisposable
             ThrowIfDisposed();
             // Publication shares the frame lock with newer captures; late cancelled work cannot replace them.
             cancellationToken.ThrowIfCancellationRequested();
+            _permissions.Demand(Permission.VisionCapture, "rug.capture.publish");
             _frame = frame;
         }
         return frame;

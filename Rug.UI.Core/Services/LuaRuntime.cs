@@ -22,6 +22,12 @@ public sealed class LuaRuntime : IScriptRuntime
         local pack, luaType, raise = table.pack, type, error
         local getConfig, getState, setState, writeLog, shouldAbort, clock =
           __rug_get_config, __rug_get_state, __rug_set_state, __rug_log, __rug_should_abort, __rug_ticks
+        local protectedCall = pcall
+        local function hostCall(callback, ...)
+          local ok, result, failure = protectedCall(callback, ...)
+          if not ok or failure ~= nil or luaType(result) == 'userdata' then raise('Host API rejected the call', 2) end
+          return result
+        end
         local min = math.min
         local sethook, traceback = debug.sethook, debug.traceback
         local thread, chunk
@@ -56,12 +62,12 @@ public sealed class LuaRuntime : IScriptRuntime
         function rug.agent.resolve_anomaly(reason, context)
           return luaYield('__rug', 'resolve_anomaly', reason, context, traceback('', 2))
         end
-        function rug.get_config(key) return getConfig(key) end
-        function rug.get_state(key) return getState(key) end
-        function rug.set_state(key, value) return setState(key, value) end
+        function rug.get_config(key) return hostCall(getConfig, key) end
+        function rug.get_state(key) return hostCall(getState, key) end
+        function rug.set_state(key, value) return hostCall(setState, key, value) end
         function rug.log(level, message)
           if message == nil then message, level = level, 'info' end
-          return writeLog(level, message)
+          return hostCall(writeLog, level, message)
         end
         function __rug_drive(value)
           local r = pack(luaResume(thread, value))
@@ -100,6 +106,8 @@ public sealed class LuaRuntime : IScriptRuntime
     private readonly bool _ownsCommandBus;
     private RunIdentity? _identity;
     private AutomationGateway? _gateway;
+    private readonly IPluginAuthorization _authorization;
+    private AuthorizationLease? _authorizationLease;
     private AutomationCallContext? _caller;
     private StateScope _instanceScope = StateScope.Instance("standalone", Guid.NewGuid());
     private IReadOnlyDictionary<string, object?>? _configSnapshot;
@@ -130,8 +138,9 @@ public sealed class LuaRuntime : IScriptRuntime
 
     public LuaRuntime(ICaptureService capture, IOcrService ocr, IInputService input, ILogger<LuaRuntime> logger,
         ICoordinateMapper? coordinateMapper = null, Func<nint, bool>? ensureForeground = null,
-        ITemplateMatchService? templateMatcher = null, ICommandBus? commandBus = null)
+        ITemplateMatchService? templateMatcher = null, ICommandBus? commandBus = null, IPluginAuthorization? authorization = null)
     {
+        _authorization = authorization ?? new PluginAuthorization();
         _capture = capture;
         _ocr = ocr;
         _matcher = templateMatcher ?? new TemplateMatchService();
@@ -146,6 +155,8 @@ public sealed class LuaRuntime : IScriptRuntime
 
     public ScriptState State { get { lock (_stateGate) return _state; } }
     public event EventHandler<ScriptStateChangedEventArgs>? StateChanged;
+    public IPluginAuthorization Authorization => _gateway?.Authorization ?? _authorization;
+    public RunIdentity? BoundIdentity => _identity;
     public AutomationGateway Gateway => _gateway ?? throw new InvalidOperationException("Runtime is not initialized.");
     public void ConfigureGateway(AutomationGateway gateway)
     {
@@ -187,24 +198,22 @@ public sealed class LuaRuntime : IScriptRuntime
         if (State != ScriptState.Uninitialized) throw new InvalidOperationException("Runtime is already initialized.");
         string source = await File.ReadAllTextAsync(scriptPath, ct).ConfigureAwait(false);
         _manifest = manifest;
-        _permissions = new PermissionInterceptor(manifest, _logger);
+        _identity ??= new RunIdentity(manifest.Id, _instanceScope.InstanceId, 1,
+            manifest.TargetWindow == 0 ? null : Guid.NewGuid(), manifest.TargetWindow);
+        PluginManifest gatewayManifest = manifest with { Id = _identity.PluginId };
+        _gateway ??= new AutomationGateway(_logger, getPlugin: (plugin, _) =>
+            Task.FromResult(plugin == gatewayManifest.Id ? gatewayManifest : throw new KeyNotFoundException()),
+            authorization: _authorization);
+        _caller = _gateway.BindContext(gatewayManifest, "lua:" + _identity.InstanceId, AutomationSource.Lua, _identity);
+        _authorizationLease = _gateway.Authorization.Admit(_caller.Authorization, manifest.Permissions);
+        _lifetime = CancellationTokenSource.CreateLinkedTokenSource(ct, _authorizationLease.Token);
+        _permissions = new PermissionInterceptor(manifest, _logger, _gateway.Authorization, _caller.Authorization);
         _visual = new VisualEngineBridge(_capture, _ocr, _matcher, _permissions, manifest.PluginDirectory);
         _inputBridge = new InputBridge(_input, _permissions, _coordinateMapper, _ensureForeground);
         if (manifest.Permissions.Contains(Permission.ControlInput))
-        {
             await _inputBridge.BindAsync(manifest.TargetWindow,
-                manifest.InputDelivery ?? (manifest.BackgroundInput
-                    ? InputDeliveryMode.Win32PostMessage : InputDeliveryMode.Win32SendInput),
-                ct).ConfigureAwait(false);
-        }
-        _lifetime = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        _identity ??= new RunIdentity(string.IsNullOrWhiteSpace(manifest.Id) ? "standalone" : manifest.Id,
-            _instanceScope.InstanceId, 1, manifest.TargetWindow == 0 ? null : Guid.NewGuid(), manifest.TargetWindow);
-        PluginManifest gatewayManifest = manifest with { Id = _identity.PluginId };
-        _gateway ??= new AutomationGateway(_logger, getPlugin: (plugin, _) =>
-            Task.FromResult(plugin == gatewayManifest.Id ? gatewayManifest : throw new KeyNotFoundException()));
-        _caller = _gateway.BindContext(gatewayManifest, "lua:" + _identity.InstanceId,
-            AutomationSource.Lua, _identity);
+                manifest.InputDelivery ?? (manifest.BackgroundInput ? InputDeliveryMode.Win32PostMessage : InputDeliveryMode.Win32SendInput),
+                _lifetime.Token).ConfigureAwait(false);
         _gateway.RegisterRun(_identity, gatewayManifest, _lifetime.Token, ExecuteAutomationAsync);
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -241,10 +250,10 @@ public sealed class LuaRuntime : IScriptRuntime
         finally { _gate.Release(); }
     }
 
-    private static readonly System.Reflection.MethodInfo GetConfigMethod = typeof(LuaRuntime).GetMethod(nameof(GetConfig))!;
-    private static readonly System.Reflection.MethodInfo GetStateMethod = typeof(LuaRuntime).GetMethod(nameof(GetState))!;
-    private static readonly System.Reflection.MethodInfo SetStateMethod = typeof(LuaRuntime).GetMethod(nameof(SetState))!;
-    private static readonly System.Reflection.MethodInfo LogMethod = typeof(LuaRuntime).GetMethod(nameof(Log))!;
+    private static readonly System.Reflection.MethodInfo GetConfigMethod = typeof(LuaRuntime).GetMethod(nameof(GetLuaConfig), System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+    private static readonly System.Reflection.MethodInfo GetStateMethod = typeof(LuaRuntime).GetMethod(nameof(GetLuaState), System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+    private static readonly System.Reflection.MethodInfo SetStateMethod = typeof(LuaRuntime).GetMethod(nameof(SetLuaState), System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+    private static readonly System.Reflection.MethodInfo LogMethod = typeof(LuaRuntime).GetMethod(nameof(LogLua), System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
     private static readonly System.Reflection.MethodInfo ShouldAbortMethod = typeof(LuaRuntime).GetMethod(nameof(ShouldAbort))!;
     private static readonly System.Reflection.MethodInfo TicksMethod = typeof(LuaRuntime).GetMethod(nameof(Ticks))!;
 
@@ -330,6 +339,42 @@ public sealed class LuaRuntime : IScriptRuntime
             JsonValueKind.Null or JsonValueKind.Undefined => null,
             _ => json
         };
+    }
+
+    // Never hand CLR userdata to untrusted Lua through state/config. Host snapshots retain their original JSON shape.
+    private static string HostString(object? value) => value as string ?? throw new ArgumentException("Expected a string.");
+    private object? GetLuaState(object? key, out string? failure) =>
+        HostValue(() => ToLuaJson(JsonSerializer.SerializeToElement(GetState(HostString(key)))), out failure);
+    private object? GetLuaConfig(object? key, out string? failure) =>
+        HostValue(() => ToLuaJson(JsonSerializer.SerializeToElement(GetConfig(HostString(key)))), out failure);
+    private object? SetLuaState(object? key, object? value, out string? failure) =>
+        HostValue(() => { SetState(HostString(key), value); return null; }, out failure);
+    private object? LogLua(object? level, object? message, out string? failure) =>
+        HostValue(() => { Log(HostString(level), HostString(message)); return null; }, out failure);
+    private static object? HostValue(Func<object?> read, out string? failure)
+    {
+        try { failure = null; return read(); }
+        catch (Exception) { failure = "Host API rejected the call"; return null; }
+    }
+    private object? ToLuaJson(JsonElement value)
+    {
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.Object:
+                LuaTable objectTable = NewTable();
+                foreach (var property in value.EnumerateObject()) objectTable[property.Name] = ToLuaJson(property.Value);
+                return objectTable;
+            case JsonValueKind.Array:
+                LuaTable arrayTable = NewTable();
+                int index = 1;
+                foreach (var item in value.EnumerateArray()) arrayTable[index++] = ToLuaJson(item);
+                return arrayTable;
+            case JsonValueKind.String: return value.GetString();
+            case JsonValueKind.Number: return value.TryGetInt64(out long integer) ? (object)integer : value.GetDouble();
+            case JsonValueKind.True: return true;
+            case JsonValueKind.False: return false;
+            default: return null;
+        }
     }
 
     public void SetState(string key, object? value)
@@ -782,6 +827,7 @@ public sealed class LuaRuntime : IScriptRuntime
             _beginStop?.Dispose();
             _lua?.Dispose();
             _lifetime?.Dispose();
+            _authorizationLease?.Dispose();
             _operations.Clear();
             _visual?.Dispose();
             if (_inputBridge is not null) await _inputBridge.DisposeAsync().ConfigureAwait(false);

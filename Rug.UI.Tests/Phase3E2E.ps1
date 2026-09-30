@@ -44,6 +44,8 @@ try {
     if ($toggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::On) { $toggle.Toggle() }
     $button = Await-Name $window '开始执行'
     $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $allow = Await-Name $window 'Allow permissions'
+    $allow.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Await-Name $window '刷图步骤完成（模拟）' 8
     $watch = [System.Diagnostics.Stopwatch]::StartNew()
     $ui = Join-Path $plugin 'ui.json'

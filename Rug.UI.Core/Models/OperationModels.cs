@@ -22,7 +22,7 @@ public sealed record OperationTarget(string PluginId, Guid? InstanceId = null,
 public sealed record OperationRequest(AutomationOperation Operation, JsonElement Parameters,
     Guid OperationId, string CorrelationId, OperationTarget Target, DateTimeOffset Deadline);
 public sealed record OperationResult(OperationStatus Status, OperationError Error = OperationError.None,
-    object? Value = null, bool OutcomeUncertain = false, string? DeniedPermission = null)
+    object? Value = null, bool OutcomeUncertain = false, string? DeniedPermission = null, IReadOnlyList<string>? MissingPermissions = null)
 {
     public object? RequireSuccess()
     {
@@ -37,13 +37,14 @@ public sealed record OperationResult(OperationStatus Status, OperationError Erro
 public sealed class AutomationCallContext
 {
     internal AutomationCallContext(AutomationGateway owner, string principal, AutomationSource source,
-        string pluginId, string[] permissions, RunIdentity? run, nint startHwnd,
+        string pluginId, string[] permissions, AuthorizationTicket authorization, RunIdentity? run, nint startHwnd,
         Action<RunIdentity>? onReady)
     {
-        Owner = owner; Principal = principal; Source = source; PluginId = pluginId;
+        Authorization = authorization; Owner = owner; Principal = principal; Source = source; PluginId = pluginId;
         Permissions = Array.AsReadOnly(permissions); BoundRun = run; StartHwnd = startHwnd; OnReady = onReady;
     }
     internal AutomationGateway Owner { get; }
+    public AuthorizationTicket Authorization { get; }
     internal nint StartHwnd { get; }
     internal Action<RunIdentity>? OnReady { get; }
     public string Principal { get; }

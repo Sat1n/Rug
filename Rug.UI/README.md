@@ -71,10 +71,15 @@ no automation pipeline and no native interop itself.
 * `Services/PluginAutomationCommands` binds verified plugin UI callers and routes
   start/stop/pause/resume through the scheduler's Automation Gateway. Schema
   parameters remain launch data, never identity/permission grants or HWNDs.
+  Foreground starts use host-owned `PluginPermissionConsent` to display and
+  explicitly approve the requested permissions first. Deny/close never starts.
+  The main-window Plugin permissions button displays grants and revokes them.
   Demo start and automatic completion-stop use that same path. The host also
   registers `host.pause_selected`/`host.resume_selected` for schema commands.
   See the [Gateway contract](../Rug.UI.Core/AutomationGateway.md) for deadlines,
-  cancellation, bounded deduplication and sanitized outcomes.
+  cancellation, bounded deduplication and sanitized outcomes, and the
+  [authorization contract](../Rug.UI.Core/Authorization.md) for process-local
+  installation-bound grants, startup/revocation ordering and background reload.
 * `Rug.UI` targets Windows SDK 22621 and pins Windows App SDK 1.5 plus SettingsControls 8.1 because `SelectorBar` first appears in 1.5 and this toolkit build requires the 22621 target framework.
 
 ## .NET 10 x64 build and verification (Task 3.5-01)

@@ -69,3 +69,15 @@ fields, wrong JSON types, integer/enum/threshold/region ranges and actual Lua
 coercion attempts, asserting Rejected/InvalidParameters without uncertainty or
 capture/OCR/matching/input calls. A real service InvalidOperationException remains
 Failed/ExecutionFailed rather than being hidden by parameter classification.
+
+Task 3.5-04 uses explicit `TestAuthorizationHost` setup for legacy positive cases.
+`AuthorizationTests.cs` separately verifies fail-closed startup, missing-name
+results, installation/caller ceilings, forged and unknown permissions, live
+revocation stamps, external templates, queue/active cancellation, other-plugin
+isolation, new identities after regrant, expanded-manifest reload rejection and
+zero live authorization leases after repeated stops. Production has no automatic
+approval flag; see [Authorization](../../Rug.UI.Core/Authorization.md).
+
+Real Lua state/config reads also check nested arrays, objects, nulls and false,
+and confirm they are ordinary Lua tables without CLR GetType access. Managed
+JSON snapshots and StepFlowView reads remain unchanged.

@@ -66,6 +66,8 @@ public sealed class InputBridge : IAsyncDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            _permissions.Demand(Permission.ControlInput, "input.dispatch");
+            cancellationToken.ThrowIfCancellationRequested();
             ThrowIfUnbound();
             // Validate in the same physical client coordinate space consumed by native.
             // Do not feed the screen point back to the bound native controller.
@@ -86,6 +88,8 @@ public sealed class InputBridge : IAsyncDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            _permissions.Demand(Permission.ControlInput, "input.dispatch");
+            cancellationToken.ThrowIfCancellationRequested();
             ThrowIfUnbound();
             await SelectModeAsync(_defaultMode, cancellationToken).ConfigureAwait(false);
             if (durationMs == 0)

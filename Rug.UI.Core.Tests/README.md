@@ -31,3 +31,7 @@ the template. It polls WGC after click and Esc to avoid reading a stale frame.
 On success it prints `PASS` and paths to a real PNG/JSON anomaly pair under the
 ignored `bin/x64/Debug/net10.0/e2e-run/` directory. The anomaly is intentional;
 the task must finish `Faulted` after `on_stop`, with its capture session closed.
+
+The disposable E2E test host explicitly registers and grants the verified test
+installation before scheduler startup. This approval is confined to this invoked
+test harness; normal app plugins require the foreground host consent dialog.

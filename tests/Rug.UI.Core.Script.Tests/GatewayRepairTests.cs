@@ -30,7 +30,7 @@ internal static class GatewayRepairTests
         runtime.ConfigureState(identity, new Dictionary<string, object?>(), new Dictionary<string, object?>());
         string script = Path.Combine(root, "cache.lua");
         await File.WriteAllTextAsync(script, "function on_tick() end");
-        await runtime.InitializeAsync(script, manifest);
+        await TestAuthorizationHost.InitializeAsync(runtime, script, manifest);
         var caller = await gateway.CreateContextAsync(manifest.Id, "ui", AutomationSource.PluginUI);
         using var cancellation = new CancellationTokenSource();
         var first = Request(AutomationOperation.Capture, identity, new { });
@@ -65,7 +65,7 @@ internal static class GatewayRepairTests
             new FakeCoordinateMapper(), _ => true, matcher);
         runtime.ConfigureGateway(gateway);
         runtime.ConfigureState(identity, new Dictionary<string, object?>(), new Dictionary<string, object?>());
-        await runtime.InitializeAsync(Path.Combine(root, "cache.lua"), manifest);
+        await TestAuthorizationHost.InitializeAsync(runtime, Path.Combine(root, "cache.lua"), manifest);
         var caller = await gateway.CreateContextAsync(manifest.Id, "adapter", AutomationSource.Mcp);
         (AutomationOperation Operation, object Parameters)[] cases =
         [
@@ -125,7 +125,7 @@ internal static class GatewayRepairTests
                 new FakeCoordinateMapper(), _ => true, matcher);
             lua.ConfigureGateway(gateway);
             lua.ConfigureState(luaIdentity, new Dictionary<string, object?>(), new Dictionary<string, object?>());
-            await lua.InitializeAsync(script, manifest);
+            await TestAuthorizationHost.InitializeAsync(lua, script, manifest);
             Expect((await lua.StepAsync()).State == ScriptState.Faulted && gateway.Records.Any(record =>
                 record.Target.InstanceId == luaIdentity.InstanceId && record.Error == OperationError.InvalidParameters && !record.OutcomeUncertain),
                 "Lua coercion bypassed parameter validation: " + call);

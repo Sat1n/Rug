@@ -57,6 +57,7 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 | `Models/PluginManifest.cs` · `Models/PluginConfigSchema.cs` · `Models/Permission.cs` | Plugin identity/entry/permission declarations, UI control schema and typed defaults, exact permission names |
 | `Services/LuaRuntime.cs` | NLua coroutine bridge: `StepAsync` yields a `rug.*` operation, starts its .NET task, and `ResumeAsync` awaits that task before resuming Lua; all Lua-state access is serialized |
 | `Abstractions/IPluginManager.cs` · `Services/PluginManager.cs` | Scan immediate plugin directories, validate manifest/entry/config, cache valid plugins and UI schema; skip malformed plugins with a warning |
+| `Abstractions/IPluginAuthorization.cs` · `Services/PluginAuthorization.cs` · `Models/AuthorizationModels.cs` | Process-local installation-bound explicit grants, immutable snapshots/revisions, revocable admission leases; [contract](Authorization.md) |
 | `Security/PermissionInterceptor.cs` · `Exceptions/PermissionDeniedException.cs` | Exact-match permission checks before sensitive API tasks start; denied calls log an audit warning and fault the script |
 | `Abstractions/ITaskScheduler.cs` · `Models/TaskExecutionContext.cs` · `Models/RunIdentity.cs` · `Services/TaskScheduler.cs` | Concurrent plugin/window runs, independent run generation and target-binding identity, per-instance service ownership and lifecycle dispatch |
 | `Models/StateScope.cs` · `Models/StateChangedEventArgs.cs` · `Services/StateStore.cs` | Structural AppState/PluginConfig/InstanceState partitions, bounded JSON values, scoped revisions and detached events |
@@ -90,7 +91,7 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 
 ## Anomaly black box and Agent hook (Task 2.1.4)
 
-* A manifest with `agent` permission may call
+* A plugin declaring `agent` and holding a current host grant may call
   `rug.agent.resolve_anomaly(reason, context)`. The Lua bridge yields immediately,
   captures a private Lua traceback alongside the supplied context, and dispatches
   to the owning task's `IAnomalyLogger`. Unauthorized calls raise an audited
@@ -182,8 +183,10 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   host-only runtime fields ignored during JSON parsing. `InputDelivery` is an
   optional JSON declaration validated at scan time. The manager fills `Configuration`
   with typed config defaults; the host may override values and supplies the window.
-  Permissions are copied into `PermissionInterceptor` on initialization and checked
-  before each `rug.*` service task. A missing grant throws
+  Permissions are requested capability ceilings. The host must explicitly grant
+  all declarations before startup; live authorization and caller/run ceilings are
+  checked before sensitive calls. See [Authorization](Authorization.md) for
+  installation binding, revocation and reload rules. A missing grant throws
   `PermissionDeniedException`, logs plugin/API/
   permission details, and puts the runtime in `Faulted` state. Defined names:
   `timer`, `vision.capture`, `vision.match`, `vision.ocr`, `input`, `network`, `filesystem`, `agent`.
@@ -303,6 +306,9 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 
 ## Plugin & Permission Rules
 
+* [Explicit plugin grants](Authorization.md) are independent process-local host
+  data. Scheduler/Lua startup and all sensitive bridges enforce live grants;
+  revocation cancels affected instances before normal cleanup.
 * Plugin UI lifecycle and Lua automation use `IAutomationGateway.ExecuteAsync`
   before dispatch to the registered run's services. Host-bound caller grants,
   complete run identity, cancellation/deadlines, bounded deduplication and
@@ -347,4 +353,4 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 
 ## Script-only demo tasks (Task 3.4)
 
-* `TaskScheduler.StartTaskAsync(pluginId, 0)` accepts a windowless task only when the manifest grants neither `vision.capture` nor `input`. Such tasks still use a fresh Lua runtime and the ordinary lifecycle, but skip WGC session initialization. Window-bound automation continues to require a nonzero HWND and starts capture before Lua.
+* `TaskScheduler.StartTaskAsync(pluginId, 0)` accepts a windowless task only when the manifest declares neither `vision.capture` nor `input`. Such tasks still use a fresh Lua runtime and the ordinary lifecycle, but skip WGC session initialization. Window-bound automation continues to require a nonzero HWND and starts capture before Lua.

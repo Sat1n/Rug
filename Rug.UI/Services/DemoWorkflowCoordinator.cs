@@ -43,6 +43,7 @@ public sealed class DemoWorkflowCoordinator : IDisposable
     {
         string[] selected = parameter as string[] ?? [];
         if (selected.Length == 0) throw new InvalidOperationException("请先选择至少一个任务。");
+        if (!await App.GetService<PluginPermissionConsent>().ConfirmStartAsync(PluginId, cancellationToken)) return;
         foreach (var active in _scheduler.Instances.Where(item => item.PluginId == PluginId))
             await PluginAutomationCommands.ExecuteAsync(_scheduler, PluginId, AutomationOperation.Stop,
                 active.Identity, cancellationToken: cancellationToken);

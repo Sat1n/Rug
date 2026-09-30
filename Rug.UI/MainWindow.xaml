@@ -39,6 +39,8 @@
                 <Button x:Name="NextInstanceButton" Content="下一个实例"
                         AutomationProperties.Name="Next instance"
                         Click="NextInstanceButton_Click"/>
+                <Button Content="插件权限" AutomationProperties.Name="Plugin permissions"
+                        Click="PluginPermissions_Click"/>
                 <TextBlock x:Name="ReloadStatus" Text="监控中" Opacity="0.7"
                            VerticalAlignment="Center"/>
             </StackPanel>

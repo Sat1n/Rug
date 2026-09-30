@@ -12,6 +12,9 @@ internal static class PluginAutomationCommands
         IReadOnlyDictionary<string, object?>? inputs = null, Action<RunIdentity>? onReady = null,
         CancellationToken cancellationToken = default)
     {
+        if (operation == AutomationOperation.Start &&
+            !await App.GetService<PluginPermissionConsent>().ConfirmStartAsync(pluginId, cancellationToken))
+            throw new OperationCanceledException("Plugin permission confirmation was declined.");
         var caller = await scheduler.Gateway.CreateContextAsync(pluginId, "plugin-ui", AutomationSource.PluginUI,
             onReady: onReady, cancellationToken: cancellationToken);
         var request = new OperationRequest(operation, JsonSerializer.SerializeToElement(inputs ?? new Dictionary<string, object?>()),

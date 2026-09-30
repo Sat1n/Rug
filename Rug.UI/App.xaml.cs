@@ -77,6 +77,8 @@ public partial class App : Application
             // Core Services
             services.AddSingleton<IFileService, FileService>();
             services.AddSingleton<StateStore>();
+            services.AddSingleton<IPluginAuthorization, PluginAuthorization>();
+            services.AddSingleton<PluginPermissionConsent>();
             services.AddSingleton<IPluginManager, PluginManager>();
             services.AddSingleton<IAnomalyLogger, AnomalyLogger>();
             services.AddSingleton<ICommandBus>(provider =>
@@ -99,7 +101,8 @@ public partial class App : Application
                     commandBus: provider.GetRequiredService<ICommandBus>()),
                 provider.GetRequiredService<ILogger<Rug.UI.Core.Services.TaskScheduler>>(),
                 provider.GetRequiredService<IAnomalyLogger>(),
-                commandBus: provider.GetRequiredService<ICommandBus>()));
+                commandBus: provider.GetRequiredService<ICommandBus>(),
+                authorization: provider.GetRequiredService<IPluginAuthorization>()));
             services.AddSingleton<IAutomationGateway>(provider => provider.GetRequiredService<ITaskScheduler>().Gateway);
             services.AddSingleton<IHotReloadService>(provider => new HotReloadService(
                 PluginsRoot, provider.GetRequiredService<ITaskScheduler>(),

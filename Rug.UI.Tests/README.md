@@ -18,3 +18,10 @@ uses an isolated plugin directory and cleans it up.
 Since Task 3.5-02, selected tasks are per-run launch inputs. The Lua demo writes
 only its InstanceState, and the displayed completed timeline is a detached UI
 copy associated with that run; PluginConfig remains plugin-scoped in memory.
+
+Task 3.5-04 UI automation explicitly invokes the real host permission dialog.
+`--instance-ui` verifies denied Start produces no timeline, Allow starts, revoke
+stops all runs, and regrant starts a new run; it waits for enabled navigation
+before switching asynchronously created instances. `--e2e` explicitly approves
+the demo before running and checks its completed timeline survives UI reload.
+No environment variable auto-approves grants. Background reload never prompts.

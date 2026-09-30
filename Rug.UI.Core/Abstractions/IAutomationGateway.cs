@@ -9,7 +9,7 @@ public interface IAutomationGateway
         CancellationToken cancellationToken = default);
 }
 
-/// <summary>Replaceable policy; grants come only from host-created contexts and the registered run.</summary>
+/// <summary>Additional host policy over capability ceilings; live grants come from IPluginAuthorization.</summary>
 public interface IAutomationPermissionChecker
 {
     bool IsAllowed(AutomationCallContext caller, IReadOnlyList<string> runPermissions,

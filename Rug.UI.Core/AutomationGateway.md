@@ -28,7 +28,7 @@ wrong-binding requests fail before service dispatch.
 
 `AutomationCallContext` has an internal constructor and is not request data.
 Trusted host composition code uses `CreateContextAsync` to verify the plugin
-catalog, bind a principal/source, copy manifest grants, and optionally pin a run.
+catalog, bind a principal/source, copy capability ceilings and installation-bound authorization tickets, and optionally pin a run.
 Only that host API may bind a startup HWND or pre-run ready callback. External
 adapters must receive a context issued by their trusted host, never expose this
 factory or bind principal/source/grants from client JSON. Contexts from another
@@ -36,10 +36,13 @@ gateway are invalid. Lua contexts are run-pinned and cannot issue lifecycle
 commands; UI/Agent/MCP contexts may be plugin-scoped or run-pinned.
 
 `IAutomationPermissionChecker` is replaceable through the scheduler or gateway
-constructor. The default checks exact manifest names in both caller and live-run
-grants: `timer`, `vision.capture`, `vision.ocr`, `vision.match`, `input`. Plugin
-lifecycle operations use the host's plugin capability and require no additional
-manifest permission. Existing bridge checks remain defense in depth: external
+constructor. Live grants are additionally enforced through
+[IPluginAuthorization](Authorization.md); the default operation policy checks
+exact declarations in both caller and live-run ceilings: `timer`, `vision.capture`,
+`vision.ocr`, `vision.match`, `input`. Start requires all current declarations to
+be explicitly granted; Stop cleanup is independent of revoked grants.
+Pause/Resume still validate the live identity. Existing bridge checks remain
+defense in depth: external
 templates require `filesystem`, symlink/path restrictions and client-coordinate,
 button, key and duration validation remain unchanged. A replacement policy can
 restrict admission; it cannot relax those existing service checks.
@@ -77,7 +80,8 @@ Malformed parameters return Rejected/InvalidParameters with no uncertainty or
 service calls. This does not reclassify service `InvalidOperationException`s:
 they remain Failed/ExecutionFailed.
 
-Codes include invalid parameters/caller, permission denial, unknown instance,
+Permission rejection includes structured missing names, rather than exception
+text. Codes include invalid parameters/caller, permission denial, unknown instance,
 stale run, binding mismatch, unsupported operation, duplicate conflict, deadline,
 cancellation, execution failure and capacity backpressure. No internal exception
 or stack is returned to adapters. Lua maps successful values through its existing
@@ -106,7 +110,7 @@ that blocks before returning its Task cannot block the caller, timeout delivery
 or admission of another request. Tests cover that synchronous prefix as well as
 an asynchronously pending noncooperative capture.
 
-Deduplication keys include host principal/source, plugin, pinned-caller instance,
+Deduplication keys include host principal/source, plugin installation, pinned-caller instance,
 target instance/generation/binding and operation ID. Fingerprints use operation
 type plus exact JSON text; different property order is conservatively a conflict.
 Correlation/deadline are transport metadata rather than parameters. Completed
