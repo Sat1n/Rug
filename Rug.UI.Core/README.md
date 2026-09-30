@@ -303,8 +303,13 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 
 ## Plugin & Permission Rules
 
-* Enforce `manifest.json` permissions before starting each sensitive `rug.*` task.
-  Unauthorized calls throw `PermissionDeniedException` and emit an audit warning.
+* Plugin UI lifecycle and Lua automation use `IAutomationGateway.ExecuteAsync`
+  before dispatch to the registered run's services. Host-bound caller grants,
+  complete run identity, cancellation/deadlines, bounded deduplication and
+  sanitized outcomes are defined in [Automation Gateway](AutomationGateway.md).
+  Existing bridge/path/input gates remain enforced; denied Lua calls retain
+  `PermissionDeniedException` and a security warning. Anomaly/state/config/log
+  keep their existing paths.
 
 ## Constraints
 

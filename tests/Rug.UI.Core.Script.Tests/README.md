@@ -51,3 +51,13 @@ null versus missing keys, detached arrays/events, oversized/deep/unsupported JSO
 stale UI notifications, and writes/callbacks after instance close. Scheduler tests
 cover windowless launch inputs, per-plugin configuration startup snapshots,
 generation/binding identity and a fresh state partition after restart.
+
+Task 3.5-03 routes the existing real Lua suite through Automation Gateway.
+`GatewayTests.cs` also exercises UI lifecycle and simulated Agent/MCP callers,
+dual-instance services, permission policy replacement, forged grant data and
+foreign capabilities, identity rejection with zero capture calls, 20 concurrent
+duplicates and parameter conflicts, pre-expiration/pre-cancellation, ignored
+cancellation and late Lua results. Tests cover bounded capacity, TTL expiry with
+a controlled clock, pinned noncooperative work, sanitized failures and repeated
+run cleanup. The windowless lifecycle test checks duplicate start, pause, resume
+and stop through Gateway. See the [contract](../../Rug.UI.Core/AutomationGateway.md).

@@ -44,7 +44,8 @@ public sealed class DemoWorkflowCoordinator : IDisposable
         string[] selected = parameter as string[] ?? [];
         if (selected.Length == 0) throw new InvalidOperationException("请先选择至少一个任务。");
         foreach (var active in _scheduler.Instances.Where(item => item.PluginId == PluginId))
-            await _scheduler.StopTaskAsync(active.InstanceId);
+            await PluginAutomationCommands.ExecuteAsync(_scheduler, PluginId, AutomationOperation.Stop,
+                active.Identity, cancellationToken: cancellationToken);
         lock (_gate)
         {
             foreach (var subscription in _stateSubscriptions.Values) subscription.Dispose();
@@ -54,7 +55,8 @@ public sealed class DemoWorkflowCoordinator : IDisposable
         }
         TimelineChanged?.Invoke(this, EventArgs.Empty);
         var inputs = new Dictionary<string, object?> { ["demo.selection"] = string.Join(",", selected) };
-        await _scheduler.StartTaskAsync(PluginId, 0, inputs, OnReady, cancellationToken);
+        await PluginAutomationCommands.ExecuteAsync(_scheduler, PluginId, AutomationOperation.Start,
+            inputs: inputs, onReady: OnReady, cancellationToken: cancellationToken);
     }
 
     private void OnReady(RunIdentity identity)
@@ -110,7 +112,12 @@ public sealed class DemoWorkflowCoordinator : IDisposable
 
     private async Task StopCompletedAsync(Guid instanceId)
     {
-        try { await _scheduler.StopTaskAsync(instanceId); }
+        try
+        {
+            var run = _scheduler.Instances.FirstOrDefault(item => item.InstanceId == instanceId);
+            if (run is not null)
+                await PluginAutomationCommands.ExecuteAsync(_scheduler, PluginId, AutomationOperation.Stop, run.Identity);
+        }
         catch (Exception error) { _bus.SetState(StateScope.App, "demo.last_error", error.Message); }
         finally
         {

@@ -1,11 +1,13 @@
 #nullable enable
 using Rug.UI.Core.Models;
+using Rug.UI.Core.Services;
 
 namespace Rug.UI.Core.Abstractions;
 
 /// <summary>One Lua script instance. StepAsync starts it; ResumeAsync awaits one pending operation.</summary>
 public interface IScriptRuntime : IAsyncDisposable
 {
+    void ConfigureGateway(AutomationGateway gateway) { }
     ScriptState State { get; }
     event EventHandler<ScriptStateChangedEventArgs>? StateChanged;
     /// <summary>Bind structural identity, launch inputs and a plugin config snapshot before initialization.</summary>

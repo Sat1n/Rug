@@ -36,7 +36,8 @@ public sealed class TaskScheduler : ITaskScheduler
         Func<ICaptureService> captureFactory, Func<IInputService> inputFactory,
         Func<ICaptureService, IInputService, IScriptRuntime> runtimeFactory,
         ILogger<TaskScheduler> logger, IAnomalyLogger anomalies, TimeSpan? tickInterval = null,
-        TimeSpan? watchdogTimeout = null, ICommandBus? commandBus = null)
+        TimeSpan? watchdogTimeout = null, ICommandBus? commandBus = null,
+        IAutomationPermissionChecker? permissionChecker = null)
     {
         _plugins = plugins ?? throw new ArgumentNullException(nameof(plugins));
         _anomalies = anomalies ?? throw new ArgumentNullException(nameof(anomalies));
@@ -51,8 +52,17 @@ public sealed class TaskScheduler : ITaskScheduler
         _watchdogTimeout = watchdogTimeout ?? TimeSpan.FromSeconds(1);
         if (_tickInterval <= TimeSpan.Zero || _watchdogTimeout <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(tickInterval));
+        Gateway = new AutomationGateway(logger, permissionChecker, getPlugin: GetPluginAsync,
+            start: async (plugin, hwnd, inputs, ready, token) =>
+            {
+                RunIdentity? started = null;
+                await StartTaskWithReadyAsync(plugin, hwnd, inputs,
+                    identity => { started = identity; ready?.Invoke(identity); }, token).ConfigureAwait(false);
+                return started!;
+            }, stop: StopTaskAsync, pause: PauseTask, resume: ResumeTask);
     }
 
+    public AutomationGateway Gateway { get; }
     public IReadOnlyCollection<TaskExecutionContext> Instances => _instances.Values.ToArray();
     public event EventHandler? InstancesChanged;
 
@@ -153,6 +163,7 @@ public sealed class TaskScheduler : ITaskScheduler
             capture = _captureFactory() ?? throw new InvalidOperationException("Capture factory returned null.");
             input = _inputFactory() ?? throw new InvalidOperationException("Input factory returned null.");
             runtime = _runtimeFactory(capture, input) ?? throw new InvalidOperationException("Runtime factory returned null.");
+            runtime.ConfigureGateway(Gateway);
             _commandBus?.OpenInstance(identity.InstanceScope);
             runtime.ConfigureState(identity, launchInputs, configuration);
             // Capture is ready before Lua on_init can call rug.capture().

@@ -100,6 +100,7 @@ public partial class App : Application
                 provider.GetRequiredService<ILogger<Rug.UI.Core.Services.TaskScheduler>>(),
                 provider.GetRequiredService<IAnomalyLogger>(),
                 commandBus: provider.GetRequiredService<ICommandBus>()));
+            services.AddSingleton<IAutomationGateway>(provider => provider.GetRequiredService<ITaskScheduler>().Gateway);
             services.AddSingleton<IHotReloadService>(provider => new HotReloadService(
                 PluginsRoot, provider.GetRequiredService<ITaskScheduler>(),
                 provider.GetRequiredService<ILogger<HotReloadService>>()));

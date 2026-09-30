@@ -20,6 +20,8 @@ public sealed partial class MainWindow : WindowEx
     private Services.DemoWorkflowCoordinator? _demo;
     private IDisposable? _startSubscription;
     private IDisposable? _stopSubscription;
+    private IDisposable? _pauseSubscription;
+    private IDisposable? _resumeSubscription;
     private Guid? _selectedInstanceId;
     private bool _updatingInstancePicker;
     private bool _initialized;
@@ -38,6 +40,8 @@ public sealed partial class MainWindow : WindowEx
             if (_demo is not null) _demo.TimelineChanged -= OnDemoTimelineChanged;
             _startSubscription?.Dispose();
             _stopSubscription?.Dispose();
+            _pauseSubscription?.Dispose();
+            _resumeSubscription?.Dispose();
         };
     }
 
@@ -52,6 +56,8 @@ public sealed partial class MainWindow : WindowEx
         var bus = App.GetService<ICommandBus>();
         _startSubscription = bus.Subscribe("host.start_windowless", StartWindowlessAsync);
         _stopSubscription = bus.Subscribe("host.stop_selected", StopSelectedAsync);
+        _pauseSubscription = bus.Subscribe("host.pause_selected", (_, token) => ControlSelectedAsync(AutomationOperation.Pause, token));
+        _resumeSubscription = bus.Subscribe("host.resume_selected", (_, token) => ControlSelectedAsync(AutomationOperation.Resume, token));
         var reload = App.GetService<IHotReloadService>();
         reload.Reloaded += (_, e) => DispatcherQueue.TryEnqueue(() =>
         {
@@ -213,7 +219,9 @@ public sealed partial class MainWindow : WindowEx
         ReloadStatus.Text = "正在启动 · " + pluginId;
         try
         {
-            Guid id = await _scheduler!.StartTaskAsync(pluginId, 0, inputs, cancellationToken);
+            var identity = (RunIdentity)(await Services.PluginAutomationCommands.ExecuteAsync(_scheduler!, pluginId,
+                AutomationOperation.Start, inputs: inputs, cancellationToken: cancellationToken))!;
+            Guid id = identity.InstanceId;
             RefreshInstancePicker();
             ReloadStatus.Text = "运行中 · " + id.ToString("N")[..8];
         }
@@ -225,9 +233,14 @@ public sealed partial class MainWindow : WindowEx
     }
 
     private async Task StopSelectedAsync(object? parameter, CancellationToken cancellationToken)
+        => await ControlSelectedAsync(AutomationOperation.Stop, cancellationToken);
+
+    private async Task ControlSelectedAsync(AutomationOperation operation, CancellationToken cancellationToken)
     {
-        if (_selectedInstanceId is Guid id)
-            await _scheduler!.StopTaskAsync(id).WaitAsync(cancellationToken);
+        TaskExecutionContext? run = _scheduler?.Instances.FirstOrDefault(item => item.InstanceId == _selectedInstanceId);
+        if (run is not null)
+            await Services.PluginAutomationCommands.ExecuteAsync(_scheduler!, run.PluginId, operation,
+                run.Identity, cancellationToken: cancellationToken);
     }
 
     private void Settings_ColorValuesChanged(UISettings sender, object args) =>

@@ -68,6 +68,13 @@ no automation pipeline and no native interop itself.
 * `Services/UIFactory.cs` maps validated `UISchemaNode` trees to WinUI 3 controls. Settings cards use Windows Community Toolkit `SettingsCard`; navigation uses the native `SelectorBar`. `Controls/TaskSelectorCard` provides selection, ordering, select-all, clear and command dispatch; `Controls/StepFlowView` renders status and optional app-owned thumbnail URIs. `InfoBanner` maps to `InfoBar`.
 * `Views/DynamicUIHost` accepts JSON text or a file plus `ICommandBus`. The host calls `SetActiveInstance(RunIdentity?, displayFallbacks)` for any plugin; the binding survives card rebuilds, and null releases the live instance subscription. Settings controls read/write the selected plugin's `PluginConfig` scope; each `StepFlowView` reads and subscribes to its own schema `stateKey` in the active run's `InstanceState`. Instance changes and card rebuilds reread that scope, with schema steps as defaults. The factory applies exact-scope/key UI notifications on the dispatcher and detaches subscriptions when replaced or unloaded. Command failures surface in the host `InfoBar`.
 * `MainWindow` hosts the plugin navigation, `DynamicUIHost` and active-instance picker. It listens to scheduler instance changes, switches the selected run, clears stopped runs and rebinds after hot reload on the UI dispatcher. `host.start_windowless` starts the selected plugin with optional JSON object launch inputs; `host.stop_selected` stops the selected run. The buttons can be declared in any plugin schema. Window-bound runs still require their existing target-selection path. The older `MainPage` remains a legacy page. A plugin supplies `ui.json` to `DynamicUIHost.LoadFileAsync` without recompiling.
+* `Services/PluginAutomationCommands` binds verified plugin UI callers and routes
+  start/stop/pause/resume through the scheduler's Automation Gateway. Schema
+  parameters remain launch data, never identity/permission grants or HWNDs.
+  Demo start and automatic completion-stop use that same path. The host also
+  registers `host.pause_selected`/`host.resume_selected` for schema commands.
+  See the [Gateway contract](../Rug.UI.Core/AutomationGateway.md) for deadlines,
+  cancellation, bounded deduplication and sanitized outcomes.
 * `Rug.UI` targets Windows SDK 22621 and pins Windows App SDK 1.5 plus SettingsControls 8.1 because `SelectorBar` first appears in 1.5 and this toolkit build requires the 22621 target framework.
 
 ## .NET 10 x64 build and verification (Task 3.5-01)

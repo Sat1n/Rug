@@ -98,6 +98,9 @@ public sealed class LuaRuntime : IScriptRuntime
     private readonly ILogger _logger;
     private readonly ICommandBus _commandBus;
     private readonly bool _ownsCommandBus;
+    private RunIdentity? _identity;
+    private AutomationGateway? _gateway;
+    private AutomationCallContext? _caller;
     private StateScope _instanceScope = StateScope.Instance("standalone", Guid.NewGuid());
     private IReadOnlyDictionary<string, object?>? _configSnapshot;
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -143,6 +146,12 @@ public sealed class LuaRuntime : IScriptRuntime
 
     public ScriptState State { get { lock (_stateGate) return _state; } }
     public event EventHandler<ScriptStateChangedEventArgs>? StateChanged;
+    public AutomationGateway Gateway => _gateway ?? throw new InvalidOperationException("Runtime is not initialized.");
+    public void ConfigureGateway(AutomationGateway gateway)
+    {
+        if (State != ScriptState.Uninitialized) throw new InvalidOperationException("Gateway must be bound before initialization.");
+        _gateway = gateway;
+    }
 
     public void ConfigureState(RunIdentity identity, IReadOnlyDictionary<string, object?> launchInputs,
         IReadOnlyDictionary<string, object?> pluginConfig)
@@ -153,6 +162,7 @@ public sealed class LuaRuntime : IScriptRuntime
         if (State != ScriptState.Uninitialized) throw new InvalidOperationException("State identity must be bound before initialization.");
         _commandBus.CloseInstance(_instanceScope);
         _instanceScope = identity.InstanceScope;
+        _identity = identity;
         _commandBus.OpenInstance(_instanceScope);
         var copy = new StateStore();
         StateScope configurationScope = StateScope.Plugin(identity.PluginId);
@@ -188,6 +198,14 @@ public sealed class LuaRuntime : IScriptRuntime
                 ct).ConfigureAwait(false);
         }
         _lifetime = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        _identity ??= new RunIdentity(string.IsNullOrWhiteSpace(manifest.Id) ? "standalone" : manifest.Id,
+            _instanceScope.InstanceId, 1, manifest.TargetWindow == 0 ? null : Guid.NewGuid(), manifest.TargetWindow);
+        PluginManifest gatewayManifest = manifest with { Id = _identity.PluginId };
+        _gateway ??= new AutomationGateway(_logger, getPlugin: (plugin, _) =>
+            Task.FromResult(plugin == gatewayManifest.Id ? gatewayManifest : throw new KeyNotFoundException()));
+        _caller = _gateway.BindContext(gatewayManifest, "lua:" + _identity.InstanceId,
+            AutomationSource.Lua, _identity);
+        _gateway.RegisterRun(_identity, gatewayManifest, _lifetime.Token, ExecuteAutomationAsync);
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
@@ -440,29 +458,84 @@ public sealed class LuaRuntime : IScriptRuntime
         return new(State);
     }
 
+    /// <summary>@shape args: packed coroutine result, operation arguments start at index 4; result: gateway task.
+    /// @source args: LuaRuntime.ResumeLua</summary>
     private Task<object?> BeginOperation(string operation, LuaTable args, CancellationToken ct)
     {
-        string permission = operation switch
+        if (operation == "resolve_anomaly")
         {
-            "sleep" => Permission.Timer, "capture" => Permission.VisionCapture, "ocr" => Permission.VisionOcr,
-            "find_image" => Permission.VisionMatch,
-            "click" or "press_key" => Permission.ControlInput,
-            "resolve_anomaly" => Permission.Agent,
-            _ => throw new InvalidOperationException($"Unknown rug operation: {operation}")
-        };
-        _permissions!.Demand(permission, operation == "resolve_anomaly" ? "rug.agent.resolve_anomaly" : $"rug.{operation}");
-        return operation switch
+            _permissions!.Demand(Permission.Agent, "rug.agent.resolve_anomaly");
+            return ResolveAnomalyAsync(args);
+        }
+        AutomationOperation type = operation switch
         {
-            "sleep" => SleepAsync(Int(args[4]), ct),
-            "capture" => CaptureAsync(ct),
-            "ocr" => OcrAsync(args[4], args[5], args[6], ct),
-            "find_image" => FindImageAsync(args[4], args[5], args[6], ct),
-            "click" => ClickAsync(Int(args[4]), Int(args[5]), ParseButton(args[6]), ParseMode(args[7]), ct),
-            "press_key" => PressKeyAsync(Int(args[4]), args[5] is null ? 0 : Int(args[5]), ct),
-            "resolve_anomaly" => ResolveAnomalyAsync(args),
-            _ => throw new InvalidOperationException()
+            "sleep" => AutomationOperation.Sleep, "capture" => AutomationOperation.Capture,
+            "ocr" => AutomationOperation.Ocr, "find_image" => AutomationOperation.FindImage,
+            "click" => AutomationOperation.Click, "press_key" => AutomationOperation.PressKey,
+            _ => (AutomationOperation)(-1)
         };
+        JsonElement parameters;
+        try { parameters = ParseOperationParameters(operation, args); }
+        catch (Exception error) when (error is ArgumentException or JsonException or FormatException or InvalidCastException or OverflowException)
+        {
+            // Invalid Lua arguments still enter Gateway and produce an audited InvalidParameters result.
+            parameters = JsonSerializer.SerializeToElement<object?>(null);
+        }
+        return ExecuteGatewayAsync(type, parameters, ct);
     }
+
+    private static JsonElement ParseOperationParameters(string operation, LuaTable args)
+    {
+        // Copy Lua arguments while holding the Lua gate; never retain a LuaTable in a request.
+        object parameters = operation switch
+        {
+            "sleep" => new { ms = Int(args[4]) },
+            "capture" => new { },
+            "ocr" => ParseOcrParameters(args[4], args[5], args[6]),
+            "find_image" => new { path = args[4] as string ?? throw new ArgumentException("Template path must be a string."),
+                threshold = args[5] is null ? 0.8f : Convert.ToSingle(args[5], CultureInfo.InvariantCulture), region = ParseRegion(args[6]) },
+            "click" => new { x = Int(args[4]), y = Int(args[5]), button = ParseButton(args[6]), mode = ParseMode(args[7]) },
+            "press_key" => new { key = Int(args[4]), durationMs = args[5] is null ? 0 : Int(args[5]) },
+            _ => throw new ArgumentException($"Unknown rug operation: {operation}")
+        };
+        return JsonSerializer.SerializeToElement(parameters);
+    }
+
+    private Task<object?> ExecuteGatewayAsync(AutomationOperation operation, JsonElement parameters, CancellationToken ct)
+    {
+        var request = new OperationRequest(operation, parameters, Guid.NewGuid(), _identity!.InstanceId.ToString("N"),
+            OperationTarget.ForRun(_identity), DateTimeOffset.UtcNow.AddMinutes(10));
+        Task<OperationResult> pending = _gateway!.ExecuteAsync(_caller!, request, ct);
+        return pending.IsCompletedSuccessfully ? Task.FromResult(MapGatewayResult(pending.Result, operation)) : AwaitResultAsync();
+        async Task<object?> AwaitResultAsync() => MapGatewayResult(await pending.ConfigureAwait(false), operation);
+    }
+    private object? MapGatewayResult(OperationResult result, AutomationOperation operation)
+    {
+        if (result.Error == OperationError.PermissionDenied)
+            throw new Rug.UI.Core.Exceptions.PermissionDeniedException(_identity!.PluginId,
+                result.DeniedPermission ?? ManifestAutomationPermissionChecker.RequiredPermission(operation)!, "rug." + (operation switch
+                {
+                    AutomationOperation.FindImage => "find_image", AutomationOperation.PressKey => "press_key",
+                    _ => operation.ToString().ToLowerInvariant()
+                }));
+        return result.RequireSuccess();
+    }
+
+    private Task<object?> ExecuteAutomationAsync(AutomationOperation operation, JsonElement parameters, CancellationToken ct) =>
+        operation switch
+        {
+            AutomationOperation.Sleep => SleepAsync(parameters.GetProperty("ms").GetInt32(), ct),
+            AutomationOperation.Capture => CaptureAsync(ct),
+            AutomationOperation.FindImage => FindImageAsync(parameters, ct),
+            AutomationOperation.Ocr => OcrAsync(parameters, ct),
+            AutomationOperation.Click => ClickAsync(parameters.GetProperty("x").GetInt32(), parameters.GetProperty("y").GetInt32(),
+                ReadOptional<MouseButton>(parameters, "button") ?? MouseButton.Left, ReadOptional<InputDeliveryMode>(parameters, "mode"), ct),
+            AutomationOperation.PressKey => PressKeyAsync(parameters.GetProperty("key").GetInt32(),
+                ReadOptional<int>(parameters, "durationMs") ?? 0, ct),
+            _ => throw new ArgumentException("Unsupported runtime operation.")
+        };
+    private static T? ReadOptional<T>(JsonElement parameters, string key) where T : struct =>
+        parameters.TryGetProperty(key, out var value) && value.ValueKind != JsonValueKind.Null ? value.Deserialize<T>() : null;
 
     private static int Int(object? value) => Convert.ToInt32(value, CultureInfo.InvariantCulture);
 
@@ -521,17 +594,19 @@ public sealed class LuaRuntime : IScriptRuntime
 
     private async Task<object?> CaptureAsync(CancellationToken ct)
     {
-        return await _visual!.CaptureAsync(ct).ConfigureAwait(false);
+        CapturedFrame? frame = await _visual!.CaptureAsync(ct).ConfigureAwait(false);
+        // Cache descriptors for deduplication; the visual bridge owns the current pixel buffer.
+        return frame is null ? null : new CapturedFrameMetadata(frame.Width, frame.Height, frame.Stride);
     }
 
-    private async Task<object?> FindImageAsync(object? path, object? threshold, object? region, CancellationToken ct)
+    private async Task<object?> FindImageAsync(JsonElement parameters, CancellationToken ct)
     {
-        string template = path as string ?? throw new ArgumentException("Template path must be a string.");
-        float score = threshold is null ? 0.8f : Convert.ToSingle(threshold, CultureInfo.InvariantCulture);
-        return await _visual!.FindImageAsync(template, score, ParseRegion(region), ct).ConfigureAwait(false);
+        string template = parameters.GetProperty("path").GetString() ?? throw new ArgumentException("Template path must be a string.");
+        return await _visual!.FindImageAsync(template, ReadOptional<float>(parameters, "threshold") ?? 0.8f,
+            ReadOptional<Rect>(parameters, "region"), ct).ConfigureAwait(false);
     }
 
-    private async Task<object?> OcrAsync(object? first, object? second, object? third, CancellationToken ct)
+    private static object ParseOcrParameters(object? first, object? second, object? third)
     {
         Rect? region = ParseRegion(first is LuaTable ? first : null);
         OcrEngineType engine = OcrEngineType.WinRt;
@@ -558,12 +633,19 @@ public sealed class LuaRuntime : IScriptRuntime
         }
         else if (third is not null)
             throw new ArgumentException("OCR engine must be a string.");
-        return await _visual!.OcrAsync(region, language, engine, ct).ConfigureAwait(false);
+        return new { region, language, engine };
+    }
+    private async Task<object?> OcrAsync(JsonElement parameters, CancellationToken ct)
+    {
+        string? language = parameters.TryGetProperty("language", out var value) ? value.GetString() : null;
+        OcrEngineType engine = ReadOptional<OcrEngineType>(parameters, "engine") ?? OcrEngineType.WinRt;
+        if (!Enum.IsDefined(engine)) throw new ArgumentException("Unknown OCR engine.");
+        return await _visual!.OcrAsync(ReadOptional<Rect>(parameters, "region"), language, engine, ct).ConfigureAwait(false);
     }
 
     private object? ToLuaValue(object? value)
     {
-        if (value is CapturedFrame frame)
+        if (value is CapturedFrameMetadata frame)
         {
             LuaTable table = NewTable();
             table["width"] = frame.Width;
@@ -649,6 +731,7 @@ public sealed class LuaRuntime : IScriptRuntime
 
     public void Stop()
     {
+        if (_identity is not null) _gateway?.EndRun(_identity.InstanceId);
         if (State == ScriptState.Stopped) return;
         _lifetime?.Cancel();
         ChangeState(ScriptState.Stopped);
@@ -663,6 +746,11 @@ public sealed class LuaRuntime : IScriptRuntime
             previous = _state;
             if (previous == state || previous == ScriptState.Stopped && state != ScriptState.Stopped) return;
             _state = state;
+        }
+        if (state is ScriptState.Stopped or ScriptState.Faulted)
+        {
+            if (_identity is not null) _gateway?.EndRun(_identity.InstanceId);
+            _lifetime?.Cancel();
         }
         StateChanged?.Invoke(this, new(previous, state));
     }

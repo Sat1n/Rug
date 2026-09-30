@@ -1,10 +1,12 @@
 #nullable enable
 using Rug.UI.Core.Models;
+using Rug.UI.Core.Services;
 
 namespace Rug.UI.Core.Abstractions;
 
 public interface ITaskScheduler : IAsyncDisposable
 {
+    AutomationGateway Gateway => throw new NotSupportedException("No automation gateway is bound.");
     /// <summary>Raised after a run enters or leaves the active instance collection.</summary>
     event EventHandler? InstancesChanged;
     IReadOnlyCollection<TaskExecutionContext> Instances { get; }

@@ -1031,6 +1031,7 @@ await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new 
         launchOptions.GetProperty("nested")[1].ValueKind == JsonValueKind.Null,
         "JSON launch objects retain their nested structure");
 }
+await GatewayTests.RunAsync();
 Console.WriteLine("Lua bridge, scheduler and state/command bus tests passed");
 
 static void Check(bool condition, string message)
