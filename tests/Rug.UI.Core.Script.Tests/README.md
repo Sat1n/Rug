@@ -61,3 +61,11 @@ cancellation and late Lua results. Tests cover bounded capacity, TTL expiry with
 a controlled clock, pinned noncooperative work, sanitized failures and repeated
 run cleanup. The windowless lifecycle test checks duplicate start, pause, resume
 and stop through Gateway. See the [contract](../../Rug.UI.Core/AutomationGateway.md).
+
+`GatewayRepairTests.cs` keeps an instance alive through capture A timeout or
+explicit cancellation, successful capture B and late A completion, then checks
+that OCR and matching still consume B. Parameter regressions cover missing
+fields, wrong JSON types, integer/enum/threshold/region ranges and actual Lua
+coercion attempts, asserting Rejected/InvalidParameters without uncertainty or
+capture/OCR/matching/input calls. A real service InvalidOperationException remains
+Failed/ExecutionFailed rather than being hidden by parameter classification.

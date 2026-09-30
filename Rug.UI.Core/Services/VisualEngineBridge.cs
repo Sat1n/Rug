@@ -38,11 +38,15 @@ public sealed class VisualEngineBridge : IDisposable
     {
         _permissions.Demand(Permission.VisionCapture, "rug.capture");
         ThrowIfDisposed();
+        cancellationToken.ThrowIfCancellationRequested();
         CapturedFrame? frame = await _capture.GrabFrameAsync(cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
         if (frame is not null) ValidateFrame(frame);
         lock (_frameGate)
         {
             ThrowIfDisposed();
+            // Publication shares the frame lock with newer captures; late cancelled work cannot replace them.
+            cancellationToken.ThrowIfCancellationRequested();
             _frame = frame;
         }
         return frame;

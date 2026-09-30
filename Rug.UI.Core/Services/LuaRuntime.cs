@@ -493,7 +493,7 @@ public sealed class LuaRuntime : IScriptRuntime
             "capture" => new { },
             "ocr" => ParseOcrParameters(args[4], args[5], args[6]),
             "find_image" => new { path = args[4] as string ?? throw new ArgumentException("Template path must be a string."),
-                threshold = args[5] is null ? 0.8f : Convert.ToSingle(args[5], CultureInfo.InvariantCulture), region = ParseRegion(args[6]) },
+                threshold = args[5] is null ? 0.8f : Number(args[5]), region = ParseRegion(args[6]) },
             "click" => new { x = Int(args[4]), y = Int(args[5]), button = ParseButton(args[6]), mode = ParseMode(args[7]) },
             "press_key" => new { key = Int(args[4]), durationMs = args[5] is null ? 0 : Int(args[5]) },
             _ => throw new ArgumentException($"Unknown rug operation: {operation}")
@@ -537,7 +537,19 @@ public sealed class LuaRuntime : IScriptRuntime
     private static T? ReadOptional<T>(JsonElement parameters, string key) where T : struct =>
         parameters.TryGetProperty(key, out var value) && value.ValueKind != JsonValueKind.Null ? value.Deserialize<T>() : null;
 
-    private static int Int(object? value) => Convert.ToInt32(value, CultureInfo.InvariantCulture);
+    private static int Int(object? value) => value switch
+    {
+        int integer => integer,
+        long integer when integer is >= int.MinValue and <= int.MaxValue => (int)integer,
+        double number when double.IsFinite(number) && number >= int.MinValue && number <= int.MaxValue && Math.Truncate(number) == number => (int)number,
+        _ => throw new ArgumentException("Argument must be an Int32 number.")
+    };
+    private static float Number(object? value) => value switch
+    {
+        long number => number,
+        double number => (float)number,
+        _ => throw new ArgumentException("Argument must be a number.")
+    };
 
     private static Rect? ParseRegion(object? value)
     {
@@ -610,6 +622,7 @@ public sealed class LuaRuntime : IScriptRuntime
     {
         Rect? region = ParseRegion(first is LuaTable ? first : null);
         OcrEngineType engine = OcrEngineType.WinRt;
+        if (second is not null and not string) throw new ArgumentException("OCR language must be a string.");
         string? language = second as string;
         if (first is string selector)
         {

@@ -54,6 +54,8 @@ restrict admission; it cannot relax those existing service checks.
   `press_key {key,durationMs?}` yield requests. Regions use managed `Rect` JSON
   (`X`,`Y`,`Width`,`Height`); engine/button/mode use enum numeric values.
   Lua argument tables are copied under the Lua gate and never retained by Gateway.
+  Numeric strings, booleans, missing required integers and fractional integers
+  are rejected rather than coerced by Lua argument parsing.
   Capture returns `CapturedFrameMetadata` (width/height/stride), preserving Lua's
   frame table. Pixel buffers stay in the per-run visual bridge; deduplication
   does not retain previous screenshots.
@@ -67,6 +69,14 @@ restrict admission; it cannot relax those existing service checks.
 ## Results, cancellation and deduplication
 
 `OperationResult` separates Success, Rejected, Cancelled, TimedOut and Failed.
+`OperationParameterValidator` checks required fields, JSON scalar types, enum
+values, integer ranges, finite thresholds and complete positive regions before
+dispatch. Startup inputs are checked against StateStore constraints before
+creating services. Frame/window bounds remain checked by their owning bridge.
+Malformed parameters return Rejected/InvalidParameters with no uncertainty or
+service calls. This does not reclassify service `InvalidOperationException`s:
+they remain Failed/ExecutionFailed.
+
 Codes include invalid parameters/caller, permission denial, unknown instance,
 stale run, binding mismatch, unsupported operation, duplicate conflict, deadline,
 cancellation, execution failure and capacity backpressure. No internal exception
@@ -87,6 +97,10 @@ Already-started work may ignore cancellation. Gateway returns promptly with
 resumes stopped Lua or writes into a replacement instance. This flag is
 conservative, including operations without physical side effects. Cancellation
 cannot retract input already emitted. Native work is not forcibly aborted.
+Capture additionally checks cancellation after its underlying await and inside
+the frame publication lock. A timed-out/cancelled capture cannot update the
+visual cache even if it returns after a newer successful capture on a live run;
+subsequent OCR/matching continue reading that newer frame.
 Service dispatch runs on a worker outside the registry lock, so even a service
 that blocks before returning its Task cannot block the caller, timeout delivery
 or admission of another request. Tests cover that synchronous prefix as well as

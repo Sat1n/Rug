@@ -207,6 +207,7 @@ internal static class GatewayTests
 
             await TestLifecycleAsync(root);
             await TestLateLuaAsync(root);
+            await GatewayRepairTests.RunAsync(root);
             Console.WriteLine("Automation gateway identity, adapters, deduplication, cancellation and lifecycle tests passed");
         }
         finally { Directory.Delete(root, recursive: true); }

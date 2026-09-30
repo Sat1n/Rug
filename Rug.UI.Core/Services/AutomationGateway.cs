@@ -155,6 +155,8 @@ public sealed class AutomationGateway : IAutomationGateway
             if (_entries.TryGetValue(key, out entry!))
                 return entry.Fingerprint == fingerprint ? entry.Completion.Task :
                     FinishImmediate(caller, request, OperationStatus.Rejected, OperationError.DeduplicationConflict);
+            if (!OperationParameterValidator.IsValid(request.Operation, request.Parameters))
+                return FinishImmediate(caller, request, OperationStatus.Rejected, OperationError.InvalidParameters);
             if (request.Deadline <= _clock.GetUtcNow())
                 return FinishImmediate(caller, request, OperationStatus.TimedOut, OperationError.DeadlineExceeded);
             if (cancellationToken.IsCancellationRequested)

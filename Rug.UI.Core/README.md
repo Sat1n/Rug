@@ -310,6 +310,10 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   Existing bridge/path/input gates remain enforced; denied Lua calls retain
   `PermissionDeniedException` and a security warning. Anomaly/state/config/log
   keep their existing paths.
+  `OperationParameterValidator` rejects wrong JSON types, missing fields and
+  invalid static ranges before service dispatch. Capture checks cancellation
+  again under its cache publication lock, so a late cancelled frame cannot
+  replace a newer frame used by OCR or matching.
 
 ## Constraints
 
