@@ -41,6 +41,8 @@ public sealed class TaskExecutionContext
     internal Task? Runner { get; set; }
     internal AuthorizationLease? AuthorizationLease { get; set; }
     internal CancellationTokenRegistration AuthorizationCancellation { get; set; }
+    internal CancellationTokenRegistration InputCancellation { get; set; }
+    internal bool DeclaresInput { get; set; }
 
     internal void SetStatus(AutomationTaskStatus status)
     {

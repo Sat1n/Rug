@@ -8,6 +8,7 @@ namespace Rug.UI.Core.Abstractions;
 public interface IScriptRuntime : IAsyncDisposable
 {
     void ConfigureGateway(AutomationGateway gateway) { }
+    void ConfigureInputArbiter(IInputArbiter arbiter) { }
     ScriptState State { get; }
     event EventHandler<ScriptStateChangedEventArgs>? StateChanged;
     /// <summary>Bind structural identity, launch inputs and a plugin config snapshot before initialization.</summary>

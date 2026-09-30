@@ -50,7 +50,8 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 | `Services/VisualEngineBridge.cs` | Single-frame cache per runtime, permission-gated capture/match/OCR, safe template paths, region crops and client-space result coordinates |
 | `Services/InputService.cs` | Async humanized input (Task.Run / MTA): mouse move/click/drag, key press, `SendText`, dry-run `PlanTrajectoryAsync`; `SetTargetAsync(hwnd, background)` binds the window + delivery mode. Mouse coords are **client-space**, confined to the window by native |
 | `Abstractions/ICoordinateMapper.cs` · `Services/CoordinateMapper.cs` | Validate a physical client point against the target HWND and project it through Win32 `ClientToScreen` for diagnostics and tests |
-| `Services/InputBridge.cs` | Permission-gated input dispatch, per-call foreground/background selection, focus guard, button selection and cancellable key hold |
+| `Services/InputBridge.cs` | Permission-gated input dispatch, foreground/background selection, focus guard and full-action shared leases |
+| `Abstractions/IInputArbiter.cs` · `Models/InputOwnership.cs` · `Services/InputArbiter.cs` · `Services/InputWindowValidator.cs` · `Services/InputExecutionBoundary.cs` | Host owners, window lifetimes, bounded conflict-FIFO input queue, manual takeover and Gateway input-progress boundary; [contract](InputArbitration.md) |
 | `Services/CaptureService.cs` | Async WGC capture (Task.Run / MTA): start/stop a native capturer, copy each frame to managed BGRA8, free the native buffer |
 | `Services/WindowSpyService.cs` | Resolve the window under the cursor or enumerate visible top-level windows → `WindowInfo` (incl. monitor via `MonitorFromWindow`); inspect a given HWND, check foreground state, query client size and pick client points. All physical pixels (PMv2-aware host) |
 | `Abstractions/IScriptRuntime.cs` · `Models/ScriptExecutionResult.cs` | Script lifecycle/state contract |
@@ -76,7 +77,9 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 * `PauseTask` suspends progress at the next coroutine boundary and preserves the
   pending operation; `ResumeTask` continues it. `StopTaskAsync` cancels the instance,
   awaits the runner, invokes `on_stop()` with a bounded watchdog, stops/disposes
-  capture, and disposes Lua/input resources. `on_stop()` is synchronous; yielding
+  capture, and disposes Lua/input resources after actual input and releases finish.
+  Stop can wait for noncooperative native calls; no fixed timeout frees their
+  input handles early. `on_stop()` is synchronous; yielding
   from it is rejected during cleanup. Instances are removed after cleanup.
   `ITaskScheduler.InstancesChanged` fires after an instance enters or leaves the
   active collection; the WinUI host marshals it to its dispatcher and rereads
@@ -108,6 +111,11 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   failure also faults the task and is surfaced through `LastError`.
 
 ## Native input bridge and coordinates (Task 2.2)
+
+* Task 3.5-05A adds [shared input arbitration](InputArbitration.md). Lua and
+  Gateway input compete with host DevTools on actual window/global resources.
+  Host takeover stops only input-declaring runs and waits for releases; grants
+  are unchanged and returning control never revives an old run.
 
 * `rug.click(x, y, button?, mode?)` and `rug.press_key(vk, duration_ms?)` require
   `input`. Buttons accept `left`, `right`, `middle`, `x1`, `x2` or their native

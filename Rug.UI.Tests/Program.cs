@@ -87,6 +87,7 @@ Check(selectedTask == "capture", "schema command route");
 await HotReloadTests.RunAsync();
 if (args.Contains("--e2e", StringComparer.Ordinal)) await E2ETests.RunAsync();
 if (args.Contains("--instance-ui", StringComparer.Ordinal)) await E2ETests.RunInstanceUiAsync();
+if (args.Contains("--takeover-ui", StringComparer.Ordinal)) await E2ETests.RunTakeoverUiAsync();
 Console.WriteLine("Schema, state, and hot reload tests passed.");
 
 void ExpectInvalid(string json, string reason)

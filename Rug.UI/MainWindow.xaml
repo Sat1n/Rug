@@ -31,18 +31,25 @@
         </NavigationView>
         <Border Grid.Row="1" Padding="16,8" BorderThickness="0,1,0,0"
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
-            <StackPanel Orientation="Horizontal" Spacing="12">
-                <TextBlock Text="当前实例" VerticalAlignment="Center"/>
-                <ComboBox x:Name="InstancePicker" MinWidth="150" MaxWidth="250"
-                          AutomationProperties.Name="当前实例"
-                          SelectionChanged="InstancePicker_SelectionChanged"/>
-                <Button x:Name="NextInstanceButton" Content="下一个实例"
-                        AutomationProperties.Name="Next instance"
-                        Click="NextInstanceButton_Click"/>
-                <Button Content="插件权限" AutomationProperties.Name="Plugin permissions"
-                        Click="PluginPermissions_Click"/>
-                <TextBlock x:Name="ReloadStatus" Text="监控中" Opacity="0.7"
-                           VerticalAlignment="Center"/>
+            <StackPanel Spacing="8">
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                    <Button Content="人工接管" AutomationProperties.Name="Manual takeover" Click="ManualTakeover_Click"/>
+                    <Button Content="交还控制" AutomationProperties.Name="Return control" Click="ReturnControl_Click"/>
+                    <TextBlock x:Name="InputControlStatus" Text="自动化可用" VerticalAlignment="Center"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                    <TextBlock Text="当前实例" VerticalAlignment="Center"/>
+                    <ComboBox x:Name="InstancePicker" MinWidth="150" MaxWidth="250"
+                              AutomationProperties.Name="当前实例"
+                              SelectionChanged="InstancePicker_SelectionChanged"/>
+                    <Button x:Name="NextInstanceButton" Content="下一个实例"
+                            AutomationProperties.Name="Next instance"
+                            Click="NextInstanceButton_Click"/>
+                    <Button Content="插件权限" AutomationProperties.Name="Plugin permissions"
+                            Click="PluginPermissions_Click"/>
+                    <TextBlock x:Name="ReloadStatus" Text="监控中" Opacity="0.7"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
             </StackPanel>
         </Border>
     </Grid>

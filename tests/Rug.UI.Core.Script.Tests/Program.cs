@@ -272,7 +272,7 @@ await using (var bridge = new InputBridge(deniedInput,
 var bridgedInput = new FakeInput();
 await using (var bridge = new InputBridge(bridgedInput,
     TestAuthorizationHost.Gate(new PluginManifest([Permission.ControlInput]), NullLogger.Instance),
-    fakeMapper, _ => true))
+    fakeMapper, _ => true, arbiter: TestAuthorizationHost.InputArbiter))
 {
     await bridge.BindAsync(123, InputDeliveryMode.Win32PostMessage);
     await bridge.ClickAsync(100, 100, MouseButton.Right, InputDeliveryMode.Win32SendInput);
@@ -300,7 +300,7 @@ await using (var bridge = new InputBridge(bridgedInput,
 var unfocusedInput = new FakeInput();
 await using (var bridge = new InputBridge(unfocusedInput,
     TestAuthorizationHost.Gate(new PluginManifest([Permission.ControlInput]), NullLogger.Instance),
-    fakeMapper, _ => false))
+    fakeMapper, _ => false, arbiter: TestAuthorizationHost.InputArbiter))
 {
     await bridge.BindAsync(123, InputDeliveryMode.Win32PostMessage);
     await bridge.ClickAsync(100, 100);
@@ -521,7 +521,7 @@ try
         () => { var i = new FakeInput(); inputs.Add(i); return i; },
         (c, i) => new LuaRuntime(c, new FakeOcr(), i, luaLogger, commandBus: scopedBus),
         NullLogger<RugTaskScheduler>.Instance, anomalyLogger, TimeSpan.FromMilliseconds(20),
-        commandBus: scopedBus, authorization: schedulerAuthorization);
+        commandBus: scopedBus, authorization: schedulerAuthorization, inputArbiter: TestAuthorizationHost.InputArbiter);
     int instanceListNotifications = 0;
     scheduler.InstancesChanged += (_, _) => Interlocked.Increment(ref instanceListNotifications);
 
@@ -701,7 +701,7 @@ try
         new PluginManager(NullLogger<PluginManager>.Instance), schedulerRoot,
         () => delayedCapture, () => new FakeInput(),
         (c, i) => new LuaRuntime(c, new FakeOcr(), i, luaLogger),
-        NullLogger<RugTaskScheduler>.Instance, anomalyLogger, authorization: schedulerAuthorization);
+        NullLogger<RugTaskScheduler>.Instance, anomalyLogger, authorization: schedulerAuthorization, inputArbiter: TestAuthorizationHost.InputArbiter);
     Task<Guid> opening = delayedScheduler.StartTaskAsync("life", 404);
     await WaitUntilAsync(() => delayedCapture.StartCalls == 1);
     await delayedScheduler.DisposeAsync();
@@ -1049,6 +1049,8 @@ await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new 
 }
 await GatewayTests.RunAsync();
 await AuthorizationTests.RunAsync();
+await InputArbitrationTests.RunAsync();
+await NativeInputTakeoverTests.RunAsync();
 Console.WriteLine("Lua bridge, scheduler and state/command bus tests passed");
 
 static void Check(bool condition, string message)

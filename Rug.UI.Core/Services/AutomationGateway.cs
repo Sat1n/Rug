@@ -259,8 +259,15 @@ public sealed class AutomationGateway : IAutomationGateway
                         using var admission = Authorization.Admit(caller.Authorization, Required(caller, request));
                         using var dispatchToken = CancellationTokenSource.CreateLinkedTokenSource(executionToken, admission.Token);
                         dispatchToken.Token.ThrowIfCancellationRequested();
-                        Volatile.Write(ref started, 1);
-                        object? value = await DispatchAsync(caller, request, run, dispatchToken.Token).ConfigureAwait(false);
+                        bool inputOperation = request.Operation is AutomationOperation.Click or AutomationOperation.PressKey;
+                        if (!inputOperation) Volatile.Write(ref started, 1);
+                        var previousBoundary = InputExecutionBoundary.Started.Value;
+                        var previousCaller = InputExecutionBoundary.Caller.Value;
+                        InputExecutionBoundary.Started.Value = () => Volatile.Write(ref started, 1);
+                        InputExecutionBoundary.Caller.Value = caller;
+                        object? value;
+                        try { value = await DispatchAsync(caller, request, run, dispatchToken.Token).ConfigureAwait(false); }
+                        finally { InputExecutionBoundary.Started.Value = previousBoundary; InputExecutionBoundary.Caller.Value = previousCaller; }
                         dispatchToken.Token.ThrowIfCancellationRequested();
                         return value;
                     }
@@ -289,6 +296,7 @@ public sealed class AutomationGateway : IAutomationGateway
             DeniedPermission: error.Missing.FirstOrDefault(),
             MissingPermissions: error.Missing); }
         catch (PermissionDeniedException error) { result = new(OperationStatus.Rejected, OperationError.PermissionDenied, DeniedPermission: error.Permission, MissingPermissions: error.MissingPermissions); }
+        catch (InputUnavailableException) { result = new(OperationStatus.Rejected, OperationError.InputUnavailable); }
         catch (KeyNotFoundException) { result = new(OperationStatus.Rejected, OperationError.InvalidParameters); }
         catch (Exception error) when (error is ArgumentException or JsonException or InvalidCastException or FormatException or OverflowException)
         { result = new(OperationStatus.Rejected, OperationError.InvalidParameters); }

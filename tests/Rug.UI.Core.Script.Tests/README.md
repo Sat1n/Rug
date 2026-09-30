@@ -81,3 +81,18 @@ approval flag; see [Authorization](../../Rug.UI.Core/Authorization.md).
 Real Lua state/config reads also check nested arrays, objects, nulls and false,
 and confirm they are ordinary Lua tables without CLR GetType access. Managed
 JSON snapshots and StepFlowView reads remain unchanged.
+
+Task 3.5-05A adds `InputArbitrationTests.cs`: controlled barriers assert the
+window/global conflict matrix, conflict FIFO/capacity, queued cancellation,
+revocation/stopping/window invalidation with zero input, composite click/key
+leases, Gateway timeout with live native work, late cleanup/handle lifetime,
+fault quarantine, other-plugin preservation and repeated takeover/subscription
+cleanup. `TestAuthorizationHost` explicitly supplies a replaceable window
+validator for fake HWNDs; production does not accept them.
+
+`NativeInputTakeoverTests.cs` loads `x64/Debug/Rug.Core.dll` when available and
+creates a dedicated message-pumped isolated window. Real PostMessage mouse and
+keyboard messages verify click and mandatory KeyUp before manual control. It
+cleans up that window and controller; no game or installed plugin is involved.
+Missing Windows/native DLL prints NOT RUN rather than recording a pass.
+See [shared input contract](../../Rug.UI.Core/InputArbitration.md).

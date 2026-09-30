@@ -131,6 +131,17 @@ principal/source, target identity, type and terminal status/code/uncertainty.
 Records omit parameters and exception stacks. Active run/entry/work counters
 support bounded-resource tests. The gateway holds no state/event subscriptions.
 
+## Input arbitration (Task 3.5-05A)
+
+Click/PressKey dispatch uses the host [shared arbiter](InputArbitration.md),
+including UI/Agent/MCP callers of the Lua runtime handler. Queuing is not an
+input side effect: the flow-local `InputExecutionBoundary` marks the first actual
+input call. Waiting cancellation reports no uncertainty; cancellation after
+input starts remains uncertain. The bridge keeps its lease/native service until
+actual work and release finish, even after Gateway returns early. Closed input,
+invalid lifetime or a full input queue returns Rejected/InputUnavailable.
+Authorization, run identity, parameter checks and dedup remain in force.
+
 ## Verification
 
 The [script suite](../tests/Rug.UI.Core.Script.Tests/README.md) executes real Lua,

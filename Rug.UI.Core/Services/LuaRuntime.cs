@@ -119,6 +119,7 @@ public sealed class LuaRuntime : IScriptRuntime
     private PluginManifest? _manifest;
     private PermissionInterceptor? _permissions;
     private InputBridge? _inputBridge;
+    private IInputArbiter _inputArbiter = InputArbiter.Shared;
     private VisualEngineBridge? _visual;
     private Lua? _lua;
     private LuaFunction? _drive;
@@ -158,6 +159,11 @@ public sealed class LuaRuntime : IScriptRuntime
     public IPluginAuthorization Authorization => _gateway?.Authorization ?? _authorization;
     public RunIdentity? BoundIdentity => _identity;
     public AutomationGateway Gateway => _gateway ?? throw new InvalidOperationException("Runtime is not initialized.");
+    public void ConfigureInputArbiter(IInputArbiter arbiter)
+    {
+        if (State != ScriptState.Uninitialized) throw new InvalidOperationException("Input arbiter must be bound before initialization.");
+        _inputArbiter = arbiter;
+    }
     public void ConfigureGateway(AutomationGateway gateway)
     {
         if (State != ScriptState.Uninitialized) throw new InvalidOperationException("Gateway must be bound before initialization.");
@@ -206,10 +212,13 @@ public sealed class LuaRuntime : IScriptRuntime
             authorization: _authorization);
         _caller = _gateway.BindContext(gatewayManifest, "lua:" + _identity.InstanceId, AutomationSource.Lua, _identity);
         _authorizationLease = _gateway.Authorization.Admit(_caller.Authorization, manifest.Permissions);
-        _lifetime = CancellationTokenSource.CreateLinkedTokenSource(ct, _authorizationLease.Token);
+        _lifetime = manifest.Permissions.Contains(Permission.ControlInput)
+            ? CancellationTokenSource.CreateLinkedTokenSource(ct, _authorizationLease.Token, _inputArbiter.AutomationToken)
+            : CancellationTokenSource.CreateLinkedTokenSource(ct, _authorizationLease.Token);
         _permissions = new PermissionInterceptor(manifest, _logger, _gateway.Authorization, _caller.Authorization);
         _visual = new VisualEngineBridge(_capture, _ocr, _matcher, _permissions, manifest.PluginDirectory);
-        _inputBridge = new InputBridge(_input, _permissions, _coordinateMapper, _ensureForeground);
+        _inputBridge = new InputBridge(_input, _permissions, _coordinateMapper, _ensureForeground,
+            _inputArbiter, InputOwner.ForRun(_identity), () => _lifetime.Token.ThrowIfCancellationRequested());
         if (manifest.Permissions.Contains(Permission.ControlInput))
             await _inputBridge.BindAsync(manifest.TargetWindow,
                 manifest.InputDelivery ?? (manifest.BackgroundInput ? InputDeliveryMode.Win32PostMessage : InputDeliveryMode.Win32SendInput),
@@ -826,11 +835,11 @@ public sealed class LuaRuntime : IScriptRuntime
             _beginTick?.Dispose();
             _beginStop?.Dispose();
             _lua?.Dispose();
-            _lifetime?.Dispose();
             _authorizationLease?.Dispose();
             _operations.Clear();
             _visual?.Dispose();
             if (_inputBridge is not null) await _inputBridge.DisposeAsync().ConfigureAwait(false);
+            _lifetime?.Dispose();
             _commandBus.CloseInstance(_instanceScope);
             if (_ownsCommandBus) _commandBus.Dispose();
             _disposed = true;

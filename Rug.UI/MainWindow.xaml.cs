@@ -17,6 +17,7 @@ public sealed partial class MainWindow : WindowEx
     private string? _activePlugin;
     private DynamicUIHost? _host;
     private ITaskScheduler? _scheduler;
+    private IInputArbiter? _inputArbiter;
     private Services.DemoWorkflowCoordinator? _demo;
     private IDisposable? _startSubscription;
     private IDisposable? _stopSubscription;
@@ -37,6 +38,7 @@ public sealed partial class MainWindow : WindowEx
         Closed += (_, _) =>
         {
             if (_scheduler is not null) _scheduler.InstancesChanged -= OnInstancesChanged;
+            if (_inputArbiter is not null) _inputArbiter.StateChanged -= InputControlChanged;
             if (_demo is not null) _demo.TimelineChanged -= OnDemoTimelineChanged;
             _startSubscription?.Dispose();
             _stopSubscription?.Dispose();
@@ -50,6 +52,9 @@ public sealed partial class MainWindow : WindowEx
         if (_initialized) return;
         _initialized = true;
         _scheduler = App.GetService<ITaskScheduler>();
+        _inputArbiter = App.GetService<IInputArbiter>();
+        _inputArbiter.StateChanged += InputControlChanged;
+        RefreshInputControl();
         _scheduler.InstancesChanged += OnInstancesChanged;
         _demo = App.GetService<Services.DemoWorkflowCoordinator>();
         _demo.TimelineChanged += OnDemoTimelineChanged;
@@ -78,6 +83,32 @@ public sealed partial class MainWindow : WindowEx
             EmptyMessage.Text = "未发现插件。请在插件目录中添加 manifest.json、ui.json 与 main.lua。";
             EmptyMessage.Visibility = Visibility.Visible;
         }
+    }
+
+    private void InputControlChanged(object? sender, EventArgs args) => DispatcherQueue.TryEnqueue(RefreshInputControl);
+    private void RefreshInputControl()
+    {
+        // Reread instead of applying queued snapshots: stale notifications cannot roll state back.
+        var snapshot = _inputArbiter?.Snapshot;
+        InputControlStatus.Text = snapshot?.State switch
+        {
+            InputControlState.TakingOver => "正在接管／等待输入清理",
+            InputControlState.ManualControl => "人工控制已生效",
+            InputControlState.CleanupFailed => "输入清理失败：" + snapshot.Error,
+            _ => "自动化可用"
+        };
+    }
+    private async void ManualTakeover_Click(object sender, RoutedEventArgs args)
+    {
+        try { if (_inputArbiter is not null) await _inputArbiter.TakeOverAsync(); }
+        catch (Exception error) { InputControlStatus.Text = "输入清理失败：" + error.Message; }
+        RefreshInputControl();
+    }
+    private void ReturnControl_Click(object sender, RoutedEventArgs args)
+    {
+        try { _inputArbiter?.ReturnControl(); }
+        catch (Exception error) { InputControlStatus.Text = error.Message; }
+        RefreshInputControl();
     }
 
     private void RefreshPluginList()

@@ -100,6 +100,23 @@ no automation pipeline and no native interop itself.
 * The app watches `%LOCALAPPDATA%/Rug/plugins/` by default; set `RUG_PLUGINS_ROOT` to use an isolated directory. `MainWindow` lists scanned plugins and attaches the selected `DynamicUIHost` to its plugin ID. Changing JSON or Lua rebuilds the card tree on the WinUI dispatcher while the app stays open. The old factory unsubscribes before its controls are removed. PluginConfig values persist in memory across reloads; InstanceState is discarded when the old run stops.
 * The host displays a success `InfoBar` for two seconds, or a persistent error with the JSON/Lua exception stack. A failed parse keeps the last good UI in place; correcting the file triggers another reload. UI and script changes are validated before new instances start.
 
+## Shared input and host takeover (Task 3.5-05A)
+
+* `App` registers one `IInputArbiter` for scheduler/Lua and singleton DevTools.
+  DevTools mouse, drag, key and stress tests hold a compound-action lease and
+  validate it before native input; target rebinding takes place inside the lease.
+  It uses a trusted host owner independent of plugin identities.
+* `MainWindow` displays Manual takeover / Return control and current status.
+  Takeover closes input immediately, cancels input runs/queues, and shows manual
+  control only after actual native input and required releases settle. Timer and
+  vision-only runs continue. Cleanup failure stays blocked; return cannot bypass
+  cleanup, change grants or restart old instances. UI notifications reread current
+  revision/state on the dispatcher, and handlers detach on window close.
+* See [input arbitration](../Rug.UI.Core/InputArbitration.md) for window lifetime,
+  mutual exclusion, conflict FIFO, noncooperative native calls and fault behavior.
+  Real physical input activity detection is not part of 05A. Verify real UI state
+  transitions with the UI suite `--takeover-ui`.
+
 ## Phase 3 MVP integration (Task 3.4)
 
 * `MainWindow` owns the plugin sidebar, selected dynamic host, hot-reload status and a footer entry for DevTools. The bundled `plugins/demo_arknights` is copied into the app output and seeded into the default local plugin directory only when absent; an explicit `RUG_PLUGINS_ROOT` is never modified.

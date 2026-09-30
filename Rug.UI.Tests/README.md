@@ -25,3 +25,11 @@ stops all runs, and regrant starts a new run; it waits for enabled navigation
 before switching asynchronously created instances. `--e2e` explicitly approves
 the demo before running and checks its completed timeline survives UI reload.
 No environment variable auto-approves grants. Background reload never prompts.
+
+Task 3.5-05A: run `dotnet run --no-build --project Rug.UI.Tests/Rug.UI.Tests.csproj
+-c Debug -p:Platform=x64 -- --takeover-ui` after the x64 app/test build.
+`ManualTakeoverUiSmoke.ps1` uses an isolated timer-only plugin, explicitly grants
+its timer permission in the real host dialog, and invokes Manual takeover /
+Return control three times. It verifies actual state labels, idempotent clicks
+and timer-run preservation, then stops its run and cleans up its own app/files.
+Physical input activity detection is not implemented in this unit.

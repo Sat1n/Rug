@@ -108,6 +108,7 @@ internal static class AuthorizationTests
         var identity = new RunIdentity(manifest.Id, Guid.NewGuid(), 1, null, 0);
         var capture = new LateCapture();
         await using var runtime = new LuaRuntime(capture, new FakeOcr(), new FakeInput(), NullLogger<LuaRuntime>.Instance);
+        runtime.ConfigureInputArbiter(TestAuthorizationHost.InputArbiter);
         runtime.ConfigureGateway(gateway);
         runtime.ConfigureState(identity, new Dictionary<string, object?>(), new Dictionary<string, object?>());
         var noGrant = await gateway.CreateContextAsync(manifest.Id, "ui", AutomationSource.PluginUI);
@@ -177,6 +178,7 @@ internal static class AuthorizationTests
         var identity = new RunIdentity(manifest.Id, Guid.NewGuid(), 1, Guid.NewGuid(), 123);
         await using var runtime = new LuaRuntime(capture, ocr, input, NullLogger<LuaRuntime>.Instance,
             new FakeCoordinateMapper(), _ => true, match);
+        runtime.ConfigureInputArbiter(TestAuthorizationHost.InputArbiter);
         runtime.ConfigureGateway(gateway);
         runtime.ConfigureState(identity, new Dictionary<string, object?>(), new Dictionary<string, object?>());
         await runtime.InitializeAsync(script, manifest);
@@ -225,7 +227,7 @@ internal static class AuthorizationTests
         await using var scheduler = new Scheduler(new PluginManager(NullLogger<PluginManager>.Instance), pluginsRoot,
             () => { factories++; var c = new LateCapture(); captures.Add(c); return c; }, () => new FakeInput(),
             (c, i) => new LuaRuntime(c, new FakeOcr(), i, NullLogger<LuaRuntime>.Instance),
-            NullLogger<Scheduler>.Instance, new NoAnomaly(), authorization: auth);
+            NullLogger<Scheduler>.Instance, new NoAnomaly(), authorization: auth, inputArbiter: TestAuthorizationHost.InputArbiter);
         try { await scheduler.StartTaskAsync("first", 123); throw new Exception("unapproved scheduler start accepted"); }
         catch (PermissionDeniedException) { }
         Check(factories == 0, "startup created native services before authorization");

@@ -77,6 +77,7 @@ public partial class App : Application
             // Core Services
             services.AddSingleton<IFileService, FileService>();
             services.AddSingleton<StateStore>();
+            services.AddSingleton<IInputArbiter>(_ => InputArbiter.Shared);
             services.AddSingleton<IPluginAuthorization, PluginAuthorization>();
             services.AddSingleton<PluginPermissionConsent>();
             services.AddSingleton<IPluginManager, PluginManager>();
@@ -102,7 +103,8 @@ public partial class App : Application
                 provider.GetRequiredService<ILogger<Rug.UI.Core.Services.TaskScheduler>>(),
                 provider.GetRequiredService<IAnomalyLogger>(),
                 commandBus: provider.GetRequiredService<ICommandBus>(),
-                authorization: provider.GetRequiredService<IPluginAuthorization>()));
+                authorization: provider.GetRequiredService<IPluginAuthorization>(),
+                inputArbiter: provider.GetRequiredService<IInputArbiter>()));
             services.AddSingleton<IAutomationGateway>(provider => provider.GetRequiredService<ITaskScheduler>().Gateway);
             services.AddSingleton<IHotReloadService>(provider => new HotReloadService(
                 PluginsRoot, provider.GetRequiredService<ITaskScheduler>(),
@@ -120,7 +122,7 @@ public partial class App : Application
             services.AddTransient<SettingsPage>();
             services.AddTransient<MainViewModel>();
             services.AddTransient<MainPage>();
-            services.AddTransient<DevToolsViewModel>();
+            services.AddSingleton<DevToolsViewModel>();
             services.AddTransient<DevToolsPage>();
             services.AddTransient<ShellPage>();
             services.AddTransient<ShellViewModel>();

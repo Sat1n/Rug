@@ -14,6 +14,13 @@ internal static class WindowNative
 {
     private const string User32 = "user32.dll";
 
+    [DllImport(User32, CharSet = CharSet.Unicode)]
+    internal static extern nint GetPropW(nint hwnd, string name);
+
+    [DllImport(User32, CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool SetPropW(nint hwnd, string name, nint value);
+
     internal const uint GA_ROOT = 2;
     internal const uint MONITOR_DEFAULTTONEAREST = 2;
     private const int CCHDEVICENAME = 32;

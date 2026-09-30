@@ -29,15 +29,20 @@ public sealed class TaskScheduler : ITaskScheduler
     private readonly object _lifecycleGate = new();
     private TaskCompletionSource<bool> _startsDrained = CompletedSignal();
     private int _starting;
+    private int _startingInput;
+    private TaskCompletionSource<bool> _inputStartsDrained = CompletedSignal();
     private Dictionary<string, PluginManifest>? _catalog;
     private bool _disposed;
+    private readonly IInputArbiter _inputArbiter;
+    private readonly IDisposable _inputStopRegistration;
 
     public TaskScheduler(IPluginManager plugins, string pluginsRoot,
         Func<ICaptureService> captureFactory, Func<IInputService> inputFactory,
         Func<ICaptureService, IInputService, IScriptRuntime> runtimeFactory,
         ILogger<TaskScheduler> logger, IAnomalyLogger anomalies, TimeSpan? tickInterval = null,
         TimeSpan? watchdogTimeout = null, ICommandBus? commandBus = null,
-        IAutomationPermissionChecker? permissionChecker = null, IPluginAuthorization? authorization = null)
+        IAutomationPermissionChecker? permissionChecker = null, IPluginAuthorization? authorization = null,
+        IInputArbiter? inputArbiter = null)
     {
         _plugins = plugins ?? throw new ArgumentNullException(nameof(plugins));
         _anomalies = anomalies ?? throw new ArgumentNullException(nameof(anomalies));
@@ -50,6 +55,8 @@ public sealed class TaskScheduler : ITaskScheduler
         _commandBus = commandBus;
         _tickInterval = tickInterval ?? TimeSpan.FromMilliseconds(50);
         _watchdogTimeout = watchdogTimeout ?? TimeSpan.FromSeconds(1);
+        _inputArbiter = inputArbiter ?? InputArbiter.Shared;
+        _inputStopRegistration = _inputArbiter.RegisterStopHandler(StopInputRunsAsync);
         if (_tickInterval <= TimeSpan.Zero || _watchdogTimeout <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(tickInterval));
         Gateway = new AutomationGateway(logger, permissionChecker, getPlugin: GetPluginAsync,
@@ -145,6 +152,8 @@ public sealed class TaskScheduler : ITaskScheduler
         RunIdentity? identity = null;
         AuthorizationLease? authorizationLease = null;
         CancellationTokenRegistration authorizationCancellation = default;
+        CancellationTokenRegistration inputCancellation = default;
+        bool inputStarting = false;
         try
         {
             PluginManifest source = await GetPluginAsync(pluginId, cancellation.Token).ConfigureAwait(false);
@@ -152,6 +161,18 @@ public sealed class TaskScheduler : ITaskScheduler
             authorizationLease = Gateway.Authorization.Admit(ticket, source.Permissions);
             authorizationCancellation = authorizationLease.Token.Register(() => cancellation.Cancel());
             cancellation.Token.ThrowIfCancellationRequested();
+            bool declaresInput = source.Permissions.Contains(Permission.ControlInput);
+            if (declaresInput)
+            {
+                lock (_lifecycleGate)
+                {
+                    inputStarting = true;
+                    if (++_startingInput == 1) _inputStartsDrained = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                }
+                inputCancellation = _inputArbiter.AutomationToken.Register(() => cancellation.Cancel());
+                _inputArbiter.BindTarget(hwnd);
+                cancellation.Token.ThrowIfCancellationRequested();
+            }
             bool needsWindow = source.Permissions.Contains(Permission.Capture) ||
                 source.Permissions.Contains(Permission.ControlInput);
             if (needsWindow && hwnd == 0)
@@ -171,6 +192,7 @@ public sealed class TaskScheduler : ITaskScheduler
             input = _inputFactory() ?? throw new InvalidOperationException("Input factory returned null.");
             runtime = _runtimeFactory(capture, input) ?? throw new InvalidOperationException("Runtime factory returned null.");
             runtime.ConfigureGateway(Gateway);
+            runtime.ConfigureInputArbiter(_inputArbiter);
             _commandBus?.OpenInstance(identity.InstanceScope);
             runtime.ConfigureState(identity, launchInputs, configuration);
             // Capture is ready before Lua on_init can call rug.capture().
@@ -184,6 +206,8 @@ public sealed class TaskScheduler : ITaskScheduler
             cancellation.Token.ThrowIfCancellationRequested();
             context.AuthorizationLease = authorizationLease;
             context.AuthorizationCancellation = authorizationCancellation;
+            context.InputCancellation = inputCancellation;
+            context.DeclaresInput = declaresInput;
             onReady?.Invoke(identity);
             lock (_lifecycleGate)
             {
@@ -212,9 +236,17 @@ public sealed class TaskScheduler : ITaskScheduler
             if (input is not null)
                 await TryCleanupAsync(() => input.DisposeAsync().AsTask(), "input startup disposal").ConfigureAwait(false);
             authorizationCancellation.Dispose();
+            inputCancellation.Dispose();
             authorizationLease?.Dispose();
             cancellation.Dispose();
             throw;
+        }
+        finally
+        {
+            if (inputStarting) lock (_lifecycleGate)
+            {
+                if (--_startingInput == 0) _inputStartsDrained.TrySetResult(true);
+            }
         }
     }
 
@@ -229,7 +261,18 @@ public sealed class TaskScheduler : ITaskScheduler
         if (!_instances.TryGetValue(instanceId, out TaskExecutionContext? context)) return;
         context.Cancel();
         if (context.Runner is Task runner)
-            await runner.WaitAsync(_watchdogTimeout + TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+            await runner.ConfigureAwait(false);
+    }
+
+    private async Task StopInputRunsAsync()
+    {
+        Task starts;
+        lock (_lifecycleGate) starts = _inputStartsDrained.Task;
+        await starts.ConfigureAwait(false);
+        var affected = Instances.Where(c => c.DeclaresInput).ToArray();
+        await Task.WhenAll(affected.Select(c => StopTaskAsync(c.InstanceId))).ConfigureAwait(false);
+        if (affected.Any(c => c.LastError is InputCleanupException))
+            throw new InputUnavailableException("Input cleanup failed during takeover.");
     }
 
     private async Task<PluginManifest> GetPluginAsync(string pluginId, CancellationToken ct)
@@ -326,6 +369,7 @@ public sealed class TaskScheduler : ITaskScheduler
             context.SetStatus(context.LastError is null ? AutomationTaskStatus.Stopped : AutomationTaskStatus.Faulted);
             _instances.TryRemove(context.InstanceId, out _);
             context.AuthorizationCancellation.Dispose();
+            context.InputCancellation.Dispose();
             context.AuthorizationLease?.Dispose();
             context.Cancellation.Dispose();
             NotifyInstancesChanged();
@@ -362,6 +406,7 @@ public sealed class TaskScheduler : ITaskScheduler
         _shutdown.Cancel();
         await drained.ConfigureAwait(false);
         await Task.WhenAll(_instances.Keys.Select(StopTaskAsync)).ConfigureAwait(false);
+        _inputStopRegistration.Dispose();
         _catalogGate.Dispose();
         _shutdown.Dispose();
     }

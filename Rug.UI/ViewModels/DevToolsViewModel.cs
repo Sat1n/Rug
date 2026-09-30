@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
 using Rug.UI.Core.Contracts.Services;
+using Rug.UI.Core.Abstractions;
 using Rug.UI.Core.Helpers;
 using Rug.UI.Core.Models;
 using Rug.UI.Models;
@@ -29,16 +30,21 @@ public partial class DevToolsViewModel : ObservableObject
     private readonly IWindowSpyService _windowSpy;
     private readonly IOcrService _ocr;
     private readonly IInputService _input;
+    private readonly IInputArbiter _arbiter;
+    private readonly InputOwner _owner = InputOwner.ForDevTools("host.devtools");
+    private InputTarget? _inputTarget;
+    private Action? _validateInput;
 
     private CancellationTokenSource? _previewCts;
 
     public DevToolsViewModel(
-        ICaptureService capture, IWindowSpyService windowSpy, IOcrService ocr, IInputService input)
+        ICaptureService capture, IWindowSpyService windowSpy, IOcrService ocr, IInputService input, IInputArbiter arbiter)
     {
         _capture = capture;
         _windowSpy = windowSpy;
         _ocr = ocr;
         _input = input;
+        _arbiter = arbiter;
 
         try
         {
@@ -137,6 +143,7 @@ public partial class DevToolsViewModel : ObservableObject
         }
 
         BoundWindow = info;
+        _inputTarget = null;
         Log(LogLevel.Success, "Spy",
             $"已绑定 {info.HexHwnd} \"{info.Title}\" 进程={info.ProcessName} " +
             $"尺寸={info.Width}x{info.Height} DPI={info.DpiPercent}%");
@@ -328,35 +335,40 @@ public partial class DevToolsViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            await PrepareInputTargetAsync();
-            Log(LogLevel.Info, "Input", $"开始鼠标全功能测试（客户区 {ClientWidth}x{ClientHeight} 内：左/右/中/侧键X1/X2 + 贝塞尔拖拽）...");
-
-            (string Name, MouseButton Button)[] clicks =
+            await ExecuteInputTestAsync(async token =>
             {
-                ("左键", MouseButton.Left),
-                ("右键", MouseButton.Right),
-                ("中键", MouseButton.Middle),
-                ("侧键1 (X1)", MouseButton.XButton1),
-                ("侧键2 (X2)", MouseButton.XButton2),
-            };
+                Log(LogLevel.Info, "Input", $"开始鼠标全功能测试（客户区 {ClientWidth}x{ClientHeight} 内：左/右/中/侧键X1/X2 + 贝塞尔拖拽）...");
 
-            int w = ClientWidth, h = ClientHeight;
-            for (int i = 0; i < clicks.Length; i++)
-            {
-                // Spread the clicks across the client area so each lands inside the window.
-                int cx = (int)(w * (0.30 + 0.10 * i));
-                int cy = (int)(h * 0.45);
-                Log(LogLevel.Info, "Input", $"移动到客户区 ({cx},{cy}) 并点击 {clicks[i].Name} ...");
-                await _input.MoveMouseAsync(cx, cy, TrajectoryType.CubicBezier, true);
-                await _input.ClickAsync(clicks[i].Button, 0);
-                await Task.Delay(150);
-            }
+                (string Name, MouseButton Button)[] clicks =
+                {
+                    ("左键", MouseButton.Left),
+                    ("右键", MouseButton.Right),
+                    ("中键", MouseButton.Middle),
+                    ("侧键1 (X1)", MouseButton.XButton1),
+                    ("侧键2 (X2)", MouseButton.XButton2),
+                };
 
-            GetDragRegion(out int sx, out int sy, out int ex, out int ey);
-            Log(LogLevel.Info, "Input", $"贝塞尔缓动拖拽 ({sx},{sy}) → ({ex},{ey}) ...");
-            await _input.DragAndDropAsync(sx, sy, ex, ey, TrajectoryType.CubicBezier, true);
+                int w = ClientWidth, h = ClientHeight;
+                for (int i = 0; i < clicks.Length; i++)
+                {
+                    // Spread the clicks across the client area so each lands inside the window.
+                    int cx = (int)(w * (0.30 + 0.10 * i));
+                    int cy = (int)(h * 0.45);
+                    Log(LogLevel.Info, "Input", $"移动到客户区 ({cx},{cy}) 并点击 {clicks[i].Name} ...");
+                    _validateInput!();
+                    await _input.MoveMouseAsync(cx, cy, TrajectoryType.CubicBezier, true, token);
+                    await ClickWithCleanupAsync(clicks[i].Button, token);
+                    await Task.Delay(150, token);
+                }
 
-            Log(LogLevel.Success, "Input", "鼠标全功能测试完成（全程限制在绑定窗口客户区内）。");
+                GetDragRegion(out int sx, out int sy, out int ex, out int ey);
+                Log(LogLevel.Info, "Input", $"贝塞尔缓动拖拽 ({sx},{sy}) → ({ex},{ey}) ...");
+                _validateInput!();
+                try { await _input.DragAndDropAsync(sx, sy, ex, ey, TrajectoryType.CubicBezier, true, token); }
+                finally { await ReleaseInputAsync(() => _input.MouseUpAsync(MouseButton.Left)); }
+
+                Log(LogLevel.Success, "Input", "鼠标全功能测试完成（全程限制在绑定窗口客户区内）。");
+            });
         }
         catch (Exception ex)
         {
@@ -379,7 +391,8 @@ public partial class DevToolsViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            await PrepareInputTargetAsync();
+            await ExecuteInputTestAsync(async token =>
+            {
             List<(string Name, int Vk)> keys = BuildKeySequence();
             Log(LogLevel.Info, "Input", $"开始键盘覆盖测试（{keys.Count} 个按键，已严格屏蔽 Win/Fn）...");
 
@@ -391,8 +404,8 @@ public partial class DevToolsViewModel : ObservableObject
                     Log(LogLevel.Error, "Input", $"检测到 Win 键 (VK=0x{vk:X2})，已跳过。");
                     continue;
                 }
-                await _input.KeyPressAsync(vk, 0);
-                await Task.Delay(40);
+                await KeyWithCleanupAsync(vk, token);
+                await Task.Delay(40, token);
                 if (++sent % 20 == 0)
                 {
                     Log(LogLevel.Info, "Input", $"已发送 {sent}/{keys.Count} 个按键...");
@@ -400,6 +413,7 @@ public partial class DevToolsViewModel : ObservableObject
             }
 
             Log(LogLevel.Success, "Input", $"键盘覆盖测试完成，共发送 {sent} 个按键。");
+            });
         }
         catch (Exception ex)
         {
@@ -422,7 +436,6 @@ public partial class DevToolsViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            await PrepareInputTargetAsync();
             if (!_capture.IsCapturing)
             {
                 await _capture.StartAsync(BoundWindow!.Hwnd);
@@ -451,9 +464,16 @@ public partial class DevToolsViewModel : ObservableObject
                             cx = b.X + b.Width / 2;
                             cy = b.Y + b.Height / 2;
                         }
-                        await _input.MoveMouseAsync(cx, cy, TrajectoryType.CubicBezier, true);
-                        await _input.ClickAsync(MouseButton.Left, 0);
+                        await ExecuteInputTestAsync(async token =>
+                        {
+                            _validateInput!();
+                            await _input.MoveMouseAsync(cx, cy, TrajectoryType.CubicBezier, true, token);
+                            await ClickWithCleanupAsync(MouseButton.Left, token);
+                        });
                     }
+                    catch (OperationCanceledException) { throw; }
+                    catch (InputCleanupException) { throw; }
+                    catch (InputUnavailableException) { throw; }
                     catch (Exception ex)
                     {
                         Log(LogLevel.Warn, "Stress", $"第 {i} 次迭代异常: {ex.Message}");
@@ -510,44 +530,58 @@ public partial class DevToolsViewModel : ObservableObject
     }
 
     /// <summary>Point the native controller at the bound window per the current mode.</summary>
-    private async Task ApplyInputTargetAsync()
+    private Task ApplyInputTargetAsync()
     {
-        if (BoundWindow is null)
+        if (BoundWindow is not null && !IsBusy)
         {
-            return;
+            try { _inputTarget = _arbiter.BindTarget(BoundWindow.Hwnd); }
+            catch (Exception error) { _inputTarget = null; Log(LogLevel.Warn, "Input", error.Message); }
         }
-        try
-        {
-            // The window stays bound in BOTH modes so native maps client->screen and
-            // confines the cursor to the client rect; the flag only picks the delivery.
-            await _input.SetTargetAsync(BoundWindow.Hwnd, UseBackgroundInput);
-        }
-        catch (Exception ex)
-        {
-            Log(LogLevel.Warn, "Input", $"设置输入目标窗口失败: {ex.Message}");
-        }
+        // Native rebinding happens only inside the compound action's shared lease.
+        return Task.CompletedTask;
     }
 
-    /// <summary>Before an input test: bind target + delivery, activating the window for foreground.</summary>
-    private async Task PrepareInputTargetAsync()
+    private async Task PrepareInputTargetAsync(nint hwnd, bool background, CancellationToken token)
     {
-        if (BoundWindow is null)
-        {
-            return;
-        }
+        _validateInput!();
+        await _input.SetTargetAsync(hwnd, background, token);
+        _validateInput!();
+        if (background) return;
+        if (!_windowSpy.BringToFront(hwnd)) throw new InvalidOperationException("Foreground activation was refused.");
+        await Task.Delay(150, token);
+        _validateInput!();
+    }
 
-        await _input.SetTargetAsync(BoundWindow.Hwnd, UseBackgroundInput);
-
-        if (UseBackgroundInput)
-        {
-            return;
-        }
-
-        bool ok = _windowSpy.BringToFront(BoundWindow.Hwnd);
-        Log(ok ? LogLevel.Info : LogLevel.Warn, "Input", ok
-            ? $"已激活前台窗口 {BoundWindow.HexHwnd}，SendInput 将发往该窗口（客户区内）。"
-            : "前台激活被系统拒绝，SendInput 将发往当前焦点窗口。");
-        await Task.Delay(150);
+    private async Task ExecuteInputTestAsync(Func<CancellationToken, Task> action)
+    {
+        var window = BoundWindow ?? throw new InvalidOperationException("No target window.");
+        var target = _inputTarget ??= _arbiter.BindTarget(window.Hwnd);
+        bool background = UseBackgroundInput;
+        using var lease = await _arbiter.AcquireAsync(_owner, target,
+            background ? InputDeliveryMode.Win32PostMessage : InputDeliveryMode.Win32SendInput,
+            () => { if (BoundWindow?.Hwnd != target.Hwnd || UseBackgroundInput != background || _inputTarget != target)
+                throw new InputUnavailableException("DevTools target was rebound while queued."); });
+        _validateInput = lease.Validate;
+        try { await PrepareInputTargetAsync(window.Hwnd, background, lease.Token); await action(lease.Token); }
+        catch (InputCleanupException error) { lease.CleanupFailed(error); throw; }
+        finally { _validateInput = null; }
+    }
+    private async Task ClickWithCleanupAsync(MouseButton button, CancellationToken token)
+    {
+        _validateInput!();
+        try { await _input.ClickAsync(button, cancellationToken: token); }
+        finally { await ReleaseInputAsync(() => _input.MouseUpAsync(button)); }
+    }
+    private async Task KeyWithCleanupAsync(int key, CancellationToken token)
+    {
+        _validateInput!();
+        try { await _input.KeyPressAsync(key, cancellationToken: token); }
+        finally { await ReleaseInputAsync(() => _input.KeyUpAsync(key)); }
+    }
+    private static async Task ReleaseInputAsync(Func<Task> release)
+    {
+        try { await release(); }
+        catch (Exception error) { throw new InputCleanupException("DevTools release failed.", error); }
     }
 
     private void GetDragRegion(out int sx, out int sy, out int ex, out int ey)
