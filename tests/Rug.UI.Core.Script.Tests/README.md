@@ -96,3 +96,10 @@ keyboard messages verify click and mandatory KeyUp before manual control. It
 cleans up that window and controller; no game or installed plugin is involved.
 Missing Windows/native DLL prints NOT RUN rather than recording a pass.
 See [shared input contract](../../Rug.UI.Core/InputArbitration.md).
+
+`InputArbitrationTests.GatewayOutcomeAsync` exercises the real runtime Gateway
+handler and bridge with deterministic move callbacks and queue barriers. It
+checks post-move window invalidation and permission rejection, foreground
+click/key rechecks and failed activation, pre-input rejection, queued rejection
+and cancellation. Exact status/error/uncertainty, zero unstarted input, retained
+duplicate results and empty queues/leases are asserted in nine scenarios.

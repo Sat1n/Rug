@@ -142,8 +142,14 @@ public sealed class InputBridge : IAsyncDisposable
             _activeMode = mode;
         }
         lease.Validate();
-        if (mode == InputDeliveryMode.Win32SendInput && !_ensureForeground(_hwnd))
-            throw new InvalidOperationException("Target window could not be brought to the foreground for SendInput.");
+        if (mode == InputDeliveryMode.Win32SendInput)
+        {
+            // Foreground activation may visibly change focus even if its subsequent
+            // confirmation rejects or throws. It belongs to the input side-effect boundary.
+            InputExecutionBoundary.MarkStarted();
+            if (!_ensureForeground(_hwnd))
+                throw new InvalidOperationException("Target window could not be brought to the foreground for SendInput.");
+        }
     }
 
     private void ValidateAdmission()

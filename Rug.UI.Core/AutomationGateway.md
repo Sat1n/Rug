@@ -135,9 +135,13 @@ support bounded-resource tests. The gateway holds no state/event subscriptions.
 
 Click/PressKey dispatch uses the host [shared arbiter](InputArbitration.md),
 including UI/Agent/MCP callers of the Lua runtime handler. Queuing is not an
-input side effect: the flow-local `InputExecutionBoundary` marks the first actual
-input call. Waiting cancellation reports no uncertainty; cancellation after
-input starts remains uncertain. The bridge keeps its lease/native service until
+input side effect: the flow-local `InputExecutionBoundary` marks the attempt to
+activate the foreground window, or the first native input call for background
+input. Foreground confirmation may fail after changing focus, so its attempt
+conservatively counts as started. Every non-success input result uses that
+progress flag, including target/permission/parameter rejection after movement
+or activation; its status/error still describes the reason execution ended.
+Pre-execution rejection and waiting cancellation report no uncertainty. The bridge keeps its lease/native service until
 actual work and release finish, even after Gateway returns early. Closed input,
 invalid lifetime or a full input queue returns Rejected/InputUnavailable.
 Authorization, run identity, parameter checks and dedup remain in force.

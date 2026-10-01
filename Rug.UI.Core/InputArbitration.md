@@ -56,7 +56,12 @@ lease. The bridge awaits the actual input task and cleanup even if Gateway has
 already reported cancellation/timeout. Scheduler Stop also awaits the runner's
 cleanup rather than disposing its native input handle after a fixed timeout.
 Waiting input has no side effects and reports `OutcomeUncertain=false`; once
-native input starts, cancellation remains uncertain and never auto-retries.
+foreground activation is attempted or native input starts, any non-success
+Gateway result remains uncertain and never auto-retries. This includes a later
+permission or target recheck rejecting the action after movement. Mode binding,
+coordinate validation and queued admission alone do not mark execution started.
+Foreground confirmation can fail after changing focus, so marking occurs before
+that call. Retained duplicate results preserve this flag without repeating input.
 `InputUnavailable` is a stable rejection code for closed input admission/invalid
 target lifetime/queue capacity. Existing permission, identity and parameter
 errors remain distinct. Deduplication still pins live underlying work.

@@ -24,6 +24,7 @@ internal static class InputArbitrationTests
         await QueuedAdmissionAsync();
         await QueuedBridgeValidationAsync();
         await ActualGatewayAsync();
+        await GatewayOutcomeAsync();
         await CleanupFailureAsync();
         await SchedulerTakeoverAsync();
         if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763))
@@ -186,6 +187,92 @@ internal static class InputArbitrationTests
         File.Delete(path);
     }
 
+    private static async Task GatewayOutcomeAsync()
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "input-outcomes.lua");
+        await File.WriteAllTextAsync(path, "function on_tick() end");
+        try
+        {
+            foreach (string scenario in new[] { "move-window", "move-permission", "foreground-permission", "foreground-key", "foreground-failed", "before-permission", "before-window", "queued-permission", "queued-cancel" })
+            {
+                bool allowed = true;
+                int foregroundCalls = 0;
+                var windows = new MutableWindows();
+                var arbiter = new InputArbiter(windows);
+                var auth = new PluginAuthorization((_, _) => Volatile.Read(ref allowed));
+                var manifest = new PluginManifest([Permission.ControlInput]) { Id = "outcome-" + scenario, PluginDirectory = AppContext.BaseDirectory, TargetWindow = 123, InputDelivery = scenario == "foreground-key" ? InputDeliveryMode.Win32SendInput : InputDeliveryMode.Win32PostMessage };
+                var input = new ControlledInput();
+                input.AfterMove = () =>
+                {
+                    if (scenario == "move-window") windows.Stamp++;
+                    if (scenario == "move-permission") Volatile.Write(ref allowed, false);
+                };
+                bool Foreground(nint hwnd)
+                {
+                    foregroundCalls++;
+                    if (scenario is "foreground-permission" or "foreground-key") Volatile.Write(ref allowed, false);
+                    return scenario != "foreground-failed";
+                }
+                await using var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), input, NullLogger<LuaRuntime>.Instance,
+                    new FakeCoordinateMapper(), Foreground, authorization: auth);
+                runtime.ConfigureInputArbiter(arbiter);
+                TestAuthorizationHost.Approve(auth, manifest);
+                await runtime.InitializeAsync(path, manifest);
+                var gateway = runtime.Gateway;
+                var caller = await gateway.CreateContextAsync(manifest.Id, "outcome-agent", AutomationSource.Agent);
+                bool key = scenario == "foreground-key";
+                var request = new OperationRequest(key ? AutomationOperation.PressKey : AutomationOperation.Click,
+                    key ? JsonSerializer.SerializeToElement(new { key = 65 }) : JsonSerializer.SerializeToElement(new { x = 1, y = 2,
+                        mode = (int)(scenario.StartsWith("foreground", StringComparison.Ordinal) ? InputDeliveryMode.Win32SendInput : InputDeliveryMode.Win32PostMessage) }),
+                    Guid.NewGuid(), Guid.NewGuid().ToString(), OperationTarget.ForRun(runtime.BoundIdentity!), DateTimeOffset.UtcNow.AddSeconds(10));
+                if (scenario == "before-permission") Volatile.Write(ref allowed, false);
+                if (scenario == "before-window") windows.Stamp++;
+                using var cancel = new CancellationTokenSource();
+                IInputLease? held = null;
+                OperationResult result;
+                try
+                {
+                    if (scenario.StartsWith("queued", StringComparison.Ordinal))
+                        held = await arbiter.AcquireAsync(InputOwner.ForDevTools("barrier"), arbiter.BindTarget(123), InputDeliveryMode.Win32PostMessage, () => { });
+                    var executing = gateway.ExecuteAsync(caller, request, cancel.Token);
+                    if (held is not null)
+                    {
+                        await Until(() => arbiter.Snapshot.Waiting == 1);
+                        if (scenario == "queued-cancel") cancel.Cancel();
+                        else Volatile.Write(ref allowed, false);
+                        held.Dispose(); held = null;
+                    }
+                    result = await executing.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                finally { held?.Dispose(); }
+                bool started = scenario.StartsWith("move", StringComparison.Ordinal) || scenario.StartsWith("foreground", StringComparison.Ordinal);
+                var expectedError = scenario.Contains("permission", StringComparison.Ordinal) || scenario == "foreground-key" ? OperationError.PermissionDenied
+                    : scenario == "queued-cancel" ? OperationError.Cancelled
+                    : scenario == "foreground-failed" ? OperationError.ExecutionFailed : OperationError.InputUnavailable;
+                var expectedStatus = scenario == "queued-cancel" ? OperationStatus.Cancelled
+                    : scenario == "foreground-failed" ? OperationStatus.Failed : OperationStatus.Rejected;
+                Check(result.Status == expectedStatus && result.Error == expectedError && result.OutcomeUncertain == started,
+                    $"{scenario}: incorrect outcome {result}");
+                Check(input.MoveCalls == (scenario.StartsWith("move", StringComparison.Ordinal) ? 1 : 0) && input.Clicks == 0 && input.PressCalls == 0,
+                    $"{scenario}: unexpected native input");
+                Check(foregroundCalls == (scenario.StartsWith("foreground", StringComparison.Ordinal) ? 1 : 0), $"{scenario}: unexpected foreground attempt");
+                // Restore only the live host policy so admission can read the retained result.
+                // A denied pre-admission request is intentionally not cached and stays denied.
+                if (scenario != "before-permission") Volatile.Write(ref allowed, true);
+                var duplicate = await gateway.ExecuteAsync(caller, request);
+                Check(scenario == "before-permission"
+                    ? duplicate.Status == result.Status && duplicate.Error == result.Error && !duplicate.OutcomeUncertain
+                    : duplicate == result, $"{scenario}: retry lost terminal outcome");
+                Check(input.MoveCalls == (scenario.StartsWith("move", StringComparison.Ordinal) ? 1 : 0) && input.Clicks == 0 && input.PressCalls == 0
+                    && foregroundCalls == (scenario.StartsWith("foreground", StringComparison.Ordinal) ? 1 : 0), $"{scenario}: duplicate repeated side effects");
+                await Until(() => gateway.ActiveWorkCount == 0);
+                Check(arbiter.Snapshot is { Active: 0, Waiting: 0 }, $"{scenario}: leaked input lease/queue");
+            }
+        }
+        finally { File.Delete(path); }
+        Console.WriteLine("Gateway input outcome boundaries and retained duplicate results passed (9 deterministic scenarios)");
+    }
+
     private static async Task QueuedBridgeValidationAsync()
     {
         foreach (string reason in new[] { "revoke", "stop", "window" })
@@ -305,9 +392,10 @@ internal static class InputArbitrationTests
     {
         public readonly TaskCompletionSource PressEntered = Signal(), PressRelease = Signal(), MoveEntered = Signal(), MoveRelease = Signal(), DownEntered = Signal();
         public bool HoldPress, HoldMove, FailKeyUp, Disposed;
-        public int PressCalls, KeyUps, MouseUps, Clicks;
+        public int PressCalls, KeyUps, MouseUps, Clicks, MoveCalls;
+        public Action? AfterMove;
         public Task MoveMouseAsync(int x, int y, TrajectoryType trajectory = TrajectoryType.CubicBezier, bool smooth = true, CancellationToken cancellationToken = default)
-        { MoveEntered.TrySetResult(); return HoldMove ? MoveRelease.Task : Task.CompletedTask; }
+        { MoveCalls++; MoveEntered.TrySetResult(); AfterMove?.Invoke(); return HoldMove ? MoveRelease.Task : Task.CompletedTask; }
         public Task MoveMouseRelativeAsync(int dx, int dy, TrajectoryType trajectory = TrajectoryType.CubicBezier, bool smooth = true, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task ClickAsync(MouseButton button = MouseButton.Left, int holdMs = 0, CancellationToken cancellationToken = default) { Clicks++; return Task.CompletedTask; }
         public Task MouseDownAsync(MouseButton button, CancellationToken cancellationToken = default) => Task.CompletedTask;

@@ -301,6 +301,10 @@ public sealed class AutomationGateway : IAutomationGateway
         catch (Exception error) when (error is ArgumentException or JsonException or InvalidCastException or FormatException or OverflowException)
         { result = new(OperationStatus.Rejected, OperationError.InvalidParameters); }
         catch (Exception) { result = new(OperationStatus.Failed, OperationError.ExecutionFailed, OutcomeUncertain: Volatile.Read(ref started) != 0); }
+        // Rejection describes why the action ended, not whether earlier input had effects.
+        // Keep every input failure mapping aligned with the same execution boundary.
+        if (request.Operation is AutomationOperation.Click or AutomationOperation.PressKey && result.Status != OperationStatus.Success)
+            result = result with { OutcomeUncertain = Volatile.Read(ref started) != 0 };
         lock (_gate)
         {
             Record(caller, request, result);
