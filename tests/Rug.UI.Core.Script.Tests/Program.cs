@@ -16,6 +16,15 @@ using Rug.UI.Core.Security;
 using Rug.UI.Core.Schema;
 using RugTaskScheduler = Rug.UI.Core.Services.TaskScheduler;
 
+if (args.Contains("--raw-input-self-test") || args.Contains("--raw-input-diagnostic"))
+{
+    try { await RawInputDiagnostics.RunAsync(args.Contains("--raw-input-diagnostic")); }
+    catch (Exception error) { Console.WriteLine($"DIAGNOSTIC FAILED: {error.Message}"); Environment.ExitCode = 1; }
+    return;
+}
+
+if (args.Contains("--raw-input-tests")) { await RawInputTests.RunAsync(); return; }
+
 string path = Path.Combine(AppContext.BaseDirectory, "bridge_test.lua");
 await File.WriteAllTextAsync(path, "function on_tick() rug.sleep(200); local frame = rug.capture(); assert(frame.width == 1 and frame.height == 1); rug.log('done') end");
 var capture = new FakeCapture();
@@ -1050,6 +1059,7 @@ await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new 
 await GatewayTests.RunAsync();
 await AuthorizationTests.RunAsync();
 await InputArbitrationTests.RunAsync();
+await RawInputTests.RunAsync();
 await NativeInputTakeoverTests.RunAsync();
 Console.WriteLine("Lua bridge, scheduler and state/command bus tests passed");
 

@@ -14,23 +14,11 @@ P/Invoke boundary** to `Rug.Core.dll` and exposes safe, async vision services
 synthesis and OS window inspection; it also hosts task scheduling, plugin
 loading and the sandboxed Lua runtime. It contains no XAML.
 
-> **Status:** native interop + vision services implemented (Phase 1, Task 1.4):
-> `Native/`, `Models/Vision.cs`, `Services/OcrService.cs`,
-> `Services/TemplateMatchService.cs`; input service added (Task 1.5):
-> `Models/Input.cs`, `Native/InputControllerHandle.cs`, `Services/InputService.cs`;
-> capture + window-spy added (Task 1.6): `Native/CapturerHandle.cs`,
-> `Native/WindowNative.cs`, `Models/Capture.cs`, `Models/WindowInfo.cs`,
-> `Services/CaptureService.cs`, `Services/WindowSpyService.cs`, `OcrService.RecognizeFrameAsync`.
-> `FileService`/`Json` pre-exist.
-> `LuaRuntime` coroutine bridge (Task 2.1.1), plugin manifest/config loading and
-> permission interception (Task 2.1.2), and multi-instance lifecycle scheduling
-> with a Lua instruction watchdog (Task 2.1.3), plus anomaly black-box logging
-> and the Agent rescue hook (Task 2.1.4), are implemented.
-> Task 2.2 adds the managed input bridge and physical coordinate mapper.
-> Task 2.3 connects WGC frames to in-memory template matching and OCR for Lua.
-> Task 2.4 adds a real Minecraft Chinese-menu E2E harness without fake services.
-> Task 3.1.1 adds state and a named-command bus; Task 3.5-02 partitions state by
-> application, plugin and run identity.
+> **Status:** native vision/input/capture interop, Lua/plugins/scheduler,
+> black-box logs, scoped state/commands, schema/hot reload and Gateway are implemented.
+> Process-local explicit grants and shared input arbitration support host manual takeover.
+> Task 3.5-05B-01 adds opt-in Raw Input capture/diagnostics; automatic takeover
+> integration and human-input acceptance remain pending.
 
 ## Internal Topology
 
@@ -52,6 +40,7 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 | `Abstractions/ICoordinateMapper.cs` · `Services/CoordinateMapper.cs` | Validate a physical client point against the target HWND and project it through Win32 `ClientToScreen` for diagnostics and tests |
 | `Services/InputBridge.cs` | Permission-gated input dispatch, foreground/background selection, focus guard and full-action shared leases |
 | `Abstractions/IInputArbiter.cs` · `Models/InputOwnership.cs` · `Services/InputArbiter.cs` · `Services/InputWindowValidator.cs` · `Services/InputExecutionBoundary.cs` | Host owners, window lifetimes, bounded conflict-FIFO input queue, manual takeover and Gateway focus/input-progress outcome boundary; [contract](InputArbitration.md) |
+| `Abstractions/IInputEventSource.cs` · `Models/InputEvents.cs` · `Services/RawInputEventSource.cs` · `Native/WindowsRawInputReceiver.cs` | Explicit host-owned Raw Input receiver, bounded detached events and diagnostics; [contract and acceptance](RawInputEvents.md) |
 | `Services/CaptureService.cs` | Async WGC capture (Task.Run / MTA): start/stop a native capturer, copy each frame to managed BGRA8, free the native buffer |
 | `Services/WindowSpyService.cs` | Resolve the window under the cursor or enumerate visible top-level windows → `WindowInfo` (incl. monitor via `MonitorFromWindow`); inspect a given HWND, check foreground state, query client size and pick client points. All physical pixels (PMv2-aware host) |
 | `Abstractions/IScriptRuntime.cs` · `Models/ScriptExecutionResult.cs` | Script lifecycle/state contract |

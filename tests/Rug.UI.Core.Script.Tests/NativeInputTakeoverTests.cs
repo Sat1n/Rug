@@ -39,7 +39,7 @@ internal static class NativeInputTakeoverTests
         // Keep the loaded module for the process lifetime; InputService's generated imports cache pointers.
     }
 
-    private sealed class IsolatedWindow : IDisposable
+    internal sealed class IsolatedWindow : IDisposable
     {
         public readonly TaskCompletionSource<nint> Ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public readonly TaskCompletionSource MouseDown = new(TaskCreationOptions.RunContinuationsAsynchronously), MouseUp = new(TaskCreationOptions.RunContinuationsAsynchronously),

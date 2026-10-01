@@ -1,3 +1,11 @@
+---
+id: rug_script_tests
+type: logic_node
+inputs: [rug_ui_core]
+outputs: []
+tags: [lua, tests, input]
+---
+
 # Lua coroutine bridge tests
 
 Run `dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64` with the root-pinned .NET SDK `10.0.401`.
@@ -103,3 +111,18 @@ checks post-move window invalidation and permission rejection, foreground
 click/key rechecks and failed activation, pre-input rejection, queued rejection
 and cancellation. Exact status/error/uncertainty, zero unstarted input, retained
 duplicate results and empty queues/leases are asserted in nine scenarios.
+
+Task 3.5-05B-01 adds `RawInputTests.cs` (included in the normal suite, or run
+`--raw-input-tests`): x86/x64 packet layouts, down/up/repeat, buttons/wheels,
+invalid native data, startup/stop cancellation, new generations, detached values,
+blocked/faulting subscribers, 10,000-motion coalescing, explicit critical overflow,
+cleanup faults and real Windows registration conflict/replacement/repeated cleanup.
+
+`--raw-input-self-test` uses a dedicated native window and the real `InputService`
+DLL path for SendInput/PostMessage move/click/key/release. It checks actual target
+messages, independently counts injected/unflagged hook activity, and reports
+interference without calling it a self-input failure. Missing focus/native DLL,
+incomplete evidence or source failure never pass silently.
+`--raw-input-diagnostic` adds an interactive, same-session HUMAN BEFORE -> AUTO ->
+HUMAN AFTER procedure and prints aggregate counts only. Ordinary application
+startup never enables it. See [commands, evidence and pending human acceptance](../../Rug.UI.Core/RawInputEvents.md).
