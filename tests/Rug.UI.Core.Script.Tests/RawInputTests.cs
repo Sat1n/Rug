@@ -68,6 +68,20 @@ internal static class RawInputTests
     {
         if (!OperatingSystem.IsWindows()) { Console.WriteLine("NOT RUN: native diagnostic probe lifecycle requires Windows"); return; }
         long generation;
+        Check(RawInputDiagnostics.IsolationStage("load") == (false, false, false), "load stage creates receiver");
+        Check(RawInputDiagnostics.IsolationStage("target") == (true, false, false), "target stage enables hooks");
+        Check(RawInputDiagnostics.IsolationStage("keyboard") == (true, true, false), "keyboard stage enables mouse hook");
+        Check(RawInputDiagnostics.IsolationStage("both") == (true, true, true), "both stage mapping incorrect");
+        try { RawInputDiagnostics.IsolationStage("bad"); throw new Exception("unknown isolation stage accepted"); } catch (ArgumentException) { }
+        foreach (var selection in new[] { (false, false), (true, false), (true, true) })
+        {
+            using var isolated = new RawInputDiagnosticWindow(selection.Item1, selection.Item2);
+            await isolated.Ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Check(isolated.Status.KeyboardInstalled == selection.Item1 && isolated.Status.MouseInstalled == selection.Item2,
+                "isolation receiver installed unrequested hooks");
+            await isolated.SynchronizeAsync(); isolated.Dispose();
+            Check(isolated.Status is { ThreadExited: true, Failure: null, ExitReason: "WM_QUIT" }, "isolation cleanup failed");
+        }
         using (var probe = new RawInputDiagnosticWindow())
         {
             await probe.Ready.Task.WaitAsync(TimeSpan.FromSeconds(5));

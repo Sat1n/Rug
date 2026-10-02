@@ -8,6 +8,10 @@ tags: [input, observation, diagnostics]
 
 # Raw Input event source (Task 3.5-05B-01)
 
+The opt-in diagnostic window supports selective keyboard/mouse Hook installation
+for [controlled component stages](../tests/NativeInputProbe/ControlledStages.md).
+Defaults remain both Hooks; this is separate from the event source and takeover.
+
 [IInputEventSource](Abstractions/IInputEventSource.cs#interface:IInputEventSource) is replaceable by a trusted host/test implementation.
 [RawInputEventSource](Services/RawInputEventSource.cs#class:RawInputEventSource) is explicitly created/started by the diagnostic host. It is
 not started by the normal WinUI application, registered as a plugin command, or

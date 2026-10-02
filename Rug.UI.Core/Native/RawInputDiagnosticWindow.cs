@@ -77,6 +77,7 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
     private readonly HookCounter _keyCounts = new(), _mouseCounts = new();
     public readonly TaskCompletionSource<nint> Ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Thread _thread;
+    private readonly bool _installKeyboard, _installMouse;
     private readonly WindowsRawInputReceiver.WindowProc _proc;
     private readonly HookProc _keyboard, _mouse;
     private readonly System.Collections.Concurrent.ConcurrentQueue<TaskCompletionSource> _barriers = new();
@@ -84,8 +85,9 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
     private long _move, _down, _up, _keyDown, _keyUp;
     public Counters Counts => new(Interlocked.Read(ref _move), Interlocked.Read(ref _down), Interlocked.Read(ref _up),
         Interlocked.Read(ref _keyDown), Interlocked.Read(ref _keyUp), _keyCounts.Snapshot, _mouseCounts.Snapshot);
-    public RawInputDiagnosticWindow()
+    public RawInputDiagnosticWindow(bool installKeyboard = true, bool installMouse = true)
     {
+        _installKeyboard = installKeyboard; _installMouse = installMouse;
         _proc = Message;
         _keyboard = (code, w, l) => Hook(code, w, l, true);
         _mouse = (code, w, l) => Hook(code, w, l, false);
@@ -134,14 +136,20 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
             registered = true;
             _hwnd = CreateWindowExW(0, name, "Rug Raw Input diagnostics - isolated input target", 0x00cf0000, 300, 200, 440, 300, 0, 0, instance, 0);
             if (_hwnd == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError(), "Diagnostic window creation failed");
-            _keyHook = SetWindowsHookExW(13, _keyboard, instance, 0);
-            _keyboardInstallError = _keyHook == 0 ? Marshal.GetLastPInvokeError() : 0;
-            CheckHookInstallation(_keyHook, _keyboardInstallError, "Keyboard hook");
-            Volatile.Write(ref _keyboardInstalled, 1);
-            _mouseHook = SetWindowsHookExW(14, _mouse, instance, 0);
-            _mouseInstallError = _mouseHook == 0 ? Marshal.GetLastPInvokeError() : 0;
-            CheckHookInstallation(_mouseHook, _mouseInstallError, "Mouse hook");
-            Volatile.Write(ref _mouseInstalled, 1);
+            if (_installKeyboard)
+            {
+                _keyHook = SetWindowsHookExW(13, _keyboard, instance, 0);
+                _keyboardInstallError = _keyHook == 0 ? Marshal.GetLastPInvokeError() : 0;
+                CheckHookInstallation(_keyHook, _keyboardInstallError, "Keyboard hook");
+                Volatile.Write(ref _keyboardInstalled, 1);
+            }
+            if (_installMouse)
+            {
+                _mouseHook = SetWindowsHookExW(14, _mouse, instance, 0);
+                _mouseInstallError = _mouseHook == 0 ? Marshal.GetLastPInvokeError() : 0;
+                CheckHookInstallation(_mouseHook, _mouseInstallError, "Mouse hook");
+                Volatile.Write(ref _mouseInstalled, 1);
+            }
             ShowWindow(_hwnd, 5); Ready.SetResult(_hwnd);
             int status;
             while ((status = GetMessageW(out var m, 0, 0, 0)) > 0) { if (m.Id == 0x8002) throw new InvalidOperationException("Controlled diagnostic thread failure"); TranslateMessage(ref m); DispatchMessageW(ref m); }

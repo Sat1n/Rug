@@ -8,6 +8,9 @@ tags: [diagnostics, input, hooks, native]
 
 # Independent x64 native input probe
 
+[Controlled managed-component stages](ControlledStages.md) keep native emission
+fixed while adding DLL load, target window and individual Hook registrations.
+
 See [paired-session evidence and source audit](HookComparison.md) for the passing
 reversed-order session and the unresolved install-order correlation. CoreInput
 prints the actual loaded DLL path; the runner labels its pre-run SHA-256 separately.

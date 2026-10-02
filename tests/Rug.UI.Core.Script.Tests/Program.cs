@@ -16,6 +16,17 @@ using Rug.UI.Core.Security;
 using Rug.UI.Core.Schema;
 using RugTaskScheduler = Rug.UI.Core.Services.TaskScheduler;
 
+if (args.Contains("--hook-isolation-stage"))
+{
+    try
+    {
+        int index = Array.IndexOf(args, "--hook-isolation-stage");
+        await RawInputDiagnostics.RunIsolationAsync(index + 1 < args.Length ? args[index + 1] : "");
+    }
+    catch (Exception error) { Console.WriteLine($"ISOLATION FAILED: {error.Message}"); Environment.ExitCode = 1; }
+    return;
+}
+
 if (args.Contains("--raw-input-self-test") || args.Contains("--raw-input-diagnostic"))
 {
     try { await RawInputDiagnostics.RunAsync(args.Contains("--raw-input-diagnostic")); }

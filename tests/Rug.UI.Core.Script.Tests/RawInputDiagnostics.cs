@@ -46,6 +46,60 @@ internal static class RawInputDiagnostics
         Console.WriteLine($"CORE LOADED: processId={Environment.ProcessId} path={module.FileName} bytes={file.Length} sha256={hash}");
         return true; // Cached generated imports require this module until process exit.
     }
+    internal static (bool Target, bool Keyboard, bool Mouse) IsolationStage(string stage) => stage switch
+    {
+        "load" => (false, false, false),
+        "target" => (true, false, false),
+        "keyboard" => (true, true, false),
+        "both" => (true, true, true),
+        _ => throw new ArgumentException("Use --hook-isolation-stage load|target|keyboard|both")
+    };
+    // @shape One fresh process per stage; no emission, Raw Input registration, or hook reinstallation.
+    // @source Existing native sender stays unchanged: tests/NativeInputProbe/main.cpp#class:CoreInput
+    internal static async Task RunIsolationAsync(string stage)
+    {
+        var selection = IsolationStage(stage); // Validate before DLL/window side effects.
+        if (!LoadNative()) { Environment.ExitCode = 2; return; }
+        using var window = selection.Target ? new RawInputDiagnosticWindow(selection.Keyboard, selection.Mouse) : null;
+        try
+        {
+            if (window is not null) await window.Ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var previous = window?.Counts;
+            async Task Snapshot(string label)
+            {
+                Console.WriteLine($"ISOLATION {label}: stage={stage} processId={Environment.ProcessId} target={selection.Target} keyboardRequested={selection.Keyboard} mouseRequested={selection.Mouse} rawInputRegistered=False emitsInput=False");
+                if (window is null) return;
+                await window.SynchronizeAsync(); PrintProbe(window, label);
+                var now = window.Counts;
+                PrintHook(label + " keyboard DELTA", now.Keyboard.Delta(previous!.Keyboard));
+                PrintHook(label + " mouse DELTA", now.Mouse.Delta(previous.Mouse));
+                previous = now;
+            }
+            await Snapshot("READY");
+            Console.WriteLine("Keep NATIVE isolated target foreground for its AUTO. Here use baseline/snapshot/done; this process sends no input. Fresh processes for each stage.");
+            while (true)
+            {
+                string? command = await Task.Run(Console.ReadLine);
+                if (command == "done" || command is null)
+                {
+                    if (command is null) { Console.WriteLine("NOT RUN: isolation session ended without done"); Environment.ExitCode = 2; }
+                    break;
+                }
+                if (command is "baseline" or "snapshot") await Snapshot(command);
+                else Console.WriteLine("Use baseline, snapshot or done.");
+            }
+            await Snapshot("END");
+        }
+        finally
+        {
+            if (window is not null)
+            {
+                window.Dispose(); PrintProbe(window, "ISOLATION STOPPED");
+                if (window.Status.Failure is not null) Environment.ExitCode = 2;
+            }
+            Console.WriteLine("ISOLATION finished; no software/human acceptance inferred from pump health.");
+        }
+    }
     private static void Print(RawInputEventSource source, string label)
     {
         var s = source.Snapshot;

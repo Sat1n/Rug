@@ -34,6 +34,15 @@ operation still require the user's explicit visual confirmation.
 
 ## Source audit
 
+Subsequent user runs repeated the same split: native-first missed keyboard
+injection; managed-first passed. Exiting G HUB and then PowerToys did not remove
+the native-first symptom. Both failures retained complete raw software down/up,
+zero candidates, later human callbacks and clean teardown. These are user-reported
+application-exit conditions, not independent proof that every associated service
+was unloaded; no component is blamed. DLL SHA-256 remained unchanged. See
+[controlled stages](ControlledStages.md) for the next test without guessing at
+production key emission changes.
+
 - Both callbacks count entry before parsing, read only HC_ACTION structures,
   distinguish tag and injected flags independently, and always return
   CallNextHookEx's result with unchanged arguments. No suppression branch exists.
