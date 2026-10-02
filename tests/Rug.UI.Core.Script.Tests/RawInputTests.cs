@@ -16,10 +16,71 @@ internal static class RawInputTests
     public static async Task RunAsync()
     {
         Parse();
+        ProbeCounters();
+        await ProbeLifecycleAsync();
         await LifecycleAsync();
         await ConsumersAsync();
         await NativeLifecycleAsync();
         Console.WriteLine("Raw Input parsing, generations, bounded delivery, consumers and registration ownership tests passed");
+    }
+    private static void ProbeCounters()
+    {
+        foreach (bool keyboard in new[] { true, false })
+        {
+            var counter = new RawInputDiagnosticWindow.HookCounter();
+            counter.Observe(-1, (nint)1, keyboard); // An unreadable sentinel must never be dereferenced.
+            Check(counter.Snapshot is { CallbackTotal: 1, ActionableTotal: 0, ParseErrors: 0 }, "negative nCode read native memory");
+            counter.Observe(1, (nint)1, keyboard);
+            Check(counter.Snapshot.ActionableTotal == 0, "non-action code was parsed");
+            nint data = Marshal.AllocHGlobal(32);
+            try
+            {
+                int flagsOffset = keyboard ? 8 : 12, extraOffset = keyboard ? 16 : IntPtr.Size == 8 ? 24 : 20;
+                uint injectedFlag = keyboard ? 0x10u : 1u;
+                var baseline = counter.Snapshot;
+                foreach (bool injected in new[] { false, true }) foreach (bool tagged in new[] { false, true })
+                {
+                    Marshal.WriteInt32(data, flagsOffset, injected ? (int)injectedFlag : 0);
+                    Marshal.WriteIntPtr(data, extraOffset, tagged ? (nint)InputObservation.RugSoftwareInputTag : 0);
+                    counter.Observe(0, data, keyboard);
+                }
+                counter.Observe(0, 0, keyboard);
+                var delta = counter.Snapshot.Delta(baseline);
+                Check(delta is { CallbackTotal: 5, ActionableTotal: 5, Injected: 2, Unflagged: 2,
+                    TaggedTotal: 2, TaggedInjected: 1, TaggedUnflagged: 1, ParseErrors: 1 }, "hook intersections or parse errors lost");
+                Check(baseline.CallbackTotal == 2 && baseline.ActionableTotal == 0, "snapshot mutated");
+                counter.Timing(12, false); counter.Timing(4, false); counter.Timing(18, true);
+                Check(counter.Snapshot is { OwnTicks: 16, OwnMaxTicks: 12, ChainTicks: 18, ChainMaxTicks: 18 }, "timing aggregates incorrect");
+            }
+            finally { Marshal.FreeHGlobal(data); }
+        }
+        try { RawInputDiagnosticWindow.CheckHookInstallation(0, 5, "Keyboard hook"); throw new Exception("install error hidden"); }
+        catch (System.ComponentModel.Win32Exception e) { Check(e.NativeErrorCode == 5 && e.Message.Contains("win32Error=5"), "registration error code lost"); }
+        Check(RawInputDiagnosticWindow.CheckHookInstallation(1, 0, "Mouse hook") == 1, "successful installation rejected");
+        var raw = new RawInputDiagnostics.RawEvidence(3, 4, 2, 5, 1, 1);
+        Check(raw.Delta(new(1, 1, 0, 0, 0, 0)) == new RawInputDiagnostics.RawEvidence(2, 3, 2, 5, 1, 1), "phase raw evidence delta incorrect");
+    }
+    private static async Task ProbeLifecycleAsync()
+    {
+        if (!OperatingSystem.IsWindows()) { Console.WriteLine("NOT RUN: native diagnostic probe lifecycle requires Windows"); return; }
+        long generation;
+        using (var probe = new RawInputDiagnosticWindow())
+        {
+            await probe.Ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var status = probe.Status; generation = status.Generation;
+            Check(status.InstallThreadId != 0 && status.KeyboardInstalled && status.MouseInstalled && !status.ThreadExited && status.Failure is null, "probe installed status incomplete");
+            probe.InjectThreadFailureForTest();
+            var stopped = await probe.Completion.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Check(probe.Ready.Task.IsCompletedSuccessfully && stopped.ThreadExited && stopped.ExitReason == "Fault" && stopped.Failure!.Contains("Controlled"), "post-ready fault was swallowed");
+            try { await probe.SynchronizeAsync(); throw new Exception("dead message thread accepted barrier"); } catch (InvalidOperationException) { }
+            probe.Dispose(); probe.Dispose();
+        }
+        using var next = new RawInputDiagnosticWindow();
+        await next.Ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Check(next.Status.Generation > generation, "probe generation reused");
+        await next.SynchronizeAsync(); // Proves pump/barrier only, not keyboard hook health.
+        next.Dispose();
+        Check(next.Status is { ThreadExited: true, Failure: null, ExitReason: "WM_QUIT" }, "normal probe cleanup not recorded");
     }
     private static byte[] Packet(uint type, int pointerSize, int body)
     {

@@ -158,6 +158,56 @@ Human acceptance (NOT RUN by the development agent):
    is denied by Windows, run on a local interactive desktop; do not classify the
    denied attempt as software-filtering success.
 
+## Independent probe evidence (diagnostic only)
+
+The keyboard and mouse hook counters independently expose callbackTotal,
+actionableTotal (HC_ACTION only), injected, unflagged, taggedTotal,
+taggedInjected, taggedUnflagged and parseErrors. Callback entry is counted before
+classification; negative nCode forwards without reading its structure. Tag and
+injection flag tests are independent. Tagged-unflagged observations are not called
+human interference, and still cannot satisfy the existing tagged-injected PASS.
+No hook callback prints, waits for a consumer or stores a key/trajectory sequence.
+Own and CallNextHookEx durations have separate total/max Stopwatch ticks. The
+maxima in delta output are lifetime maxima, not interval maxima; interval totals
+are subtracted. Timing cannot establish why a hook disappeared.
+
+Each probe instance has a new generation, installation OS thread ID and process
+architecture. Keyboard and mouse installations are separately checked with
+SetLastError=true and the error captured immediately on failure, before the next
+installation. Installed flags record initial successful installation, not ongoing
+hook health. Failure snapshots and Completion retain exceptions after Ready has
+already completed. Clean exit records WM_QUIT; controlled/post-start failure
+records Fault. Hook removal failures retain their immediate Win32 code and
+CleanupFault, and prevent a successful diagnostic exit. Synchronize checks thread failures before/after the barrier, but a
+successful message barrier never proves that either hook remains effective.
+
+STARTED, HUMAN BEFORE END, AUTO BEFORE, AUTO AFTER and HUMAN AFTER END print
+snapshots and deltas from the preceding phase. Each software-mode round also
+prints hook deltas and Raw Input CandidateKeyboard/Mouse, SoftwareKeyboard/Mouse
+and SoftwareKeyDown/Up. SendInput requires at least two software keyboard samples,
+one down and one up, plus five software mouse samples; the combined seven alone
+is insufficient. Snapshots are detached atomic counter reads, not a transaction
+across the independent message/consumer threads. Software evaluation drains
+received samples; human phase boundaries can include transition/terminal input.
+
+| New evidence | Next investigation |
+|---|---|
+| Human and software keyboard callbackTotal both zero | Installation, thread, probe lifetime or hook chain |
+| BEFORE callbacks existed, later raw keys but no new hook callbacks | Interval blocking/fault/exit; timeout-removal remains a hypothesis |
+| taggedUnflagged greater than zero | Flags/classification/structure; callbacks did enter |
+| Human hooks work but only automatic F8 missing | Compare F8 against B, only in isolated window |
+| Tagged Raw Input down/up complete but hook absent | Separate source functionality from independent probe failure |
+
+A minimal independent x64 native probe is the next comparison only if these
+phase counters cannot locate the issue: dedicated thread, same tag/test key and
+isolated target, first alone then compared with managed diagnostics. It is not
+yet added: new HUMAN BEFORE/AUTO/AFTER evidence is pending. No automatic hook
+reinstallation, changed emitter, suppressed input or relaxed Hook PASS is used.
+G HUB/PowerToys comparisons are performed by the user, one condition at a time,
+with a fresh diagnostic process. Microsoft describes possible silent timeout
+removal in [LowLevelKeyboardProc](https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelkeyboardproc);
+this is not established as the cause on this host.
+
 ## Current evidence and support boundary
 
 Automated parsing/lifecycle/buffering and real native registration tests pass.
@@ -171,10 +221,17 @@ background reception; ordinary shortcuts still require user confirmation.
 The repair tags all native software move/button/key/text emissions, including
 releases, without dropping raw observations. Parser tests cover x86/x64 tag
 propagation, unknown tags and preservation of zero-device untagged candidates.
-The rebuilt native PostMessage path passes. SendInput remains NOT RUN in the
-agent session because Windows foreground activation is blocked. End-to-end tag
-preservation and keyboard probe completion are pending manual same-session
-verification; they are not accepted solely from parser tests.
+The user's normal/admin runs after tagging both showed candidates=0,
+rugSoftware=7, target key down/up=1/1, injected keyboard/mouse=0/5 and
+PostMessage PASS. This establishes aggregate source behavior but not separate
+keyboard-tag evidence or callback entry; the earlier tagged count was inside
+the injected branch. The new counters correct that diagnostic limitation only.
+Agent verification with the new phase instrumentation saw both hooks install
+successfully (X64, errors=0), no parse/thread failures and clean WM_QUIT cleanup.
+SendInput was NOT RUN because foreground activation was blocked; the software
+PostMessage round was INTERFERED/NOT RUN due to unflagged mouse activity. No
+software acceptance or keyboard root cause is inferred from that run. New manual
+phase evidence is required before selecting a keyboard-probe repair.
 
 RAWINPUTHEADER has no injected-origin flag.
 [Microsoft documents zero device handles for precision touchpads](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-rawinputheader),

@@ -127,5 +127,12 @@ incomplete evidence or source failure never pass silently.
 HUMAN AFTER procedure with a 5-second focus-switch countdown and aggregate counts only.
 Tag regressions cover x86/x64 keyboard/mouse, unknown tags, zero-device untagged
 input and hook flags/extra-info layouts. A software PASS requires complete tagged
-raw and hook evidence; consumer counts drain before evaluation. Ordinary application
+raw and hook evidence; consumer counts drain before evaluation.
+Probe regressions exercise negative/non-action nCode without pointer reads,
+independent injected/tagged intersections (including taggedUnflagged), null-data
+parse errors, detached snapshots/phase deltas, separate processing/chain timing,
+registration error preservation and post-Ready thread failure/cleanup/restart.
+Stage output now splits raw software keyboard/mouse plus keyboard down/up and
+reports installation identity, error codes and thread exit/failure. Pump/barrier
+success never implies hook health; no input emission changes are made here. Ordinary application
 startup never enables it. See [commands, evidence and pending human acceptance](../../Rug.UI.Core/RawInputEvents.md).
