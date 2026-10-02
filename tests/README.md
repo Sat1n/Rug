@@ -1,8 +1,24 @@
+---
+id: rug_native_tests
+type: logic_node
+inputs: [rug_core]
+outputs: []
+tags: [tests, native, cabi]
+---
+
 # Rug.Core Native Tests
 
 A console harness that exercises **Rug.Core through its public C-ABI only**
 (`RugCoreAbi.h`) — the same boundary the C# host will use. It validates OCR
 correctness, OCR memory/stability under repetition, and OpenCV template matching.
+
+## Independent input Hook comparison
+
+The standalone [x64 native probe](NativeInputProbe/README.md) compares F8/B with
+real Rug.Core input and optionally observes managed diagnostic input in another
+process. Run `./tests/run_native_input_probe.ps1 -Mode Test` or `-Mode Human`.
+It builds separately, changes no C-ABI, stores no human key sequences and does
+not integrate takeover. Human/native-vs-managed acceptance remains pending.
 
 ## Layout
 

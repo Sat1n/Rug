@@ -209,10 +209,13 @@ rounds remain INCONCLUSIVE; F8=0/B>0 selects key-specific investigation, both
 zero selects native comparison, and both nonzero still require each round to
 pass all existing tagged-injected checks. It is a diagnostic branch, not a PASS.
 
-A minimal independent x64 native probe is the next comparison only if these
-phase counters cannot locate the issue: dedicated thread, same tag/test key and
-isolated target, first alone then compared with managed diagnostics. It is not
-yet added: new HUMAN BEFORE/AUTO/AFTER evidence is pending. No automatic hook
+The independent [x64 native probe](../tests/NativeInputProbe/README.md) now provides
+native C++ callbacks on a dedicated message thread plus a separate isolated target,
+using the unchanged real Rug.Core path and same F8/B/tag. Run it alone first,
+then use its passive Observe mode to compare the same managed sender in two
+processes. It does not register Raw Input, so ownership is unaffected. Native
+counter/lifecycle tests and PostMessage rounds pass; native SendInput and human /
+two-process comparison are still NOT RUN pending foreground/user operation. No automatic hook
 reinstallation, changed emitter, suppressed input or relaxed Hook PASS is used.
 G HUB/PowerToys comparisons are performed by the user, one condition at a time,
 with a fresh diagnostic process. Microsoft describes possible silent timeout
@@ -241,8 +244,13 @@ A subsequent user phase run showed HUMAN BEFORE keyboard actionable=246,
 AUTO=0, HUMAN AFTER=9 (no reinstallation). SendInput had SoftwareKeyboard=2,
 SoftwareMouse=5, SoftwareKeyDown/Up=1/1 and zero candidates. Thus raw keyboard
 tag evidence is complete and the hook still receives later human input; neither
-classification loss nor permanent hook removal is established. The next AUTO
+classification loss nor permanent hook removal is established. The current AUTO
 version compares F8/B per round, without changing production key delivery.
+The later user F8/B comparison showed both automatic keys had complete marked
+raw down/up but zero keyboard Hook entry. Human callback deltas before/after
+were 43/23, parse/thread faults zero, and both PostMessage rounds passed. This
+rules out a diagnosis based solely on F8-specific behavior or permanent Hook
+loss. It selects independent native comparison rather than speculative changes.
 Agent F8/B validation passed both real PostMessage rounds; both SendInput rounds
 were NOT RUN due to foreground activation policy, and the comparison correctly
 remained INCONCLUSIVE. Manual F8/B evidence is still pending.
