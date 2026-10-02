@@ -8,9 +8,11 @@ tags: [lua, tests, input]
 
 # Lua coroutine bridge tests
 
-Opt-in `--hook-isolation-stage load|target|keyboard|both` supports the
+Opt-in `--hook-isolation-stage load|target|keyboard|both|both-raw` supports the
 [controlled comparison](../NativeInputProbe/ControlledStages.md). It sends no
-input and does not register Raw Input; normal diagnostics retain both Hooks.
+input; only both-raw adds Raw Input after both Hooks, with software/candidate
+sample deltas and clean registration/subscription teardown. Normal diagnostics
+retain both Hooks.
 
 Run `dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64` with the root-pinned .NET SDK `10.0.401`.
 The console test uses fake capture, OCR and input services, so no native Rug.Core

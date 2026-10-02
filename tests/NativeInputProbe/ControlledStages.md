@@ -10,15 +10,16 @@ tags: [diagnostics, hooks, isolation]
 
 This is diagnosis, not Raw Input or takeover acceptance. The native Human probe
 remains the fixed sender/target/observer; the second managed process adds exactly
-one selected cumulative stage. It never sends input, registers Raw Input,
-automatically reinstalls a Hook, or alters production emitters.
+one selected cumulative stage. It never sends input, automatically reinstalls
+a Hook, or alters production emitters. Only both-raw enables Raw Input.
 
-| Stage | Managed Rug.Core load | Managed target/message thread | Keyboard Hook | Mouse Hook |
-|---|---|---|---|---|
-| load | Yes | No | No | No |
-| target | Yes | Yes | No | No |
-| keyboard | Yes | Yes | Yes | No |
-| both | Yes | Yes | Yes | Yes |
+| Stage | Managed Rug.Core load | Managed target/message thread | Keyboard Hook | Mouse Hook | Raw Input |
+|---|---|---|---|---|---|
+| load | Yes | No | No | No | No |
+| target | Yes | Yes | No | No | No |
+| keyboard | Yes | Yes | Yes | No | No |
+| both | Yes | Yes | Yes | Yes | No |
+| both-raw | Yes | Yes | Yes | Yes | Yes |
 
 Use **fresh A and B processes for every stage**, in this order:
 
@@ -32,6 +33,8 @@ Use **fresh A and B processes for every stage**, in this order:
 
    Wait for ISOLATION READY and CORE LOADED. Replace load with target, keyboard,
    then both in subsequent fresh sessions. Do not switch stages in a live process.
+   The next comparison against the user's passing both session is **both-raw**;
+   change only the B stage argument, keeping native sender and target unchanged.
 3. Perform A's HUMAN BEFORE using the **native** white window and another app.
    In B enter baseline; in A enter next. During the five-second countdown activate
    the **native** window, then release keys/mouse and keep hands off AUTO.
@@ -50,6 +53,26 @@ failures or post-start thread faults fail visibly. EOF without done is incomplet
 Snapshots print aggregate counts only; baseline/terminal input is not an AUTO
 interference verdict. No key sequence or mouse trajectory is persisted.
 
+both-raw starts the existing RawInputEventSource after both Hook installations,
+with its existing INPUTSINK/DEVNOTIFY registration, dedicated receiver thread,
+bounded consumer and software-tag classification unchanged. READY is emitted
+only after receiver readiness. Each snapshot drains delivered keyboard/mouse
+sample totals against source totals, then prints source state/fault/device changes/
+overflow/consumer errors and detached raw SNAPSHOT/DELTA: candidate key/mouse,
+software key/mouse and software key down/up. Hooks retain their separate deltas;
+native output retains actual target delivery. Neither receiver nor callbacks
+emit input or persist key contents. Source failure, overflow and consumer errors
+make the diagnostic inconclusive; stopping reports subscriptions and remaining
+process keyboard/mouse registrations, and disposes the receiver and Hook window.
+
+Raw candidate deltas between B baseline and snapshot also include human terminal
+commands/focus changes. Do not label them self-input failures or hide them using
+an ignore interval. Tagged software counts isolate cooperating Rug emissions;
+native per-round evidence provides its own narrower interference verdict.
+Any difference after both-raw is a correlation with receiver startup/registration/
+message/consumer/thread behavior, not proof that Raw Input API is defective.
+If complete, compare managed target separately only after reviewing this result.
+
 If load already loses native keyboard evidence, focus on process/DLL/environment
 differences; if target is the first change, examine target/thread interactions;
 if keyboard is the first change, examine Hook registration/chain interaction;
@@ -62,3 +85,17 @@ Do not label absent native Hook evidence as a Raw Input parser failure.
 Automated tests validate stage mapping, invalid stage rejection before native
 loading, real selective Hook startup, message barriers and cleanup. Native Human
 comparison in these stages remains NOT RUN by the agent; user operation required.
+
+User load/target/keyboard/both sessions all passed native F8/B and PostMessage
+rounds. In keyboard/both, managed Hook evidence included four tagged injected
+keyboard events; both also counted ten tagged injected mouse events. This does
+not resolve the original failing managed-sender scenario. both-raw human/native
+comparison is pending; its scripted startup/snapshots/cleanup is not acceptance.
+
+Agent verification: real both-raw scripted baseline/snapshot/done reached Ready,
+reported both Hooks plus Raw Input, then Stopped with zero subscribers and zero
+process keyboard/mouse registrations. Software/candidate/down/up classification,
+merged sample totals, detached snapshots and 1,000 concurrent observations passed
+aggregate tests. Existing Gateway/grant/arbitration/Raw Input/Lua/scheduler suite
+and Debug/x64 WinUI build passed (zero warnings/errors). No native sender or human
+actions were used in the scripted both-raw check; that comparison remains NOT RUN.

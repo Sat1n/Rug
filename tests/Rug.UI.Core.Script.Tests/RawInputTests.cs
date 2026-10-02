@@ -72,6 +72,20 @@ internal static class RawInputTests
         Check(RawInputDiagnostics.IsolationStage("target") == (true, false, false), "target stage enables hooks");
         Check(RawInputDiagnostics.IsolationStage("keyboard") == (true, true, false), "keyboard stage enables mouse hook");
         Check(RawInputDiagnostics.IsolationStage("both") == (true, true, true), "both stage mapping incorrect");
+        Check(RawInputDiagnostics.IsolationStage("both-raw") == (true, true, true), "both-raw changed hook selection");
+        var aggregate = new RawInputDiagnostics.RawAggregate();
+        var baseline = aggregate.Read();
+        aggregate.Observe(new(1, 1, 1, new(InputEventKind.Keyboard, 1, false, ExtraInformation: InputObservation.RugSoftwareInputTag)));
+        aggregate.Observe(new(1, 2, 2, new(InputEventKind.Keyboard, 1, false, KeyFlags: 1, ExtraInformation: InputObservation.RugSoftwareInputTag)));
+        aggregate.Observe(new(1, 3, 3, new(InputEventKind.Mouse, 1, false, ExtraInformation: InputObservation.RugSoftwareInputTag), 5));
+        aggregate.Observe(new(1, 4, 4, new(InputEventKind.Keyboard, 1, true)));
+        aggregate.Observe(new(1, 5, 5, new(InputEventKind.Mouse, 1, true), 3));
+        aggregate.Observe(new(1, 6, 6, new(InputEventKind.DeviceArrived, 1, false)));
+        Check(aggregate.Read().Delta(baseline) == new RawInputDiagnostics.RawEvidence(1, 3, 2, 5, 1, 1),
+            "isolation aggregate mixed candidate/software, dropped merged samples or counted device change");
+        Parallel.For(0, 1000, _ => aggregate.Observe(new(1, 7, 7, new(InputEventKind.Keyboard, 1, true))));
+        Check(aggregate.Read().CandidateKeyboard == 1001 && baseline == new RawInputDiagnostics.RawEvidence(0, 0, 0, 0, 0, 0),
+            "concurrent isolation counts or detached snapshot incorrect");
         try { RawInputDiagnostics.IsolationStage("bad"); throw new Exception("unknown isolation stage accepted"); } catch (ArgumentException) { }
         foreach (var selection in new[] { (false, false), (true, false), (true, true) })
         {

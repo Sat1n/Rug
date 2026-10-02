@@ -11,6 +11,8 @@ tags: [input, observation, diagnostics]
 The opt-in diagnostic window supports selective keyboard/mouse Hook installation
 for [controlled component stages](../tests/NativeInputProbe/ControlledStages.md).
 Defaults remain both Hooks; this is separate from the event source and takeover.
+The both-raw stage adds the existing receiver after both Hooks and reports raw
+software/candidate sample deltas alongside Hook evidence without sending input.
 
 [IInputEventSource](Abstractions/IInputEventSource.cs#interface:IInputEventSource) is replaceable by a trusted host/test implementation.
 [RawInputEventSource](Services/RawInputEventSource.cs#class:RawInputEventSource) is explicitly created/started by the diagnostic host. It is

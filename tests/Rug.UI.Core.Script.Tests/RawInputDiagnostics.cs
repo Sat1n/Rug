@@ -46,28 +46,82 @@ internal static class RawInputDiagnostics
         Console.WriteLine($"CORE LOADED: processId={Environment.ProcessId} path={module.FileName} bytes={file.Length} sha256={hash}");
         return true; // Cached generated imports require this module until process exit.
     }
+    internal sealed class RawAggregate
+    {
+        private long _candidateKey, _candidateMouse, _softwareKey, _softwareMouse, _down, _up;
+        internal void Observe(InputSourceEvent e)
+        {
+            var observation = e.Observation;
+            if (observation.IsRugSoftwareInput)
+            {
+                if (observation.Kind == InputEventKind.Keyboard)
+                {
+                    Interlocked.Add(ref _softwareKey, e.Samples);
+                    if (observation.KeyReleased) Interlocked.Add(ref _up, e.Samples);
+                    else Interlocked.Add(ref _down, e.Samples);
+                }
+                else Interlocked.Add(ref _softwareMouse, e.Samples);
+            }
+            else if (observation.IsCandidateInput)
+            {
+                if (observation.Kind == InputEventKind.Keyboard) Interlocked.Add(ref _candidateKey, e.Samples);
+                else Interlocked.Add(ref _candidateMouse, e.Samples);
+            }
+        }
+        internal RawEvidence Read() => new(Interlocked.Read(ref _candidateKey), Interlocked.Read(ref _candidateMouse),
+            Interlocked.Read(ref _softwareKey), Interlocked.Read(ref _softwareMouse), Interlocked.Read(ref _down), Interlocked.Read(ref _up));
+    }
     internal static (bool Target, bool Keyboard, bool Mouse) IsolationStage(string stage) => stage switch
     {
         "load" => (false, false, false),
         "target" => (true, false, false),
         "keyboard" => (true, true, false),
         "both" => (true, true, true),
-        _ => throw new ArgumentException("Use --hook-isolation-stage load|target|keyboard|both")
+        "both-raw" => (true, true, true),
+        _ => throw new ArgumentException("Use --hook-isolation-stage load|target|keyboard|both|both-raw")
     };
-    // @shape One fresh process per stage; no emission, Raw Input registration, or hook reinstallation.
+    // @shape One fresh process per stage; only both-raw registers Raw Input, never emits/reinstalls Hooks.
     // @source Existing native sender stays unchanged: tests/NativeInputProbe/main.cpp#class:CoreInput
     internal static async Task RunIsolationAsync(string stage)
     {
         var selection = IsolationStage(stage); // Validate before DLL/window side effects.
         if (!LoadNative()) { Environment.ExitCode = 2; return; }
         using var window = selection.Target ? new RawInputDiagnosticWindow(selection.Keyboard, selection.Mouse) : null;
+        await using var source = stage == "both-raw" ? new RawInputEventSource() : null;
+        var aggregate = new RawAggregate();
+        var previousRaw = aggregate.Read();
+        EventHandler<InputSourceEvent> onInput = (_, e) => aggregate.Observe(e);
         try
         {
             if (window is not null) await window.Ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            if (source is not null)
+            {
+                source.InputReceived += onInput;
+                // Keep both Hook registrations before the only added component.
+                await source.StartAsync();
+            }
             var previous = window?.Counts;
             async Task Snapshot(string label)
             {
-                Console.WriteLine($"ISOLATION {label}: stage={stage} processId={Environment.ProcessId} target={selection.Target} keyboardRequested={selection.Keyboard} mouseRequested={selection.Mouse} rawInputRegistered=False emitsInput=False");
+                if (source is not null)
+                {
+                    Print(source, label + " RAW STATUS");
+                    if (source.Snapshot.State != InputEventSourceState.Ready || source.Snapshot.Fault != InputEventSourceFault.None
+                        || source.Snapshot.Overflows != 0 || source.Snapshot.ConsumerErrors != 0)
+                        throw new InvalidOperationException("INCONCLUSIVE: Raw Input source is not reliable; see RAW STATUS");
+                    await source.SynchronizeAsync();
+                    await RawInputTests.Until(() =>
+                    {
+                        var raw = aggregate.Read(); var counts = source.Snapshot;
+                        return raw.CandidateKeyboard + raw.SoftwareKeyboard == counts.Keyboard
+                            && raw.CandidateMouse + raw.SoftwareMouse == counts.Mouse;
+                    });
+                    var currentRaw = aggregate.Read();
+                    Console.WriteLine($"{label} raw SNAPSHOT: {currentRaw}");
+                    Console.WriteLine($"{label} raw DELTA: {currentRaw.Delta(previousRaw)}");
+                    previousRaw = currentRaw;
+                }
+                Console.WriteLine($"ISOLATION {label}: stage={stage} processId={Environment.ProcessId} target={selection.Target} keyboardRequested={selection.Keyboard} mouseRequested={selection.Mouse} rawInputRegistered={source?.Snapshot.State == InputEventSourceState.Ready} emitsInput=False");
                 if (window is null) return;
                 await window.SynchronizeAsync(); PrintProbe(window, label);
                 var now = window.Counts;
@@ -92,6 +146,13 @@ internal static class RawInputDiagnostics
         }
         finally
         {
+            if (source is not null)
+            {
+                try { await source.StopAsync(); Print(source, "ISOLATION RAW STOPPED"); }
+                finally { source.InputReceived -= onInput; window?.Dispose(); }
+                if (source.Snapshot.Fault != InputEventSourceFault.None) Environment.ExitCode = 2;
+                Console.WriteLine($"Keyboard/mouse registrations remaining in this process: {WindowsRawInputReceiver.Registrations().Count(d => d.Page == 1 && d.Usage is 2 or 6)}");
+            }
             if (window is not null)
             {
                 window.Dispose(); PrintProbe(window, "ISOLATION STOPPED");
