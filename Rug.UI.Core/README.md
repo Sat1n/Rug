@@ -282,6 +282,11 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   launch inputs. Hot reload still stops the old run and
   starts a new one without preserving its Lua stack or InstanceState.
 
+Raw Input retains native-tagged software with IsCandidateInput=false; unknown
+tags and untagged zero-device input remain candidates. This spoofable observation
+hint grants no authority. See [diagnostics](RawInputEvents.md) for the 5-second
+countdown and pending end-to-end manual tag/probe verification.
+
 ## Native Interop & Memory Safety (CRITICAL)
 
 * **All** Rug.Core P/Invoke lives in `Native/Rug.Core.Native.cs`; OS window inspection

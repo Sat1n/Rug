@@ -30,12 +30,14 @@ internal static class RawInputDiagnostics
         await using var source = new RawInputEventSource();
         using var window = new RawInputDiagnosticWindow();
         nint hwnd = await window.Ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        long keyDown = 0, keyUp = 0, repeats = 0, foreground = 0, background = 0, zeroDevice = 0, tagged = 0;
+        long keyDown = 0, keyUp = 0, repeats = 0, foreground = 0, background = 0, zeroDevice = 0, tagged = 0, candidateCount = 0, softwareCount = 0;
         long movement = 0, buttonsDown = 0, buttonsUp = 0, wheels = 0;
         source.InputReceived += (_, e) =>
         {
+            if (e.Observation.IsRugSoftwareInput) Interlocked.Add(ref softwareCount, e.Samples);
             if (e.Observation.IsCandidateInput)
             {
+                Interlocked.Add(ref candidateCount, e.Samples);
                 if (e.Observation.DeviceId == 0) Interlocked.Increment(ref zeroDevice);
                 if (e.Observation.ExtraInformation != 0) Interlocked.Increment(ref tagged);
                 if (e.Observation.Foreground) Interlocked.Increment(ref foreground); else Interlocked.Increment(ref background);
@@ -74,10 +76,10 @@ internal static class RawInputDiagnostics
                 if (await Task.Run(Console.ReadLine) != "next") { Console.WriteLine("NOT RUN: human session aborted"); Environment.ExitCode = 2; return; }
                 if (source.Snapshot.Keyboard == 0 || source.Snapshot.Mouse == 0)
                 { Console.WriteLine("NOT RUN: missing human keyboard/mouse evidence BEFORE automatic input"); Environment.ExitCode = 2; return; }
-                Console.WriteLine("AUTO: hands off all keyboard/mouse now. Countdown 3 seconds; listener stays active throughout.");
-                await Task.Delay(3000);
+                Console.WriteLine("AUTO: hands off all keyboard/mouse now. Countdown 5 seconds; activate the isolated window now, then hands off; listener stays active throughout.");
+                await Task.Delay(5000);
             }
-            bool verified = await SelfInputAsync(source, window, hwnd);
+            bool verified = await SelfInputAsync(source, window, hwnd, () => Interlocked.Read(ref candidateCount), () => Interlocked.Read(ref softwareCount));
             Print(source, "AFTER AUTO");
             Console.WriteLine($"Raw diagnostic aggregates: zeroDevice={Interlocked.Read(ref zeroDevice)}, nonzeroExtraInfo={Interlocked.Read(ref tagged)}");
             if (!verified) Environment.ExitCode = 2;
@@ -101,7 +103,7 @@ internal static class RawInputDiagnostics
             Console.WriteLine($"Keyboard/mouse registrations remaining in this process: {WindowsRawInputReceiver.Registrations().Count(d => d.Page == 1 && d.Usage is 2 or 6)}");
         }
     }
-    private static async Task<bool> SelfInputAsync(RawInputEventSource source, RawInputDiagnosticWindow window, nint hwnd)
+    private static async Task<bool> SelfInputAsync(RawInputEventSource source, RawInputDiagnosticWindow window, nint hwnd, Func<long> candidateCount, Func<long> softwareCount)
     {
         await using var native = new InputService();
         await native.SetHumanizeConfigAsync(new HumanizeConfig { EnableJitter = false, MinClickHoldMs = 10, MaxClickHoldMs = 10, MinKeyHoldMs = 10, MaxKeyHoldMs = 10 });
@@ -110,7 +112,9 @@ internal static class RawInputDiagnostics
         {
             if (!post && !window.Activate()) { Console.WriteLine("SendInput NOT RUN: Windows foreground policy blocked isolated window activation. Activate it manually and rerun."); success = false; continue; }
             await source.SynchronizeAsync(); await window.SynchronizeAsync();
-            var raw = source.Snapshot; var legacy = window.Counts;
+            await RawInputTests.Until(() => candidateCount() + softwareCount() == source.Snapshot.Keyboard + source.Snapshot.Mouse);
+            long beforeCandidates = candidateCount(), beforeSoftware = softwareCount();
+            var legacy = window.Counts;
             await native.SetTargetAsync(hwnd, post);
             // Two distinct points ensure an unchanged cursor cannot make legacy move evidence disappear.
             await native.MoveMouseAsync(60, 60, smooth: false);
@@ -126,19 +130,23 @@ internal static class RawInputDiagnostics
             }
             catch (OperationCanceledException) { delivered = false; }
             await window.SynchronizeAsync(); await source.SynchronizeAsync();
+            await RawInputTests.Until(() => candidateCount() + softwareCount() == source.Snapshot.Keyboard + source.Snapshot.Mouse);
             var end = source.Snapshot; var probe = window.Counts;
             string mode = post ? "PostMessage" : "SendInput";
-            long candidates = end.Keyboard - raw.Keyboard + end.Mouse - raw.Mouse;
+            long candidates = candidateCount() - beforeCandidates;
+            long software = softwareCount() - beforeSoftware;
             long physicalLike = probe.Unflagged - legacy.Unflagged;
-            Console.WriteLine($"{mode}: candidates={candidates}, unflaggedHookActivity={physicalLike}, injectedKeyboard={probe.InjectedKeyboard - legacy.InjectedKeyboard}, injectedMouse={probe.InjectedMouse - legacy.InjectedMouse}, legacyMove={probe.Move - legacy.Move}, mouseDown/Up={probe.MouseDown - legacy.MouseDown}/{probe.MouseUp - legacy.MouseUp}, keyDown/Up={probe.KeyDown - legacy.KeyDown}/{probe.KeyUp - legacy.KeyUp}");
+            Console.WriteLine($"{mode}: candidates={candidates}, rugSoftware={software}, unflaggedHookActivity={physicalLike}, injectedKeyboard={probe.InjectedKeyboard - legacy.InjectedKeyboard}, injectedMouse={probe.InjectedMouse - legacy.InjectedMouse}, taggedHookKey/Mouse={probe.TaggedKeyboard - legacy.TaggedKeyboard}/{probe.TaggedMouse - legacy.TaggedMouse}, legacyMove={probe.Move - legacy.Move}, mouseDown/Up={probe.MouseDown - legacy.MouseDown}/{probe.MouseUp - legacy.MouseUp}, keyDown/Up={probe.KeyDown - legacy.KeyDown}/{probe.KeyUp - legacy.KeyUp}");
+            bool roundVerified = delivered;
             if (!delivered) { Console.WriteLine("NOT RUN: incomplete actual target-message evidence; round cannot pass."); success = false; }
             if (physicalLike > 0) { Console.WriteLine("INTERFERED: unflagged user-like activity during this round; no self-input verdict. NOT RUN / rerun hands off."); success = false; continue; }
             RawInputTests.Check(end.State == InputEventSourceState.Ready && end.Overflows == 0, "Listener lost readiness/continuity during software verification");
-            if (!post && (probe.InjectedKeyboard - legacy.InjectedKeyboard < 2 || probe.InjectedMouse - legacy.InjectedMouse < 3))
-            { Console.WriteLine("INCONCLUSIVE: independent injected-input probe did not observe the complete sequence; preserve Raw Input evidence, do not label as human interference."); success = false; }
+            if (!post && (probe.TaggedKeyboard - legacy.TaggedKeyboard < 2 || probe.TaggedMouse - legacy.TaggedMouse < 5))
+            { Console.WriteLine("INCONCLUSIVE: independent injected-input probe did not observe the complete sequence; preserve Raw Input evidence, do not label as human interference."); success = false; roundVerified = false; }
+            if (!post && software < 7) { Console.WriteLine("INCONCLUSIVE: native input tag did not survive the complete Raw Input sequence; do not pass candidate exclusion."); success = false; roundVerified = false; }
             if (candidates != 0)
-            { Console.WriteLine("FAIL / candidate observations during software round: source currently reports all Raw Input, with no authenticated origin or injected flag. No time filtering or listener pause applied."); success = false; }
-            else if (delivered) Console.WriteLine($"{mode}: PASS (real Rug.Core input including releases, live Raw Input source)");
+            { Console.WriteLine("FAIL / candidate observations during software round: unattributed Raw Input remains a candidate. No time filtering or listener pause applied."); success = false; }
+            else if (roundVerified) Console.WriteLine($"{mode}: PASS (real Rug.Core input including releases, live Raw Input source)");
         }
         return success;
     }

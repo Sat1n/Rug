@@ -17,6 +17,9 @@
 
 namespace rug::core::input {
 
+// Observation hint only, never an authorization credential. Matches managed InputObservation.
+constexpr ULONG_PTR RugSoftwareInputTag = 0x52554749u;
+
 Win32InputController::Win32InputController(HWND hwnd) : m_hwnd(hwnd) {
     m_curX = 0; m_curY = 0;
 }
@@ -68,6 +71,7 @@ void Win32InputController::SendAbsolute(int screenX, int screenY) {
     in.mi.dx = static_cast<LONG>(static_cast<double>(screenX - vLeft) * 65535.0 / (vWidth  > 1 ? vWidth  - 1 : 1));
     in.mi.dy = static_cast<LONG>(static_cast<double>(screenY - vTop ) * 65535.0 / (vHeight > 1 ? vHeight - 1 : 1));
     in.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+    in.mi.dwExtraInfo = RugSoftwareInputTag;
     SendInput(1, &in, sizeof(INPUT));
 }
 
@@ -110,6 +114,7 @@ void Win32InputController::EmitButton(bool down, MouseButton button) {
             case MouseButton::XButton2: in.mi.dwFlags = down ? MOUSEEVENTF_XDOWN : MOUSEEVENTF_XUP; in.mi.mouseData = XBUTTON2; break;
             default:                    in.mi.dwFlags = down ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP; break;
         }
+        in.mi.dwExtraInfo = RugSoftwareInputTag;
         SendInput(1, &in, sizeof(INPUT));
     }
 }
@@ -123,6 +128,8 @@ void Win32InputController::EmitKey(bool down, int virtualKey) {
         INPUT in{};
         in.type = INPUT_KEYBOARD;
         in.ki.wVk = static_cast<WORD>(virtualKey);
+        in.ki.wScan = static_cast<WORD>(MapVirtualKeyW(virtualKey, MAPVK_VK_TO_VSC));
+        in.ki.dwExtraInfo = RugSoftwareInputTag;
         in.ki.dwFlags = down ? 0 : KEYEVENTF_KEYUP;
         SendInput(1, &in, sizeof(INPUT));
     }
@@ -135,6 +142,7 @@ void Win32InputController::EmitChar(wchar_t ch) {
         INPUT in{};
         in.type = INPUT_KEYBOARD;
         in.ki.wVk = 0;
+        in.ki.dwExtraInfo = RugSoftwareInputTag;
         in.ki.wScan = ch;
         in.ki.dwFlags = KEYEVENTF_UNICODE;
         SendInput(1, &in, sizeof(INPUT));

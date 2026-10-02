@@ -12,7 +12,7 @@ tags: [input, observation, diagnostics]
 [RawInputEventSource](Services/RawInputEventSource.cs#class:RawInputEventSource) is explicitly created/started by the diagnostic host. It is
 not started by the normal WinUI application, registered as a plugin command, or
 connected to TakeOverAsync. No scheduler, grant, control-return or C-ABI behavior
-changes. Production OS interop remains in Native; UI only consumes services.
+changes. The follow-up tags software emissions without changing the C-ABI. Production OS interop remains in Native; UI only consumes services.
 
 ## Contract and ownership
 
@@ -46,7 +46,12 @@ continuity. Unmapped VK 255 is ignored as documented by Windows.
 Snapshot is an independent immutable record with state, generation, revision,
 fault reason, per-session raw keyboard/mouse/device/coalescing/overflow counts,
 consumer error count, queued count and subscriber count. Counts measure received
-packets before motion coalescing, not authenticated human actions. No input by
+packets before motion coalescing, including Rug software, not authenticated human actions.
+InputObservation.IsRugSoftwareInput recognizes exact ExtraInformation 0x52554749
+(the native emitter tag). These events remain delivered with sequence/counters
+intact but IsCandidateInput is false. Unknown tags and untagged zero-device input
+remain candidates. The tag is a spoofable cooperation hint, not authenticated
+origin or authorization. No activity-window or DeviceId-only filtering is used. No input by
 itself is not a fault. StateChanged notifications may coalesce; reread Snapshot
 and its revision rather than applying a captured old state.
 
@@ -115,6 +120,12 @@ plus its dependencies. They create/clean their own isolated window, bind a real
 InputService and send two distinct moves, click, key down/up and necessary button release
 (two points prevent an unchanged cursor from suppressing legacy move evidence).
 Actual target messages must arrive; a no-op native input path cannot pass.
+Keyboard emission now supplies MapVirtualKey scan metadata alongside the existing
+virtual-key delivery. Hook flags and pointer-sized extra-info offsets have explicit
+layout regression tests. A SendInput PASS requires target delivery, zero candidates,
+at least seven tagged raw samples and tagged injected hook evidence for two keys
+and five mouse packets. Consumer counters drain after native barriers before
+evaluation; incomplete evidence never prints PASS.
 Independent low-level hook probes exist only in the opt-in Native diagnostic
 window; they forward every event and count injected/unflagged activity, never
 feed the Raw Input source or filter its events. If unflagged user-like activity
@@ -136,7 +147,8 @@ Human acceptance (NOT RUN by the development agent):
 3. Alt+Tab to another application and repeat keyboard/mouse actions. Background
    counters must rise; normal target interaction and shortcuts must work.
    Optionally unplug/replug a device and confirm device-change counts.
-4. Return to the terminal and type next. Hands off during countdown and AUTO.
+4. Return to the terminal and type next. During the 5-second countdown, click
+   the isolated window title bar to activate it, then release all input before AUTO.
    Both real software modes should report no candidate input; any failure or
    incomplete probe evidence requires investigation, not acceptance.
 5. Repeat steps 2–3 during HUMAN AFTER, then type done. Keyboard and mouse counts
@@ -149,30 +161,32 @@ Human acceptance (NOT RUN by the development agent):
 ## Current evidence and support boundary
 
 Automated parsing/lifecycle/buffering and real native registration tests pass.
-An earlier interactive software run (one movement per mode) on this development
-desktop observed:
+The user's pre-repair same-session reproduction observed SendInput candidates=7
+(keyboard 2, mouse 5), zeroDevice=7, extra-info=0, unflagged probe=0 and injected
+keyboard/mouse=0/5, despite actual target delivery. PostMessage passed with zero
+candidates. This failure evidence is not dismissed as human interference.
+HUMAN BEFORE/AFTER counters covered keys, repeat, buttons, wheel and foreground/
+background reception; ordinary shortcuts still require user confirmation.
 
-| Mode | Raw candidates | Unflagged probe activity | Injected key/mouse probe | Target messages |
-|---|---:|---:|---|---|
-| SendInput | 6 (2 keyboard + 4 mouse) | 0 | 0 / 4 | move 1; mouse down/up 1/2; key down/up 1/1 |
-| PostMessage | 0 | 0 | 0 / 0 | move 1; mouse down/up 1/2; key down/up 1/1 |
+The repair tags all native software move/button/key/text emissions, including
+releases, without dropping raw observations. Parser tests cover x86/x64 tag
+propagation, unknown tags and preservation of zero-device untagged candidates.
+The rebuilt native PostMessage path passes. SendInput remains NOT RUN in the
+agent session because Windows foreground activation is blocked. End-to-end tag
+preservation and keyboard probe completion are pending manual same-session
+verification; they are not accepted solely from parser tests.
 
-All six raw events had DeviceId=0 and ExtraInformation=0. PostMessage passed;
-SendInput did NOT pass candidate exclusion, and its independent keyboard probe
-was incomplete. This is evidence requiring local human reproduction/source
-attribution, not a claim that Raw Input universally excludes software injection.
-The source intentionally reports those observations. RAWINPUTHEADER has no
-injected-origin flag, and the current Rug Win32 emitters initialize extra-info
-to zero. [Microsoft documents zero device handles for precision touchpads](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-rawinputheader),
-so dropping all zero-device input would also risk missing real users. No such
-filter, temporal suppression or native input tagging was added. The exact reason
-for missing keyboard hook evidence remains unverified. Later foreground activation
-attempts were blocked by Windows and explicitly reported NOT RUN; that does not
-turn the earlier candidate observations into a passing SendInput result.
+RAWINPUTHEADER has no injected-origin flag.
+[Microsoft documents zero device handles for precision touchpads](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-rawinputheader),
+so zero device alone cannot exclude candidates. If the input path loses the tag,
+diagnostics fail or remain inconclusive instead of silencing input. Other
+injectors can forge the tag: this is attribution of cooperating Rug software,
+not proof of human origin.
 
 Raw observations are candidates only, never authenticated human identities.
 Virtual HID, future hardware backends and all remote-session origins are outside
 this unit's promised classification. Foreground/background human reception and
 normal-input noninterference are pending human acceptance. Do not integrate
 automatic takeover until the SendInput observation issue and human acceptance
-are resolved. No C-ABI, native emitters, grant policy or takeover behavior changed.
+are resolved. No C-ABI, grant policy or takeover behavior changed. Native software emitters
+now attach the observation tag; the listener is never paused.

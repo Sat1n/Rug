@@ -32,6 +32,13 @@ internal static class RawInputTests
     }
     private static void Parse()
     {
+        nint hook = Marshal.AllocHGlobal(32);
+        try { Marshal.WriteInt32(hook, 8, 0x10); Marshal.WriteInt32(hook, 12, 1);
+            Check(RawInputDiagnosticWindow.ReadHookFlags(hook, true) == 0x10 && RawInputDiagnosticWindow.ReadHookFlags(hook, false) == 1, "hook flags layout incorrect");
+            Marshal.WriteIntPtr(hook, 16, (nint)InputObservation.RugSoftwareInputTag);
+            Marshal.WriteIntPtr(hook, IntPtr.Size == 8 ? 24 : 20, (nint)InputObservation.RugSoftwareInputTag);
+            Check(RawInputDiagnosticWindow.ReadHookExtraInformation(hook, true) == InputObservation.RugSoftwareInputTag && RawInputDiagnosticWindow.ReadHookExtraInformation(hook, false) == InputObservation.RugSoftwareInputTag, "hook extra-info layout incorrect"); }
+        finally { Marshal.FreeHGlobal(hook); }
         var devices = new RawInputDeviceIds();
         Check(devices.Get(0) == 0 && devices.Get(0xabcdef) == 1 && devices.Get(0xabcdef) == 1, "native handles were not mapped to stable detached IDs");
         devices.Remove(0xabcdef); Check(devices.Get(0xabcdef) == 2, "reused native device inherited ID");
@@ -44,6 +51,11 @@ internal static class RawInputTests
             BinaryPrimitives.WriteUInt32LittleEndian(key.AsSpan(h + 8), 0x100);
             var tracker = new RawInputKeyboardTracker();
             var down = RawInputPacketParser.Parse(key, true, pointers)!;
+            Check(down.IsCandidateInput && (down with { DeviceId = 0 }).IsCandidateInput, "unattributed human input excluded");
+            BinaryPrimitives.WriteUInt32LittleEndian(key.AsSpan(h + 12), InputObservation.RugSoftwareInputTag);
+            var softwareKey = RawInputPacketParser.Parse(key, true, pointers)!;
+            Check(softwareKey.IsRugSoftwareInput && !softwareKey.IsCandidateInput && (softwareKey with { ExtraInformation = 123 }).IsCandidateInput, "keyboard tag classification incorrect");
+            BinaryPrimitives.WriteUInt32LittleEndian(key.AsSpan(h + 12), 0);
             Check(down.VirtualKey == 65 && down.ScanCode == 30 && down.DeviceId == 42 && down.Foreground && !down.KeyReleased, "keyboard copied layout incorrect");
             Check(!tracker.Apply(down).IsRepeat && tracker.Apply(down).IsRepeat, "repeat tracking failed");
             Check(!tracker.Apply(down with { DeviceId = 43 }).IsRepeat, "device key identity collided");
@@ -60,6 +72,10 @@ internal static class RawInputTests
             BinaryPrimitives.WriteInt32LittleEndian(mouse.AsSpan(h + 12), -12);
             BinaryPrimitives.WriteInt32LittleEndian(mouse.AsSpan(h + 16), 7);
             var movement = RawInputPacketParser.Parse(mouse, false, pointers)!;
+            BinaryPrimitives.WriteUInt32LittleEndian(mouse.AsSpan(h + 20), InputObservation.RugSoftwareInputTag);
+            var softwareMouse = RawInputPacketParser.Parse(mouse, false, pointers)!;
+            Check(softwareMouse.IsRugSoftwareInput && !softwareMouse.IsCandidateInput && (movement with { DeviceId = 0 }).IsCandidateInput, "mouse tag classification incorrect");
+            BinaryPrimitives.WriteUInt32LittleEndian(mouse.AsSpan(h + 20), 0);
             Check(movement.IsPureMovement && movement.X == -12 && movement.Y == 7, "mouse displacement incorrect");
             foreach (ushort buttons in new ushort[] { 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048 })
             {

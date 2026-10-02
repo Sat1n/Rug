@@ -12,7 +12,10 @@ public sealed record InputObservation(InputEventKind Kind, ulong DeviceId, bool 
     long X = 0, long Y = 0, uint ExtraInformation = 0)
 {
     public bool KeyReleased => (KeyFlags & 1) != 0;
-    public bool IsCandidateInput => Kind is InputEventKind.Keyboard or InputEventKind.Mouse;
+    // Matches native Win32InputController emitters; spoofable hint, not authenticated origin.
+    public const uint RugSoftwareInputTag = 0x52554749;
+    public bool IsRugSoftwareInput => (Kind is InputEventKind.Keyboard or InputEventKind.Mouse) && ExtraInformation == RugSoftwareInputTag;
+    public bool IsCandidateInput => (Kind is InputEventKind.Keyboard or InputEventKind.Mouse) && !IsRugSoftwareInput;
     public bool IsPureMovement => Kind == InputEventKind.Mouse && ButtonFlags == 0 && (MouseFlags & 4) == 0;
 }
 

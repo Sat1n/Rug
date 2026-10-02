@@ -124,5 +124,8 @@ messages, independently counts injected/unflagged hook activity, and reports
 interference without calling it a self-input failure. Missing focus/native DLL,
 incomplete evidence or source failure never pass silently.
 `--raw-input-diagnostic` adds an interactive, same-session HUMAN BEFORE -> AUTO ->
-HUMAN AFTER procedure and prints aggregate counts only. Ordinary application
+HUMAN AFTER procedure with a 5-second focus-switch countdown and aggregate counts only.
+Tag regressions cover x86/x64 keyboard/mouse, unknown tags, zero-device untagged
+input and hook flags/extra-info layouts. A software PASS requires complete tagged
+raw and hook evidence; consumer counts drain before evaluation. Ordinary application
 startup never enables it. See [commands, evidence and pending human acceptance](../../Rug.UI.Core/RawInputEvents.md).

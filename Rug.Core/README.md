@@ -109,6 +109,12 @@ scripting, scheduling or plugin logic — those live above it.
 * Client-rect confinement: `[Win32InputController::ClampClient](Input/Win32InputController.cpp#function:ClampClient)`
 * KMBox back-end (skeleton): `[KmboxInputController](Input/KmboxInputController.h#class:KmboxInputController)`
 
+Win32 emitters attach dwExtraInfo `0x52554749` to all SendInput move/button/key/text
+events, including releases. Keyboard supplies mapped scan metadata while retaining
+virtual-key delivery. Managed observation treats the exact tag as cooperating Rug
+software, not a human candidate. The hint is spoofable, never authorization;
+C-ABI signatures/layouts are unchanged. See [diagnostics](../Rug.UI.Core/RawInputEvents.md).
+
 ## C-ABI Contract (CRITICAL)
 
 1. **Exports:** every exported API uses `extern "C"` and returns `int32_t` error

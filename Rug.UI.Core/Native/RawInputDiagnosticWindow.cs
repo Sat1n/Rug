@@ -6,16 +6,16 @@ namespace Rug.UI.Core.Native;
 /// <summary>Opt-in diagnostic target/probes only; not part of the Raw Input event source.</summary>
 internal sealed class RawInputDiagnosticWindow : IDisposable
 {
-    internal sealed record Counters(long Move, long MouseDown, long MouseUp, long KeyDown, long KeyUp, long InjectedKeyboard, long InjectedMouse, long Unflagged);
+    internal sealed record Counters(long Move, long MouseDown, long MouseUp, long KeyDown, long KeyUp, long InjectedKeyboard, long InjectedMouse, long Unflagged, long TaggedKeyboard, long TaggedMouse);
     public readonly TaskCompletionSource<nint> Ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Thread _thread;
     private readonly WindowsRawInputReceiver.WindowProc _proc;
     private readonly HookProc _keyboard, _mouse;
     private readonly System.Collections.Concurrent.ConcurrentQueue<TaskCompletionSource> _barriers = new();
     private nint _hwnd, _keyHook, _mouseHook;
-    private long _move, _down, _up, _keyDown, _keyUp, _injectedKey, _injectedMouse, _unflagged;
+    private long _move, _down, _up, _keyDown, _keyUp, _injectedKey, _injectedMouse, _unflagged, _taggedKey, _taggedMouse;
     public Counters Counts => new(Interlocked.Read(ref _move), Interlocked.Read(ref _down), Interlocked.Read(ref _up), Interlocked.Read(ref _keyDown), Interlocked.Read(ref _keyUp),
-        Interlocked.Read(ref _injectedKey), Interlocked.Read(ref _injectedMouse), Interlocked.Read(ref _unflagged));
+        Interlocked.Read(ref _injectedKey), Interlocked.Read(ref _injectedMouse), Interlocked.Read(ref _unflagged), Interlocked.Read(ref _taggedKey), Interlocked.Read(ref _taggedMouse));
     public RawInputDiagnosticWindow()
     {
         _proc = Message;
@@ -27,13 +27,19 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
     {
         if (code >= 0)
         {
-            uint flags = unchecked((uint)Marshal.ReadInt32(l, keyboard ? 8 : 12));
+            uint flags = ReadHookFlags(l, keyboard);
             if ((flags & (keyboard ? 0x10u : 1u)) != 0)
-            { if (keyboard) Interlocked.Increment(ref _injectedKey); else Interlocked.Increment(ref _injectedMouse); }
+            {
+                if (keyboard) Interlocked.Increment(ref _injectedKey); else Interlocked.Increment(ref _injectedMouse);
+                if (ReadHookExtraInformation(l, keyboard) == Models.InputObservation.RugSoftwareInputTag)
+                { if (keyboard) Interlocked.Increment(ref _taggedKey); else Interlocked.Increment(ref _taggedMouse); }
+            }
             else Interlocked.Increment(ref _unflagged);
         }
         return CallNextHookEx(0, code, w, l); // Observes only; never suppresses input.
     }
+    internal static uint ReadHookFlags(nint data, bool keyboard) => unchecked((uint)Marshal.ReadInt32(data, keyboard ? 8 : 12));
+    internal static nuint ReadHookExtraInformation(nint data, bool keyboard) => unchecked((nuint)Marshal.ReadIntPtr(data, keyboard ? 16 : IntPtr.Size == 8 ? 24 : 20));
     public bool Activate() { ShowWindow(_hwnd, 5); return GetForegroundWindow() == _hwnd || SetForegroundWindow(_hwnd) && GetForegroundWindow() == _hwnd; }
     public Task SynchronizeAsync()
     {
