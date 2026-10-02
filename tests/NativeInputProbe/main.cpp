@@ -189,6 +189,11 @@ public:
         _library = LoadLibraryExW(dll.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
         if (!_library) throw Error("Load Rug.Core", GetLastError());
         try {
+            wchar_t loaded[32768]{};
+            auto length = GetModuleFileNameW(_library, loaded, 32768);
+            Check(length > 0 && length < 32768, "Loaded core module path unavailable");
+            std::wcout << L"CORE LOADED: processId=" << GetCurrentProcessId() << L" path=" << loaded
+                << L" bytes=" << std::filesystem::file_size(loaded) << L'\n';
             destroy = Load<decltype(destroy)>("Rug_DestroyInputController"); background = Load<decltype(background)>("Rug_Input_SetBackgroundDelivery");
             move = Load<decltype(move)>("Rug_Input_MouseMove"); click = Load<decltype(click)>("Rug_Input_Click"); release = Load<decltype(release)>("Rug_Input_MouseUp");
             keyDown = Load<decltype(keyDown)>("Rug_Input_KeyDown"); keyUp = Load<decltype(keyUp)>("Rug_Input_KeyUp");

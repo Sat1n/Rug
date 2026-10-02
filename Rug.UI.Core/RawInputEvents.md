@@ -253,14 +253,19 @@ rules out a diagnosis based solely on F8-specific behavior or permanent Hook
 loss. It selects independent native comparison rather than speculative changes.
 Agent F8/B validation passed both real PostMessage rounds; both SendInput rounds
 were NOT RUN due to foreground activation policy, and the comparison correctly
-remained INCONCLUSIVE. Manual F8/B evidence is still pending.
+remained INCONCLUSIVE. Subsequent user native-alone and reversed-order paired
+sessions passed all four software rounds; the opposite paired order still missed
+both injected keyboard keys in both Hook observers. See the
+[source/module audit and comparison matrix](../tests/NativeInputProbe/HookComparison.md).
+This is an unresolved order correlation, not a proven emitter or CLR defect.
 
 Agent verification with the new phase instrumentation saw both hooks install
 successfully (X64, errors=0), no parse/thread failures and clean WM_QUIT cleanup.
 SendInput was NOT RUN because foreground activation was blocked; the software
 PostMessage round was INTERFERED/NOT RUN due to unflagged mouse activity. No
 software acceptance or keyboard root cause is inferred from that run. New manual
-phase evidence is required before selecting a keyboard-probe repair.
+phase evidence was supplied as documented in the comparison matrix; it does not
+yet identify a keyboard-probe repair.
 
 RAWINPUTHEADER has no injected-origin flag.
 [Microsoft documents zero device handles for precision touchpads](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-rawinputheader),

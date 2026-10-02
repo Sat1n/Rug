@@ -8,6 +8,10 @@ tags: [diagnostics, input, hooks, native]
 
 # Independent x64 native input probe
 
+See [paired-session evidence and source audit](HookComparison.md) for the passing
+reversed-order session and the unresolved install-order correlation. CoreInput
+prints the actual loaded DLL path; the runner labels its pre-run SHA-256 separately.
+
 [Pump](main.cpp#class:Pump) uses C++ Win32 callbacks, a dedicated hook message
 thread and a separate isolated target-window thread. It does not use CLR,
 managed diagnostic callbacks or register Raw Input devices. Hook installation

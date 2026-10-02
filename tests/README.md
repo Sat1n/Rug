@@ -18,7 +18,8 @@ The standalone [x64 native probe](NativeInputProbe/README.md) compares F8/B with
 real Rug.Core input and optionally observes managed diagnostic input in another
 process. Run `./tests/run_native_input_probe.ps1 -Mode Test` or `-Mode Human`.
 It builds separately, changes no C-ABI, stores no human key sequences and does
-not integrate takeover. Human/native-vs-managed acceptance remains pending.
+not integrate takeover. User runs now include a passing paired session and a
+failing opposite order; see [evidence and remaining limits](NativeInputProbe/HookComparison.md).
 
 ## Layout
 

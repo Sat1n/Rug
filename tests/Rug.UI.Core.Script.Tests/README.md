@@ -136,6 +136,11 @@ independent injected/tagged intersections (including taggedUnflagged), null-data
 parse errors, detached snapshots/phase deltas, separate processing/chain timing,
 registration error preservation and post-Ready thread failure/cleanup/restart.
 Stage output now splits raw software keyboard/mouse plus keyboard down/up and
+prints the actual loaded core module path/process ID/size/file SHA-256 before
+Hook startup. No hashing or module enumeration occurs in message callbacks.
+See [paired native comparison audit](../NativeInputProbe/HookComparison.md) for
+the user's passing reversed-order session and unresolved order correlation.
+Stage output also
 reports installation identity, error codes and thread exit/failure. Pump/barrier
 success never implies hook health; no input emission changes are made here. Ordinary application
 startup never enables it. See [commands, evidence and pending human acceptance](../../Rug.UI.Core/RawInputEvents.md).

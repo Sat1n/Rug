@@ -38,6 +38,12 @@ internal static class RawInputDiagnostics
         var assembly = typeof(InputService).Assembly;
         nint library = NativeLibrary.Load(dll, assembly, DllImportSearchPath.UseDllDirectoryForDependencies);
         NativeLibrary.SetDllImportResolver(assembly, (name, _, _) => name == "Rug.Core.dll" ? library : 0);
+        // Diagnostic-only: inspect the loaded module, rather than infer it from the search path.
+        using var process = System.Diagnostics.Process.GetCurrentProcess();
+        var module = process.Modules.Cast<System.Diagnostics.ProcessModule>().Single(m => m.BaseAddress == library);
+        using var file = File.OpenRead(module.FileName);
+        string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(file));
+        Console.WriteLine($"CORE LOADED: processId={Environment.ProcessId} path={module.FileName} bytes={file.Length} sha256={hash}");
         return true; // Cached generated imports require this module until process exit.
     }
     private static void Print(RawInputEventSource source, string label)
