@@ -20,6 +20,14 @@ internal static class RawInputDiagnostics
         var p = window.Status;
         Console.WriteLine($"{label}: probeGeneration={p.Generation} installThreadId={p.InstallThreadId} architecture={p.Architecture} keyboardInstalled={p.KeyboardInstalled} keyboardError={p.KeyboardInstallError} mouseInstalled={p.MouseInstalled} mouseError={p.MouseInstallError} threadExited={p.ThreadExited} failure={p.Failure ?? "None"} exitReason={p.ExitReason ?? "None"} stopwatchFrequency={System.Diagnostics.Stopwatch.Frequency}");
     }
+    internal static string CompareKeyCallbacks(long? f8, long? b)
+    {
+        if (f8 is null || b is null) return "INCONCLUSIVE: missing/interfered F8 or B round; no key-specific inference.";
+        if (f8 == 0 && b > 0) return "BRANCH: B callbacks present, F8 absent; investigate key-specific/hotkey handling.";
+        if (f8 == 0 && b == 0) return "BRANCH: both automatic F8/B callbacks absent; compare an independent x64 native probe. Human phase evidence is required to distinguish general hook failure.";
+        if (f8 > 0 && b == 0) return "BRANCH: F8 callbacks present, B absent; investigate key-specific handling or between-round probe lifetime.";
+        return "F8/B callbacks both present; use each round's tagged/injected, raw and target evidence for acceptance.";
+    }
     private static bool LoadNative()
     {
         if (!OperatingSystem.IsWindows()) { Console.WriteLine("NOT RUN: Windows desktop required"); return false; }
@@ -168,9 +176,11 @@ internal static class RawInputDiagnostics
         await using var native = new InputService();
         await native.SetHumanizeConfigAsync(new HumanizeConfig { EnableJitter = false, MinClickHoldMs = 10, MaxClickHoldMs = 10, MinKeyHoldMs = 10, MaxKeyHoldMs = 10 });
         bool success = true;
+        long? f8Callbacks = null, bCallbacks = null;
         foreach (bool post in new[] { false, true })
+        foreach (var key in new[] { (Code: 119, Name: "F8"), (Code: 66, Name: "B") })
         {
-            if (!post && !window.Activate()) { Console.WriteLine("SendInput NOT RUN: Windows foreground policy blocked isolated window activation. Activate it manually and rerun."); success = false; continue; }
+            if (!post && !window.Activate()) { Console.WriteLine($"SendInput/{key.Name} NOT RUN: Windows foreground policy blocked isolated window activation. Activate it manually and rerun."); success = false; continue; }
             await source.SynchronizeAsync(); await window.SynchronizeAsync();
             await RawInputTests.Until(() => candidateCount() + softwareCount() == source.Snapshot.Keyboard + source.Snapshot.Mouse);
             long beforeCandidates = candidateCount(), beforeSoftware = softwareCount();
@@ -181,8 +191,8 @@ internal static class RawInputDiagnostics
             await native.MoveMouseAsync(60, 60, smooth: false);
             await native.MoveMouseAsync(80, 80, smooth: false);
             await native.ClickAsync(holdMs: 10);
-            await native.KeyDownAsync(119);
-            try { } finally { await native.KeyUpAsync(119); await native.MouseUpAsync(MouseButton.Left); }
+            await native.KeyDownAsync(key.Code);
+            try { } finally { await native.KeyUpAsync(key.Code); await native.MouseUpAsync(MouseButton.Left); }
             bool delivered = true;
             try
             {
@@ -193,7 +203,7 @@ internal static class RawInputDiagnostics
             await window.SynchronizeAsync(); await source.SynchronizeAsync();
             await RawInputTests.Until(() => candidateCount() + softwareCount() == source.Snapshot.Keyboard + source.Snapshot.Mouse);
             var end = source.Snapshot; var probe = window.Counts;
-            string mode = post ? "PostMessage" : "SendInput";
+            string mode = (post ? "PostMessage" : "SendInput") + "/" + key.Name;
             long candidates = candidateCount() - beforeCandidates;
             long software = softwareCount() - beforeSoftware;
             var rawDelta = rawEvidence().Delta(rawBefore);
@@ -210,6 +220,12 @@ internal static class RawInputDiagnostics
             bool roundVerified = delivered;
             if (!delivered) { Console.WriteLine("NOT RUN: incomplete actual target-message evidence; round cannot pass."); success = false; }
             if (physicalLike > 0) { Console.WriteLine("INTERFERED: unflagged user-like activity during this round; no self-input verdict. NOT RUN / rerun hands off."); success = false; continue; }
+            if (!post && delivered && keyDelta.ParseErrors == 0 && mouseDelta.ParseErrors == 0
+                && window.Status.Failure is null && !window.Status.ThreadExited
+                && rawDelta.SoftwareKeyDown >= 1 && rawDelta.SoftwareKeyUp >= 1)
+            {
+                if (key.Code == 119) f8Callbacks = keyDelta.ActionableTotal; else bCallbacks = keyDelta.ActionableTotal;
+            }
             RawInputTests.Check(end.State == InputEventSourceState.Ready && end.Overflows == 0, "Listener lost readiness/continuity during software verification");
             if (!post && (probe.TaggedKeyboard - legacy.TaggedKeyboard < 2 || probe.TaggedMouse - legacy.TaggedMouse < 5))
             { Console.WriteLine("INCONCLUSIVE: independent injected-input probe did not observe the complete sequence; preserve Raw Input evidence, do not label as human interference."); success = false; roundVerified = false; }
@@ -220,6 +236,7 @@ internal static class RawInputDiagnostics
             { Console.WriteLine("FAIL / candidate observations during software round: unattributed Raw Input remains a candidate. No time filtering or listener pause applied."); success = false; }
             else if (roundVerified) Console.WriteLine($"{mode}: PASS (real Rug.Core input including releases, live Raw Input source)");
         }
+        Console.WriteLine("F8/B COMPARISON: " + CompareKeyCallbacks(f8Callbacks, bCallbacks));
         return success;
     }
 

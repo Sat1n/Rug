@@ -119,6 +119,10 @@ Software diagnostics require Windows interactive desktop and x64/Debug/Rug.Core.
 plus its dependencies. They create/clean their own isolated window, bind a real
 InputService and send two distinct moves, click, key down/up and necessary button release
 (two points prevent an unchanged cursor from suppressing legacy move evidence).
+AUTO now runs SendInput/F8, SendInput/B, PostMessage/F8 and PostMessage/B
+sequentially in the same live probe/source session. Each round takes fresh hook,
+raw and target baselines and releases its key/button; the user does not manually
+press F8/B during AUTO. No production emitter or key delivery is changed.
 Actual target messages must arrive; a no-op native input path cannot pass.
 Keyboard emission now supplies MapVirtualKey scan metadata alongside the existing
 virtual-key delivery. Hook flags and pointer-sized extra-info offsets have explicit
@@ -198,6 +202,13 @@ received samples; human phase boundaries can include transition/terminal input.
 | Human hooks work but only automatic F8 missing | Compare F8 against B, only in isolated window |
 | Tagged Raw Input down/up complete but hook absent | Separate source functionality from independent probe failure |
 
+The terminal F8/B COMPARISON uses actionable callback deltas only when both
+SendInput rounds have target delivery, complete marked raw key down/up, no
+parse/thread fault and no detected unmarked human-like interference. Missing
+rounds remain INCONCLUSIVE; F8=0/B>0 selects key-specific investigation, both
+zero selects native comparison, and both nonzero still require each round to
+pass all existing tagged-injected checks. It is a diagnostic branch, not a PASS.
+
 A minimal independent x64 native probe is the next comparison only if these
 phase counters cannot locate the issue: dedicated thread, same tag/test key and
 isolated target, first alone then compared with managed diagnostics. It is not
@@ -226,6 +237,16 @@ rugSoftware=7, target key down/up=1/1, injected keyboard/mouse=0/5 and
 PostMessage PASS. This establishes aggregate source behavior but not separate
 keyboard-tag evidence or callback entry; the earlier tagged count was inside
 the injected branch. The new counters correct that diagnostic limitation only.
+A subsequent user phase run showed HUMAN BEFORE keyboard actionable=246,
+AUTO=0, HUMAN AFTER=9 (no reinstallation). SendInput had SoftwareKeyboard=2,
+SoftwareMouse=5, SoftwareKeyDown/Up=1/1 and zero candidates. Thus raw keyboard
+tag evidence is complete and the hook still receives later human input; neither
+classification loss nor permanent hook removal is established. The next AUTO
+version compares F8/B per round, without changing production key delivery.
+Agent F8/B validation passed both real PostMessage rounds; both SendInput rounds
+were NOT RUN due to foreground activation policy, and the comparison correctly
+remained INCONCLUSIVE. Manual F8/B evidence is still pending.
+
 Agent verification with the new phase instrumentation saw both hooks install
 successfully (X64, errors=0), no parse/thread failures and clean WM_QUIT cleanup.
 SendInput was NOT RUN because foreground activation was blocked; the software

@@ -119,7 +119,10 @@ blocked/faulting subscribers, 10,000-motion coalescing, explicit critical overfl
 cleanup faults and real Windows registration conflict/replacement/repeated cleanup.
 
 `--raw-input-self-test` uses a dedicated native window and the real `InputService`
-DLL path for SendInput/PostMessage move/click/key/release. It checks actual target
+DLL path for four independently evaluated rounds: SendInput/F8, SendInput/B,
+PostMessage/F8 and PostMessage/B, each with move/click/key/release.
+F8/B comparison distinguishes missing/interfered rounds, selective key failure
+and both missing; it never substitutes for the per-round Hook checks. It checks actual target
 messages, independently counts injected/unflagged hook activity, and reports
 interference without calling it a self-input failure. Missing focus/native DLL,
 incomplete evidence or source failure never pass silently.

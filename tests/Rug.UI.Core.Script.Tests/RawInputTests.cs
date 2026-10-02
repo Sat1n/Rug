@@ -57,6 +57,10 @@ internal static class RawInputTests
         try { RawInputDiagnosticWindow.CheckHookInstallation(0, 5, "Keyboard hook"); throw new Exception("install error hidden"); }
         catch (System.ComponentModel.Win32Exception e) { Check(e.NativeErrorCode == 5 && e.Message.Contains("win32Error=5"), "registration error code lost"); }
         Check(RawInputDiagnosticWindow.CheckHookInstallation(1, 0, "Mouse hook") == 1, "successful installation rejected");
+        Check(RawInputDiagnostics.CompareKeyCallbacks(0, 2).Contains("key-specific/hotkey"), "selective F8 failure branch incorrect");
+        Check(RawInputDiagnostics.CompareKeyCallbacks(0, 0).Contains("independent x64 native"), "both missing comparison branch incorrect");
+        Check(RawInputDiagnostics.CompareKeyCallbacks(null, 2).StartsWith("INCONCLUSIVE"), "unrun/interfered round inferred a cause");
+        Check(RawInputDiagnostics.CompareKeyCallbacks(2, 2).Contains("each round"), "callback presence bypassed per-round acceptance");
         var raw = new RawInputDiagnostics.RawEvidence(3, 4, 2, 5, 1, 1);
         Check(raw.Delta(new(1, 1, 0, 0, 0, 0)) == new RawInputDiagnostics.RawEvidence(2, 3, 2, 5, 1, 1), "phase raw evidence delta incorrect");
     }
