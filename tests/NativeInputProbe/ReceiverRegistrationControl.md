@@ -52,13 +52,13 @@ production capture readiness and takeover behavior remain unchanged.
 Close old processes. Keep elevation/external applications unchanged. A FIRST:
 
 ~~~powershell
-& F:CardinalRugRug	estsun_native_input_probe.ps1 -Mode ManagedTarget
+& F:/Cardinal/Rug/Rug/tests/run_native_input_probe.ps1 -Mode ManagedTarget
 ~~~
 
 At A's HWND/PID prompt, start B SECOND:
 
 ~~~powershell
-dotnet run --project F:CardinalRugRug	estsRug.UI.Core.Script.TestsRug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64 -- --hook-isolation-stage keyboard-pump
+dotnet run --project F:/Cardinal/Rug/Rug/tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64 -- --hook-isolation-stage keyboard-pump
 ~~~
 
 Wait for ISOLATION READY. Check target/Hook/pump native IDs are all distinct,
@@ -91,6 +91,70 @@ Agent checks pass: three real pump lifecycles, distinct threads, target protocol
 timer handling, idempotent starts/stops/disposal, increasing generations, visible
 post-start fault and another receiver's registrations preserved during cleanup.
 Existing regressions and Debug/x64 WinUI build pass. Scripted pump startup/snapshot/
-cleanup is not AUTO acceptance. Interactive AUTO/HUMAN is NOT RUN by the agent.
+cleanup is not AUTO acceptance. The user's subsequent keyboard-pump run passed both
+Hook observers (four tagged injected keyboard events), all target/PostMessage
+rounds, human before/after callbacks and clean teardown. Its receiver processed
+245 timer messages with zero registrations/input/device/unexpected observations.
+This weakens receiver thread/window/timer presence alone in the tested condition.
 Original managed-sender diagnostics must pass after a supported repair;
 automatic takeover remains deferred.
+
+## Registered direct counter: keyboard-direct
+
+Change from keyboard-pump: the same diagnostic pump now calls the production
+WindowsRawInputReceiver.Run, restoring both device registrations, ownership
+checks, ordinary packet reading/tracking and WM_INPUT cleanup. Copied observations
+are classified/countable on the receiver thread. No RawInputEventSource, queue,
+consumer, subscriptions, GUI update or user callback is created. The pump class
+is renamed DiagnosticRawInputPump for its two explicit host diagnostic modes;
+old unregistered behavior remains available unchanged.
+
+Use fresh A/B processes, identical elevation/external applications, A FIRST:
+
+~~~powershell
+& F:/Cardinal/Rug/Rug/tests/run_native_input_probe.ps1 -Mode ManagedTarget
+~~~
+
+At A's HWND/PID prompt, B SECOND:
+
+~~~powershell
+dotnet run --project F:/Cardinal/Rug/Rug/tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64 -- --hook-isolation-stage keyboard-direct
+~~~
+
+Check separate target/Hook/receiver native IDs, keyboard Hook installed, mouse
+Hook absent, zero install errors. DIRECT PUMP must report RegistrationEnabled=True,
+PumpReady=True, ThreadExited=False, Failure empty; DIRECT REGISTRATIONS count=2
+and keyboardMouseOwned=True. rawInputRegistered=True reflects verified native
+registrations, not an event-source state claim. Paste B MANAGED TARGET HWND/PID
+into A. HUMAN BEFORE, B baseline, A next, five seconds to focus B then hands off,
+four AUTO rounds, B snapshot, HUMAN AFTER, A done, B snapshot/done remain unchanged.
+Send complete logs plus normal-input/shortcut and interference confirmation.
+
+Preserve all three evidence streams: A native Hook rounds, B managed keyboard
+Hook deltas and direct raw software/candidate snapshots/deltas, and actual target
+down/up. Expected software key/mouse 4/10 and software down/up 2/2. Each SendInput
+key should have native tagged/injected callbacks=2 and tagged down/up 1/1; B should
+have four tagged/injected key callbacks in total. Candidate deltas across baseline/
+snapshot include terminal and focus input, so they are not an AUTO interference
+verdict. Raw copies carry no native packet handles. Snapshot fields are independently
+sampled aggregates; no globally atomic cut across receiver and Hook threads is claimed.
+
+Receiver callbacks only accumulate scalars, never log, wait on consumers, execute
+input or stop tasks. Receiver barriers prove the loop, not Hook or raw completeness.
+Unexpected faults/ownership changes mark the session inconclusive. Stop removes
+owned registrations and destroys the window; final HWND/registrations must be
+zero and all threads exited. No registration ignore window or Hook reinstall.
+
+| Evidence | Direction |
+|---|---|
+| Hook gap remains with complete target/raw delivery | Registered receiver path can reproduce without source queue/consumer |
+| Both Hooks and target/raw complete | Investigate publisher/buffer/consumer and source lifecycle differences |
+| Fault, incomplete raw/target data or interference | Inconclusive; fix the evidence gap before inferring cause |
+
+Automated checks pass: copied classification/down/up/sample counts, concurrency,
+detached snapshots, three real registered lifecycles with conflicts/readiness,
+post-start malformed packet faults, generations, repeated cleanup and protection
+of new registrations from old disposal. Full existing regressions and Debug/x64
+WinUI build pass. Interactive keyboard-direct AUTO/HUMAN is NOT RUN by the agent.
+The original managed-sender diagnostic and real-human normal-operation acceptance
+remain open; no automatic takeover, emitter or production event-source changes.

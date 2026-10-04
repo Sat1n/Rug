@@ -20,6 +20,7 @@ internal static class RawInputTests
         await ProbeLifecycleAsync();
         await SplitProbeLifecycleAsync();
         await UnregisteredPumpLifecycleAsync();
+        await DirectPumpLifecycleAsync();
         await LifecycleAsync();
         await ConsumersAsync();
         await NativeLifecycleAsync();
@@ -85,6 +86,9 @@ internal static class RawInputTests
         Check(RawInputDiagnostics.IsolationStage("keyboard-pump") == (true, true, false)
             && RawInputDiagnostics.UsesSplitProbe("keyboard-pump") && !RawInputDiagnostics.UsesRawInput("keyboard-pump"),
             "unregistered pump changed Hook selection or registers Raw Input");
+        Check(RawInputDiagnostics.IsolationStage("keyboard-direct") == (true, true, false)
+            && RawInputDiagnostics.UsesSplitProbe("keyboard-direct") && !RawInputDiagnostics.UsesRawInput("keyboard-direct"),
+            "direct pump changed Hook selection or creates an event-source queue");
         var aggregate = new RawInputDiagnostics.RawAggregate();
         var baseline = aggregate.Read();
         aggregate.Observe(new(1, 1, 1, new(InputEventKind.Keyboard, 1, false, ExtraInformation: InputObservation.RugSoftwareInputTag)));
@@ -98,6 +102,17 @@ internal static class RawInputTests
         Parallel.For(0, 1000, _ => aggregate.Observe(new(1, 7, 7, new(InputEventKind.Keyboard, 1, true))));
         Check(aggregate.Read().CandidateKeyboard == 1001 && baseline == new RawInputDiagnostics.RawEvidence(0, 0, 0, 0, 0, 0),
             "concurrent isolation counts or detached snapshot incorrect");
+        var copied = new RawInputDiagnostics.RawAggregate();
+        copied.ObserveCopied(new(InputEventKind.Keyboard, 1, false, ExtraInformation: InputObservation.RugSoftwareInputTag));
+        copied.ObserveCopied(new(InputEventKind.Keyboard, 1, false, KeyFlags: 1, ExtraInformation: InputObservation.RugSoftwareInputTag));
+        copied.ObserveCopied(new(InputEventKind.Mouse, 1, false, ExtraInformation: InputObservation.RugSoftwareInputTag), 5);
+        copied.ObserveCopied(new(InputEventKind.Keyboard, 1, true));
+        copied.ObserveCopied(new(InputEventKind.Mouse, 1, true), 3);
+        copied.ObserveCopied(new(InputEventKind.DeviceArrived, 1, false));
+        Check(copied.Read() == new RawInputDiagnostics.RawEvidence(1, 3, 2, 5, 1, 1), "direct copied aggregate lost classification or releases");
+        var detached = copied.Read();
+        Parallel.For(0, 1000, _ => copied.ObserveCopied(new(InputEventKind.Keyboard, 1, true)));
+        Check(copied.Read().CandidateKeyboard == 1001 && detached.CandidateKeyboard == 1, "direct copied snapshot mutated or concurrent counts lost");
         try { RawInputDiagnostics.IsolationStage("bad"); throw new Exception("unknown isolation stage accepted"); } catch (ArgumentException) { }
         foreach (var selection in new[] { (false, false), (true, false), (true, true) })
         {
@@ -201,10 +216,10 @@ internal static class RawInputTests
             using var target = new RawInputDiagnosticWindow(false, false);
             using var probe = new RawInputDiagnosticWindow(true, false, messageOnly: true);
             await Task.WhenAll(target.Ready.Task, probe.Ready.Task).WaitAsync(TimeSpan.FromSeconds(5));
-            await using var pump = new UnregisteredRawInputPump();
+            await using var pump = new DiagnosticRawInputPump();
             await Task.WhenAll(pump.StartAsync(), pump.StartAsync()).WaitAsync(TimeSpan.FromSeconds(5));
             var ready = pump.Status;
-            Check(ready is { PumpReady: true, RegistrationEnabled: false, ThreadExited: false, Failure: null }
+            Check(ready is { PumpReady: true, RegistrationEnabled: false, ThreadExited: false, Failure: null, Evidence: null }
                 && ready.Hwnd != 0 && ready.Generation > generation, "unregistered pump startup identity incorrect");
             generation = ready.Generation;
             Check(new[] { ready.ThreadId, target.Status.InstallThreadId, probe.Status.InstallThreadId }.Distinct().Count() == 3,
@@ -244,6 +259,69 @@ internal static class RawInputTests
                 && !WindowsRawInputReceiver.Registrations().Any(d => d.Page == 1 && d.Usage is 2 or 6), "pump comparison leaked resources");
         }
         Console.WriteLine("Unregistered receiver window/thread/timer, repeated startup/disposal, observable fault and foreign registration preservation passed (3 lifecycles)");
+    }
+    // @shape Three registered target/Hook/receiver lifecycles; direct scalar aggregates and no source queue/consumer.
+    // @source Rug.UI.Core/Native/WindowsRawInputReceiver.cs#class:WindowsRawInputReceiver
+    private static async Task DirectPumpLifecycleAsync()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        long generation = 0;
+        for (int run = 0; run < 3; run++)
+        {
+            using var target = new RawInputDiagnosticWindow(false, false);
+            using var probe = new RawInputDiagnosticWindow(true, false, messageOnly: true);
+            await Task.WhenAll(target.Ready.Task, probe.Ready.Task).WaitAsync(TimeSpan.FromSeconds(5));
+            await using var pump = new DiagnosticRawInputPump(registerDevices: true);
+            await Task.WhenAll(pump.StartAsync(), pump.StartAsync()).WaitAsync(TimeSpan.FromSeconds(5));
+            var ready = pump.Status;
+            var owned = WindowsRawInputReceiver.Registrations().Where(d => d.Page == 1 && d.Usage is 2 or 6).ToArray();
+            Check(ready is { PumpReady: true, RegistrationEnabled: true, ThreadExited: false, Failure: null, UnexpectedEvents: 0 }
+                && ready.Evidence is not null && ready.Hwnd != 0 && ready.Generation > generation, "direct registered pump readiness incorrect");
+            generation = ready.Generation;
+            Check(owned.Length == 2 && owned.All(d => d.Target == ready.Hwnd && (d.Flags & ~0x2000u) == 0x100),
+                "direct pump registration flags/owner incorrect");
+            Check(new[] { ready.ThreadId, target.Status.InstallThreadId, probe.Status.InstallThreadId }.Distinct().Count() == 3,
+                "direct pump changed thread placement");
+            target.PostTargetMessagesForTest(); await target.SynchronizeAsync(); await probe.SynchronizeAsync();
+            Check(target.Counts.KeyDown > 0 && target.Counts.KeyUp > 0 && !probe.Status.ThreadExited,
+                "direct pump lost target/Hook protocol");
+            await Until(() => pump.Status.TimerMessages > 0);
+            await pump.SynchronizeAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            if (run == 1)
+            {
+                await using var conflict = new DiagnosticRawInputPump(registerDevices: true);
+                try { await conflict.StartAsync(); throw new Exception("direct pump silently replaced registration"); } catch (RawInputException) { }
+                await conflict.DisposeAsync();
+                Check(conflict.Status is { PumpReady: false, ThreadExited: true, Hwnd: 0 } && conflict.Status.Failure is not null,
+                    "direct pump startup failure hidden");
+                Check(WindowsRawInputReceiver.Registrations().Where(d => d.Page == 1 && d.Usage is 2 or 6).SequenceEqual(owned),
+                    "failed direct pump removed live owner's registrations");
+            }
+            if (run == 2)
+            {
+                Check(WindowsRawInputReceiver.PostMessageW(ready.Hwnd, 0xff, 0, 0), "could not inject direct receiver fault");
+                await Until(() => pump.Status.Failure is not null);
+                await pump.DisposeAsync();
+                Check(pump.Status is { ThreadExited: true, PumpReady: false, Hwnd: 0 }
+                    && pump.Status.Failure!.Contains("GetRawInputData"), "direct pump post-ready fault hidden");
+                await using var replacement = new DiagnosticRawInputPump(registerDevices: true);
+                await replacement.StartAsync();
+                var nextOwned = WindowsRawInputReceiver.Registrations().Where(d => d.Page == 1 && d.Usage is 2 or 6).ToArray();
+                await pump.DisposeAsync();
+                Check(replacement.Status.Generation > ready.Generation && nextOwned.Length == 2
+                    && WindowsRawInputReceiver.Registrations().Where(d => d.Page == 1 && d.Usage is 2 or 6).SequenceEqual(nextOwned),
+                    "old direct pump disposal disturbed new registrations");
+            }
+            await pump.DisposeAsync(); await pump.DisposeAsync();
+            Check(pump.Status is { ThreadExited: true, PumpReady: false, Hwnd: 0 }
+                && (run == 2 || pump.Status.Failure is null), "registered direct pump cleanup failed");
+            try { await pump.StartAsync(); throw new Exception("disposed direct pump restarted"); } catch (ObjectDisposedException) { }
+            probe.Dispose(); target.Dispose();
+            Check(!WindowsRawInputReceiver.Registrations().Any(d => d.Page == 1 && d.Usage is 2 or 6)
+                && probe.Status is { ThreadExited: true, Failure: null } && target.Status is { ThreadExited: true, Failure: null },
+                "direct pump comparison leaked registrations/threads");
+        }
+        Console.WriteLine("Registered direct receiver readiness, ownership conflict, generations, faults and cleanup passed (3 lifecycles; software AUTO not inferred)");
     }
     private static byte[] Packet(uint type, int pointerSize, int body)
     {

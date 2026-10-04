@@ -8,7 +8,7 @@ tags: [lua, tests, input]
 
 # Lua coroutine bridge tests
 
-Opt-in `--hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split|keyboard-pump` supports the
+Opt-in `--hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split|keyboard-pump|keyboard-direct` supports the
 [controlled comparison](../NativeInputProbe/ControlledStages.md). It sends no
 input; both-raw modes add Raw Input after both Hooks; target-raw adds it without
 managed Hooks. All report software/candidate
@@ -46,6 +46,13 @@ message counts and post-start faults remain visible; no capture/candidate counte
 are claimed. Three real lifecycles assert thread separation, timer handling,
 idempotent startup/disposal, restart generations, faults and preservation of another
 receiver's registrations. See [steps and result branches](../NativeInputProbe/ReceiverRegistrationControl.md).
+keyboard-direct uses the same diagnostic pump with normal registration/reading/
+ownership/cleanup, but counts copied observations directly without RawInputEventSource,
+its queue, consumer or subscriptions. Snapshots include owned registrations and
+software/candidate deltas. Three registered lifecycles cover conflicts, malformed
+WM_INPUT faults, generations and cleanup; direct aggregation tests preserve down/up,
+merged sample counts, concurrency and detached snapshots. Real AUTO is NOT RUN by
+the agent. Normal event-source diagnostics retain their original delivery path.
 
 Run `dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64` with the root-pinned .NET SDK `10.0.401`.
 The console test uses fake capture, OCR and input services, so no native Rug.Core

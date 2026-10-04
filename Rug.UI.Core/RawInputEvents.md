@@ -278,7 +278,16 @@ skipping registration and ownership checks. Its internal diagnostic method never
 changes public Run, which always registers devices, or IInputEventSource Ready.
 Only pump readiness/identity/message aggregates are reported; no raw attribution
 is claimed. Lifecycle tests include faults, generations and foreign registration
-preservation. No input emitter, C-ABI, Hook forwarding or takeover changes.
+preservation. The user's keyboard-pump run passed both observers (four tagged
+injected keyboard events), all target/PostMessage rounds, 245 receiver timer
+messages and clean teardown; registrations/input/device/unexpected events stayed
+zero. Receiver presence alone did not reproduce the tested gap. keyboard-direct
+therefore restores normal registration/reading/ownership/cleanup in the same
+diagnostic pump, aggregating copied observations directly without the event-source
+queue/consumer/subscriptions. Its Hook/raw/target evidence is separate; no source
+Ready or software acceptance follows from startup. Real registration/conflict/
+fault/cleanup and direct aggregate tests cover this mode; AUTO remains NOT RUN by
+the agent. No input emitter, C-ABI, Hook forwarding or takeover changes.
 
 Automated parsing/lifecycle/buffering and real native registration tests pass.
 The user's pre-repair same-session reproduction observed SendInput candidates=7

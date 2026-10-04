@@ -50,22 +50,23 @@ internal static class RawInputDiagnostics
     {
         private long _candidateKey, _candidateMouse, _softwareKey, _softwareMouse, _down, _up;
         internal void Observe(InputSourceEvent e)
+            => ObserveCopied(e.Observation, e.Samples);
+        internal void ObserveCopied(InputObservation observation, long samples = 1)
         {
-            var observation = e.Observation;
             if (observation.IsRugSoftwareInput)
             {
                 if (observation.Kind == InputEventKind.Keyboard)
                 {
-                    Interlocked.Add(ref _softwareKey, e.Samples);
-                    if (observation.KeyReleased) Interlocked.Add(ref _up, e.Samples);
-                    else Interlocked.Add(ref _down, e.Samples);
+                    Interlocked.Add(ref _softwareKey, samples);
+                    if (observation.KeyReleased) Interlocked.Add(ref _up, samples);
+                    else Interlocked.Add(ref _down, samples);
                 }
-                else Interlocked.Add(ref _softwareMouse, e.Samples);
+                else Interlocked.Add(ref _softwareMouse, samples);
             }
             else if (observation.IsCandidateInput)
             {
-                if (observation.Kind == InputEventKind.Keyboard) Interlocked.Add(ref _candidateKey, e.Samples);
-                else Interlocked.Add(ref _candidateMouse, e.Samples);
+                if (observation.Kind == InputEventKind.Keyboard) Interlocked.Add(ref _candidateKey, samples);
+                else Interlocked.Add(ref _candidateMouse, samples);
             }
         }
         internal RawEvidence Read() => new(Interlocked.Read(ref _candidateKey), Interlocked.Read(ref _candidateMouse),
@@ -83,9 +84,10 @@ internal static class RawInputDiagnostics
         "keyboard-raw" => (true, true, false),
         "keyboard-split" => (true, true, false),
         "keyboard-pump" => (true, true, false),
-        _ => throw new ArgumentException("Use --hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split|keyboard-pump")
+        "keyboard-direct" => (true, true, false),
+        _ => throw new ArgumentException("Use --hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split|keyboard-pump|keyboard-direct")
     };
-    internal static bool UsesSplitProbe(string stage) => stage is "both-raw-split" or "target-raw" or "keyboard-raw" or "keyboard-split" or "keyboard-pump";
+    internal static bool UsesSplitProbe(string stage) => stage is "both-raw-split" or "target-raw" or "keyboard-raw" or "keyboard-split" or "keyboard-pump" or "keyboard-direct";
     internal static bool UsesRawInput(string stage) => stage is "both-raw" or "both-raw-split" or "target-raw" or "keyboard-raw";
     // @shape Fresh process per stage; raw modes register Raw Input, never emit/reinstall Hooks.
     // @source Existing native sender stays unchanged: tests/NativeInputProbe/main.cpp#class:CoreInput
@@ -99,7 +101,8 @@ internal static class RawInputDiagnostics
         using var separateProbe = split ? new RawInputDiagnosticWindow(selection.Keyboard, selection.Mouse, messageOnly: true) : null;
         var probe = separateProbe ?? window;
         await using var source = UsesRawInput(stage) ? new RawInputEventSource() : null;
-        await using var unregisteredPump = stage == "keyboard-pump" ? new UnregisteredRawInputPump() : null;
+        bool direct = stage == "keyboard-direct";
+        await using var receiverPump = stage is "keyboard-pump" or "keyboard-direct" ? new DiagnosticRawInputPump(direct) : null;
         RawInputDiagnosticWindow.Counters? ReadCounts()
         {
             if (window is null) return null;
@@ -132,25 +135,35 @@ internal static class RawInputDiagnostics
                 // Preserve startup order: selected diagnostic receivers ready before Raw Input.
                 await source.StartAsync();
             }
-            if (unregisteredPump is not null)
+            if (receiverPump is not null)
             {
-                await unregisteredPump.StartAsync().WaitAsync(TimeSpan.FromSeconds(5));
-                Console.WriteLine("RAW INPUT UNREGISTERED CONTROL: original receiver window/timer/message loop retained; no device registration or event-source consumer. Pump readiness is not capture readiness.");
-                PrintRawRegistrations("READY");
+                await receiverPump.StartAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                Console.WriteLine(direct
+                    ? "RAW INPUT DIRECT CONTROL: normal device registration/ownership/reading/cleanup retained; detached observations counted in receiver callback. No RawInputEventSource queue, consumer or subscriptions. Preserve Hook/raw/target evidence."
+                    : "RAW INPUT UNREGISTERED CONTROL: original receiver window/timer/message loop retained; no device registration or event-source consumer. Pump readiness is not capture readiness.");
+                if (!direct) PrintRawRegistrations("READY");
             }
             var previous = ReadCounts();
             async Task Snapshot(string label)
             {
-                if (unregisteredPump is not null)
+                if (receiverPump is not null)
                 {
-                    await unregisteredPump.SynchronizeAsync().WaitAsync(TimeSpan.FromSeconds(5));
-                    var pumpStatus = unregisteredPump.Status;
-                    Console.WriteLine($"{label} UNREGISTERED PUMP: {pumpStatus}");
+                    await receiverPump.SynchronizeAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                    var pumpStatus = receiverPump.Status;
+                    Console.WriteLine($"{label} {(direct ? "DIRECT" : "UNREGISTERED")} PUMP: {pumpStatus}");
                     if (pumpStatus.Failure is not null || pumpStatus.ThreadExited || !pumpStatus.PumpReady
-                        || pumpStatus.RegistrationEnabled || pumpStatus.InputMessages != 0
-                        || pumpStatus.DeviceMessages != 0 || pumpStatus.UnexpectedEvents != 0)
+                        || pumpStatus.RegistrationEnabled != direct || pumpStatus.UnexpectedEvents != 0
+                        || (!direct && (pumpStatus.InputMessages != 0 || pumpStatus.DeviceMessages != 0)))
                         throw new InvalidOperationException("INCONCLUSIVE: diagnostic receiver pump failed or received unexpected input");
-                    PrintRawRegistrations(label);
+                    if (direct)
+                    {
+                        PrintDirectRegistrations(label, pumpStatus.Hwnd);
+                        var currentRaw = pumpStatus.Evidence ?? throw new InvalidOperationException("INCONCLUSIVE: direct raw evidence unavailable");
+                        Console.WriteLine($"{label} direct raw SNAPSHOT: {currentRaw}");
+                        Console.WriteLine($"{label} direct raw DELTA: {currentRaw.Delta(previousRaw)}");
+                        previousRaw = currentRaw;
+                    }
+                    else PrintRawRegistrations(label);
                 }
                 if (source is not null)
                 {
@@ -170,7 +183,7 @@ internal static class RawInputDiagnostics
                     Console.WriteLine($"{label} raw DELTA: {currentRaw.Delta(previousRaw)}");
                     previousRaw = currentRaw;
                 }
-                Console.WriteLine($"ISOLATION {label}: stage={stage} processId={Environment.ProcessId} target={selection.Target} keyboardRequested={selection.Keyboard} mouseRequested={selection.Mouse} rawInputRegistered={source?.Snapshot.State == InputEventSourceState.Ready} emitsInput=False");
+                Console.WriteLine($"ISOLATION {label}: stage={stage} processId={Environment.ProcessId} target={selection.Target} keyboardRequested={selection.Keyboard} mouseRequested={selection.Mouse} rawInputRegistered={direct || source?.Snapshot.State == InputEventSourceState.Ready} emitsInput=False");
                 if (window is null) return;
                 await window.SynchronizeAsync();
                 if (separateProbe is not null) { await separateProbe.SynchronizeAsync(); PrintProbe(window, label + " TARGET"); }
@@ -198,11 +211,11 @@ internal static class RawInputDiagnostics
         }
         finally
         {
-            if (unregisteredPump is not null)
+            if (receiverPump is not null)
             {
-                await unregisteredPump.DisposeAsync();
-                Console.WriteLine($"STOPPED UNREGISTERED PUMP: {unregisteredPump.Status}");
-                if (unregisteredPump.Status.Failure is not null) Environment.ExitCode = 2;
+                await receiverPump.DisposeAsync();
+                Console.WriteLine($"STOPPED {(direct ? "DIRECT" : "UNREGISTERED")} PUMP: {receiverPump.Status}");
+                if (receiverPump.Status.Failure is not null) Environment.ExitCode = 2;
             }
             if (source is not null)
             {
@@ -221,7 +234,7 @@ internal static class RawInputDiagnostics
                 separateProbe.Dispose(); PrintProbe(separateProbe, "ISOLATION HOOK STOPPED");
                 if (separateProbe.Status.Failure is not null) Environment.ExitCode = 2;
             }
-            if (stage is "keyboard-split" or "keyboard-pump") PrintRawRegistrations("STOPPED");
+            if (stage is "keyboard-split" or "keyboard-pump" or "keyboard-direct") PrintRawRegistrations("STOPPED");
             Console.WriteLine("ISOLATION finished; no software/human acceptance inferred from pump health.");
         }
     }
@@ -230,6 +243,14 @@ internal static class RawInputDiagnostics
         int count = WindowsRawInputReceiver.Registrations().Count(d => d.Page == 1 && d.Usage is 2 or 6);
         Console.WriteLine($"{label} RAW INPUT OMITTED: keyboard/mouse registrations in this process={count}");
         if (count != 0) throw new InvalidOperationException("INCONCLUSIVE: Raw Input registration exists in no-source control");
+    }
+    private static void PrintDirectRegistrations(string label, nint hwnd)
+    {
+        var devices = WindowsRawInputReceiver.Registrations().Where(d => d.Page == 1 && d.Usage is 0 or 2 or 6).ToArray();
+        bool owned = devices.Length == 2 && new ushort[] { 2, 6 }.All(usage => devices.Any(d => d.Usage == usage
+            && d.Target == hwnd && (d.Flags & ~0x2000u) == 0x100));
+        Console.WriteLine($"{label} DIRECT REGISTRATIONS: count={devices.Length} keyboardMouseOwned={owned}");
+        if (!owned) throw new InvalidOperationException("INCONCLUSIVE: direct receiver registrations changed");
     }
     private static void Print(RawInputEventSource source, string label)
     {
