@@ -10,6 +10,8 @@ tags: [diagnostics, input, hooks, native]
 
 [Controlled managed-component stages](ControlledStages.md) keep native emission
 fixed while adding DLL load, target window and individual Hook registrations.
+`-Mode ManagedTarget` binds only B's validated diagnostic HWND/PID and keeps the
+native Rug.Core sender; see the controlled guide for startup/focus/counter rules.
 
 See [paired-session evidence and source audit](HookComparison.md) for the passing
 reversed-order session and the unresolved install-order correlation. CoreInput

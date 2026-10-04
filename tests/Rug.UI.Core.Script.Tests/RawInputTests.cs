@@ -91,6 +91,10 @@ internal static class RawInputTests
         {
             using var isolated = new RawInputDiagnosticWindow(selection.Item1, selection.Item2);
             await isolated.Ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Check(isolated.QueryTargetMetricForTest(0) == RawInputDiagnosticWindow.TargetMetricMagic, "target protocol unavailable");
+            var beforeMetrics = Enumerable.Range(1, 5).Select(i => isolated.QueryTargetMetricForTest((uint)i)).ToArray();
+            isolated.PostTargetMessagesForTest(); await isolated.SynchronizeAsync();
+            for (int i = 1; i <= 5; i++) Check(isolated.QueryTargetMetricForTest((uint)i) > beforeMetrics[i - 1], "target message metric missing");
             Check(isolated.Status.KeyboardInstalled == selection.Item1 && isolated.Status.MouseInstalled == selection.Item2,
                 "isolation receiver installed unrequested hooks");
             await isolated.SynchronizeAsync(); isolated.Dispose();

@@ -99,3 +99,59 @@ merged sample totals, detached snapshots and 1,000 concurrent observations passe
 aggregate tests. Existing Gateway/grant/arbitration/Raw Input/Lua/scheduler suite
 and Debug/x64 WinUI build passed (zero warnings/errors). No native sender or human
 actions were used in the scripted both-raw check; that comparison remains NOT RUN.
+
+## Native sender with managed target (only target changes)
+
+The user's both-raw/native-target session passed all four native rounds, both
+Hooks counted four tagged keys/ten tagged mouse events, and Raw Input counted
+software key/mouse 4/10 with down/up 2/2. Subsequent human input remained visible;
+source overflow/fault/consumer errors and stop registration/subscription counts
+were zero. This is evidence for that combination, not the original managed sender.
+
+Next comparison uses **the same B both-raw stage**. Only A's target endpoint changes;
+the native sender still calls the same Rug.Core DLL/C-ABI, with the same four rounds.
+A still creates its original spare target thread/window (hidden in this mode),
+so that thread's existence is not removed as an additional variable. B's existing
+target becomes the endpoint. A queries detached aggregate target counters with
+bounded SendMessageTimeout; no pointer or input content crosses this protocol.
+
+1. Close both old processes. Start A FIRST:
+
+   ```powershell
+   ./tests/run_native_input_probe.ps1 -Mode ManagedTarget
+   ```
+
+   Wait at the HWND/PID prompt: A's native Hooks are already installed.
+2. Start B using the unchanged both-raw command. Copy the **MANAGED TARGET** line's
+   hwnd and processId into A as `0xHANDLE PID` (only those two values).
+   A verifies PID/thread, exact captured RugRawDiagnostic class, expected title and
+   counter-protocol magic; arbitrary windows are rejected. Keep both processes at
+   the same elevation; failed/blocked metric queries do not bypass UIPI.
+3. Complete A HUMAN BEFORE with the **B managed white window**, and another app.
+   Enter baseline in B, then next in A. During the five-second countdown activate
+   **B's window**, release keys/mouse, and keep hands off until AUTO finishes.
+   A never forces foreground. A logs per-round Hook deltas and actual managed
+   target move/mouse down/up/key down/up counters; B also prints target deltas.
+4. In B enter snapshot. Complete A HUMAN AFTER and done; then enter snapshot/done
+   in B. B must remain alive through A AUTO/HUMAN AFTER; A does not destroy B.
+5. Send both complete outputs and confirm ordinary input/shortcuts and accidental
+   interference. Terminal/focus activity still contaminates the broad candidate
+   interval; do not equate it to AUTO self-input errors.
+
+Identity is checked before controller creation/each round and during queries.
+Destroyed/replaced targets, wrong PID/class/title/protocol, blocked queries or
+foreground refusal are not acceptance. This opt-in window protocol is a diagnostic
+restriction, not a production authorization system or a general arbitrary-HWND
+input adapter. Necessary key/button releases retain the existing CoreInput path.
+The target experiment does not prove Raw Input or caller-thread root cause; if it
+passes, managed sender/caller context remains to be isolated in a later unit.
+
+Agent checks: native /W4 /WX build, parser rejection and thread lifecycle tests,
+managed real-window metric protocol tests, existing full script regressions and
+Debug/x64 WinUI build passed (zero warnings/errors). A scripted cross-process
+run bound the actual managed target and read key delivery 2/2, movement 4 and
+mouse down/up 2/4 after the two native ABI PostMessage rounds; cleanup had zero
+subscriptions/registrations. The rounds were INTERFERED / NOT RUN because of
+untagged mouse activity; SendInput was NOT RUN for lack of foreground and HUMAN
+was NOT RUN. This verifies transport/delivery only, not software/human acceptance.
+The managed-target four-round manual comparison remains pending.

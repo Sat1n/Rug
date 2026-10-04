@@ -121,6 +121,19 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
         if (Status.ThreadExited) throw new InvalidOperationException("Diagnostic message thread exited");
     }
     internal void InjectThreadFailureForTest() => PostMessageW(_hwnd, 0x8002, 0, 0);
+    // Diagnostic-only cross-process counters; no pointers, key contents or C-ABI changes.
+    internal const uint TargetMetricMessage = 0x8010;
+    internal const int TargetMetricMagic = 0x52554744;
+    internal nint QueryTargetMetricForTest(uint index)
+    {
+        if (SendMessageTimeoutW(_hwnd, TargetMetricMessage + index, 0, 0, 3, 3000, out var value) == 0)
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError());
+        return (nint)value;
+    }
+    internal void PostTargetMessagesForTest()
+    {
+        foreach (uint message in new uint[] { 0x200, 0x201, 0x202, 0x100, 0x101 }) PostMessageW(_hwnd, message, 0, 0);
+    }
     internal static nint CheckHookInstallation(nint handle, int error, string name)
         => handle != 0 ? handle : throw new System.ComponentModel.Win32Exception(error, name + " installation failed; win32Error=" + error);
     private void Run()
@@ -174,6 +187,12 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
     }
     private nint Message(nint hwnd, uint message, nuint wParam, nint lParam)
     {
+        if (message is >= TargetMetricMessage and <= TargetMetricMessage + 5)
+            return (nint)((message - TargetMetricMessage) switch
+            {
+                0 => TargetMetricMagic, 1 => Interlocked.Read(ref _move), 2 => Interlocked.Read(ref _down),
+                3 => Interlocked.Read(ref _up), 4 => Interlocked.Read(ref _keyDown), _ => Interlocked.Read(ref _keyUp)
+            });
         if (message == 0x200) Interlocked.Increment(ref _move);
         if (message == 0x201) Interlocked.Increment(ref _down);
         if (message == 0x202) Interlocked.Increment(ref _up);
@@ -207,6 +226,7 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
     [DllImport("user32.dll")] private static extern nint DispatchMessageW(ref NativeMessage m);
     [DllImport("user32.dll")] private static extern nint DefWindowProcW(nint hwnd, uint msg, nuint w, nint l);
     [DllImport("user32.dll")] private static extern bool PostMessageW(nint hwnd, uint msg, nuint w, nint l);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern nint SendMessageTimeoutW(nint hwnd, uint msg, nuint w, nint l, uint flags, uint timeout, out nuint result);
     [DllImport("user32.dll")] private static extern void PostQuitMessage(int code);
     [DllImport("user32.dll")] private static extern bool DestroyWindow(nint hwnd);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern bool UnregisterClassW(string name, nint instance);

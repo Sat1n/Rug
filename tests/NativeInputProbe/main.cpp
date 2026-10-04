@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <future>
 #include <iostream>
+#include <sstream>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -212,7 +213,59 @@ public:
         auto keyStatus = keyUp(_handle, vk); auto mouseStatus = release(_handle, 0); Ok(keyStatus); Ok(mouseStatus);
     }
 };
+std::pair<HWND, DWORD> ParseManagedTarget(const std::string& line) {
+    std::istringstream input(line); std::string handle, process, extra;
+    Check(static_cast<bool>(input >> handle >> process) && !(input >> extra), "Enter HWND PID only");
+    size_t end{}; auto value = std::stoull(handle, &end, 16);
+    Check(end == handle.size() && value != 0, "Invalid target HWND");
+    auto pid = std::stoull(process, &end, 10);
+    Check(end == process.size() && pid > 0 && pid <= MAXDWORD, "Invalid target process ID");
+    return {reinterpret_cast<HWND>(static_cast<uintptr_t>(value)), static_cast<DWORD>(pid)};
+}
+// Diagnostic HWND only, never arbitrary application input. Revalidate before each compound round.
+class TargetEndpoint {
+    Pump* _native;
+    HWND _hwnd;
+    DWORD _pid{}, _thread{};
+    std::wstring _class;
+    long long Metric(UINT index) const {
+        DWORD_PTR value{};
+        if (!SendMessageTimeoutW(_hwnd, WM_APP + 0x10 + index, 0, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK, 3000, &value))
+            throw Error("Managed metric query (same elevation required)", GetLastError());
+        return static_cast<long long>(value);
+    }
+public:
+    explicit TargetEndpoint(Pump& native) : _native(&native), _hwnd(native.Hwnd()) {}
+    TargetEndpoint(HWND hwnd, DWORD pid) : _native(nullptr), _hwnd(hwnd), _pid(pid) {
+        wchar_t name[256]{}; Check(GetClassNameW(hwnd, name, 256) > 0, "Target class unavailable"); _class = name;
+        Check(_class.starts_with(L"RugRawDiagnostic"), "Only Rug managed diagnostic windows are accepted");
+        DWORD actual{}; _thread = GetWindowThreadProcessId(hwnd, &actual);
+        Check(_thread != 0 && actual == pid && pid != GetCurrentProcessId(), "Target process identity mismatch");
+        Validate();
+    }
+    HWND Hwnd() const { return _hwnd; }
+    void Validate() const {
+        Check(IsWindow(_hwnd) != 0, "Target window was destroyed");
+        if (_native) { Check(_native->Healthy(), "Native target fault"); return; }
+        DWORD pid{}; auto thread = GetWindowThreadProcessId(_hwnd, &pid);
+        wchar_t name[256]{}, title[256]{};
+        Check(pid == _pid && thread == _thread && GetClassNameW(_hwnd, name, 256) > 0 && _class == name
+            && GetWindowTextW(_hwnd, title, 256) > 0 && std::wstring(title) == L"Rug Raw Input diagnostics - isolated input target",
+            "Managed diagnostic target identity changed");
+        Check(Metric(0) == 0x52554744, "Target does not support diagnostic counters");
+    }
+    void Sync() const { Validate(); if (_native) _native->Sync(); }
+    Snapshot Read() const {
+        Validate(); if (_native) return _native->Read();
+        Snapshot s{}; s.move = Metric(1); s.down = Metric(2); s.up = Metric(3); s.keyDown = Metric(4); s.keyUp = Metric(5); return s;
+    }
+};
 void Tests() {
+    auto parsed = ParseManagedTarget("0x1234 42"); Check(reinterpret_cast<uintptr_t>(parsed.first) == 0x1234 && parsed.second == 42, "Target parser failed");
+    for (const auto& line : {"0 42", "1234 0", "12oops 42", "1234 42x", "1234 42 extra"}) {
+        bool rejected = false; try { ParseManagedTarget(line); } catch (const std::exception&) { rejected = true; }
+        Check(rejected, "Invalid managed target accepted");
+    }
     Counter c; c.Record(-1, 0, 0, true, false); Check(c.Read()[0] == 1 && c.Read()[1] == 0 && c.Read()[7] == 0, "Negative code classification failed");
     for (bool injected : {false, true}) for (bool tagged : {false, true}) c.Record(0, injected ? LLKHF_INJECTED : 0, tagged ? Tag : 0, true, true);
     c.Record(0, 0, 0, true, false); auto v = c.Read();
@@ -225,10 +278,12 @@ void Tests() {
     Pump probe(true); auto initial = probe.Read(); probe.Sync(); Check(Delta(probe.Read().key, initial.key)[7] == 0, "Probe parse fault");
     probe.FailForTest(); probe.Stop(); Check(!probe.Healthy(), "Post-start thread fault hidden"); probe.Status("CONTROLLED FAILURE");
     Pump next(true); Check(next.generation > probe.generation, "Generation reused"); next.Sync(); next.Stop(); next.Status("CLEANUP"); Check(next.Clean() && !IsWindow(next.Hwnd()), "Native hook/window cleanup failed");
+    bool rejected = false; try { TargetEndpoint invalid(next.Hwnd(), GetCurrentProcessId()); } catch (const std::exception&) { rejected = true; }
+    Check(rejected, "Destroyed/arbitrary target accepted");
     for (int i = 0; i < 3; ++i) { Pump receiver(true); Pump target(false); receiver.Sync(); target.Sync(); receiver.Stop(); target.Stop(); Check(receiver.Clean() && target.Clean() && !IsWindow(target.Hwnd()), "Repeated cleanup failed"); }
     std::cout << "Native counter/layout/thread lifecycle tests PASS (no synthetic input)\n";
 }
-int Run(bool observe, bool human) {
+int Run(bool observe, bool human, bool managed = false) {
     Pump probe(true); Pump target(false); Snapshot previous{}; Evidence(probe, "STARTED", previous);
     if (observe) {
         std::cout << "OBSERVER ONLY: no synthesized input. Run managed diagnostics in another terminal, use baseline before its AUTO, snapshot after AUTO, then done. Keep managed isolated target foreground during AUTO.\n";
@@ -239,31 +294,39 @@ int Run(bool observe, bool human) {
         }
         Evidence(probe, "OBSERVER END", previous); probe.Stop(); target.Stop(); probe.Status("STOPPED"); Check(probe.Clean() && target.Clean(), "Observer cleanup failed"); return 0;
     }
-    ShowWindow(target.Hwnd(), SW_SHOW);
+    TargetEndpoint endpoint(target);
+    if (managed) {
+        std::cout << "MANAGED TARGET: now start B both-raw. Paste its HWND and PID here (example: 0x1234 42); no input before identity checks.\n";
+        std::string line; if (!std::getline(std::cin, line)) return 2;
+        auto [hwnd, pid] = ParseManagedTarget(line); endpoint = TargetEndpoint(hwnd, pid);
+        std::cout << "MANAGED TARGET bound; keep B alive through AUTO and HUMAN AFTER. Sender remains native Rug.Core calls.\n";
+    } else ShowWindow(target.Hwnd(), SW_SHOW);
     bool humanBeforeComplete = true;
     if (human) {
-        std::cout << "HUMAN BEFORE: use isolated native target, keys/mouse and another app; normal shortcuts must work. Return and type next.\n";
+        std::cout << "HUMAN BEFORE: use " << (managed ? "MANAGED B" : "native") << " isolated target, keys/mouse and another app; normal shortcuts must work. Return and type next.\n";
         std::string command; if (!std::getline(std::cin, command) || command != "next") return 2;
         Evidence(probe, "HUMAN BEFORE END", previous);
         humanBeforeComplete = previous.key[1] > 0 && previous.mouse[1] > 0;
         if (!humanBeforeComplete) std::cout << "INCONCLUSIVE: missing human keyboard/mouse hook evidence BEFORE; software results cannot accept this session\n";
-        std::cout << "Countdown 5 seconds: activate native isolated target, then hands off.\n";
+        std::cout << "Countdown 5 seconds: activate " << (managed ? "MANAGED B" : "native") << " isolated target, then hands off.\n";
         std::this_thread::sleep_for(std::chrono::seconds(5));
     }
-    Evidence(probe, "AUTO BEFORE", previous); CoreInput input(target.Hwnd()); bool passed = humanBeforeComplete;
+    Evidence(probe, "AUTO BEFORE", previous); endpoint.Validate(); CoreInput input(endpoint.Hwnd()); bool passed = humanBeforeComplete;
     for (bool post : {false, true}) for (int vk : {VK_F8, 0x42}) {
         std::string label = std::string(post ? "PostMessage/" : "SendInput/") + (vk == VK_F8 ? "F8" : "B");
-        if (!post && GetForegroundWindow() != target.Hwnd()) { std::cout << label << " NOT RUN: isolated target is not foreground\n"; passed = false; continue; }
-        probe.Sync(); target.Sync(); auto before = probe.Read(); auto targetBefore = target.Read();
+        endpoint.Validate();
+        if (!post && GetForegroundWindow() != endpoint.Hwnd()) { std::cout << label << " NOT RUN: isolated target is not foreground\n"; passed = false; continue; }
+        probe.Sync(); endpoint.Sync(); auto before = probe.Read(); auto targetBefore = endpoint.Read();
         input.Round(vk, post);
         auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5); Snapshot messages{};
-        do { probe.Sync(); target.Sync(); messages = target.Read(); if (messages.keyDown > targetBefore.keyDown && messages.keyUp > targetBefore.keyUp && messages.move > targetBefore.move && messages.down > targetBefore.down && messages.up > targetBefore.up) break;
+        do { probe.Sync(); endpoint.Sync(); messages = endpoint.Read(); if (messages.keyDown > targetBefore.keyDown && messages.keyUp > targetBefore.keyUp && messages.move > targetBefore.move && messages.down > targetBefore.down && messages.up > targetBefore.up) break;
             std::this_thread::yield(); } while (std::chrono::steady_clock::now() < deadline);
         auto after = probe.Read(); auto key = Delta(after.key, before.key); auto mouse = Delta(after.mouse, before.mouse);
         Print(label + " keyboard DELTA", key); Print(label + " mouse DELTA", mouse);
         auto downs = vk == VK_F8 ? after.f8Down - before.f8Down : after.bDown - before.bDown;
         auto ups = vk == VK_F8 ? after.f8Up - before.f8Up : after.bUp - before.bUp;
-        std::cout << label << " tagged key down/up=" << downs << '/' << ups << " targetKeyDown/Up=" << messages.keyDown - targetBefore.keyDown << '/' << messages.keyUp - targetBefore.keyUp << '\n';
+        std::cout << label << " tagged key down/up=" << downs << '/' << ups << " targetKeyDown/Up=" << messages.keyDown - targetBefore.keyDown << '/' << messages.keyUp - targetBefore.keyUp
+            << " targetMove=" << messages.move - targetBefore.move << " targetMouseDown/Up=" << messages.down - targetBefore.down << '/' << messages.up - targetBefore.up << '\n';
         bool delivered = messages.keyDown > targetBefore.keyDown && messages.keyUp > targetBefore.keyUp && messages.move > targetBefore.move && messages.down > targetBefore.down && messages.up > targetBefore.up;
         bool interference = key[3] > key[6] || mouse[3] > mouse[6];
         if (interference) { std::cout << label << " INTERFERED / NOT RUN\n"; passed = false; continue; }
@@ -283,8 +346,9 @@ int wmain(int argc, wchar_t** argv) {
     try {
         bool observe = argc == 2 && std::wstring(argv[1]) == L"--observe";
         bool self = argc == 2 && std::wstring(argv[1]) == L"--self-test";
+        bool managed = argc == 2 && std::wstring(argv[1]) == L"--managed-target";
         if (argc == 2 && std::wstring(argv[1]) == L"--test") { Tests(); return 0; }
-        if (argc > 1 && !observe && !self) { std::cout << "Usage: Rug.NativeInputProbe.exe [--test|--self-test|--observe]\n"; return 2; }
-        return Run(observe, !self);
+        if (argc > 1 && !observe && !self && !managed) { std::cout << "Usage: Rug.NativeInputProbe.exe [--test|--self-test|--observe|--managed-target]\n"; return 2; }
+        return Run(observe, !self, managed);
     } catch (const std::exception& e) { std::cerr << "NATIVE DIAGNOSTIC FAILED: " << e.what() << '\n'; return 1; }
 }

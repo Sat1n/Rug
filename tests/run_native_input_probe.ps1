@@ -1,4 +1,4 @@
-param([ValidateSet('Human','Observe','Test','SelfTest','Build')][string]$Mode = 'Human')
+param([ValidateSet('Human','Observe','Test','SelfTest','Build','ManagedTarget')][string]$Mode = 'Human')
 $ErrorActionPreference = 'Stop'
 $probeRoot = Split-Path -Parent $PSScriptRoot
 $probeProject = Join-Path $PSScriptRoot 'NativeInputProbe/NativeInputProbe.vcxproj'
@@ -15,7 +15,7 @@ if (-not $probeMsbuild) { throw 'Visual Studio C++ v145 tools and Windows SDK ar
 & $probeMsbuild $probeProject /p:Configuration=Debug /p:Platform=x64 /v:minimal /nologo
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($Mode -eq 'Build') { exit 0 }
-if ($Mode -in @('Human', 'SelfTest')) {
+if ($Mode -in @('Human', 'SelfTest', 'ManagedTarget')) {
     $probeCore = Join-Path $probeRoot 'x64/Debug/Rug.Core.dll'
     if (Test-Path -LiteralPath $probeCore) {
         Write-Host "CORE FILE (pre-run, not loaded-module evidence): path=$probeCore sha256=$((Get-FileHash -LiteralPath $probeCore -Algorithm SHA256).Hash)"
@@ -26,6 +26,7 @@ $probeExecutable = Join-Path $probeRoot 'x64/Debug/Rug.NativeInputProbe.exe'
     'Observe' { '--observe' }
     'Test' { '--test' }
     'SelfTest' { '--self-test' }
+    'ManagedTarget' { '--managed-target' }
     default { @() }
 })
 & $probeExecutable @probeArgs

@@ -94,6 +94,8 @@ internal static class RawInputDiagnostics
         try
         {
             if (window is not null) await window.Ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            if (stage == "both-raw")
+                Console.WriteLine($"MANAGED TARGET: hwnd=0x{(nuint)window!.Ready.Task.Result:X} processId={Environment.ProcessId} (diagnostic window only)");
             if (source is not null)
             {
                 source.InputReceived += onInput;
@@ -127,10 +129,11 @@ internal static class RawInputDiagnostics
                 var now = window.Counts;
                 PrintHook(label + " keyboard DELTA", now.Keyboard.Delta(previous!.Keyboard));
                 PrintHook(label + " mouse DELTA", now.Mouse.Delta(previous.Mouse));
+                Console.WriteLine($"{label} target DELTA: move={now.Move - previous.Move} mouseDown/Up={now.MouseDown - previous.MouseDown}/{now.MouseUp - previous.MouseUp} keyDown/Up={now.KeyDown - previous.KeyDown}/{now.KeyUp - previous.KeyUp}");
                 previous = now;
             }
             await Snapshot("READY");
-            Console.WriteLine("Keep NATIVE isolated target foreground for its AUTO. Here use baseline/snapshot/done; this process sends no input. Fresh processes for each stage.");
+            Console.WriteLine("Keep the selected A target foreground for its AUTO (native Human: native window; ManagedTarget: this managed window). Here use baseline/snapshot/done; this process sends no input. Fresh processes for each stage.");
             while (true)
             {
                 string? command = await Task.Run(Console.ReadLine);
