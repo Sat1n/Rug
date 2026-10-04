@@ -22,6 +22,7 @@ internal static class RawInputTests
         await UnregisteredPumpLifecycleAsync();
         await DirectPumpLifecycleAsync();
         await MessagePumpLifecycleAsync();
+        await MessagePumpLifecycleAsync(registerKeyboard: false);
         await LifecycleAsync();
         await ConsumersAsync();
         await NativeLifecycleAsync();
@@ -93,6 +94,10 @@ internal static class RawInputTests
         Check(RawInputDiagnostics.IsolationStage("keyboard-messages") == (true, true, false)
             && RawInputDiagnostics.UsesSplitProbe("keyboard-messages") && !RawInputDiagnostics.UsesRawInput("keyboard-messages"),
             "message-only registered control changed Hook selection or creates an event source");
+        Check(RawInputDiagnostics.IsolationStage("keyboard-messages-mouse") == (true, true, false)
+            && RawInputDiagnostics.UsesSplitProbe("keyboard-messages-mouse") && !RawInputDiagnostics.UsesRawInput("keyboard-messages-mouse"),
+            "mouse-only registration changed Hook selection or creates an event source");
+        try { _ = new DiagnosticRawInputPump(registerDevices: true, registerKeyboard: false); throw new Exception("mouse-only packet mode accepted"); } catch (ArgumentException) { }
         var aggregate = new RawInputDiagnostics.RawAggregate();
         var baseline = aggregate.Read();
         aggregate.Observe(new(1, 1, 1, new(InputEventKind.Keyboard, 1, false, ExtraInformation: InputObservation.RugSoftwareInputTag)));
@@ -327,9 +332,9 @@ internal static class RawInputTests
         }
         Console.WriteLine("Registered direct receiver readiness, ownership conflict, generations, faults and cleanup passed (3 lifecycles; software AUTO not inferred)");
     }
-    // @shape Three registered count-only lifecycles; no native packet parsing, tracking or observations.
+    // @shape Three count-only lifecycles per registration selection; no packet parsing, tracking or observations.
     // @source Rug.UI.Core/Native/WindowsRawInputReceiver.cs#class:WindowsRawInputReceiver
-    private static async Task MessagePumpLifecycleAsync()
+    private static async Task MessagePumpLifecycleAsync(bool registerKeyboard = true)
     {
         if (!OperatingSystem.IsWindows()) return;
         long generation = 0;
@@ -338,14 +343,17 @@ internal static class RawInputTests
             using var target = new RawInputDiagnosticWindow(false, false);
             using var probe = new RawInputDiagnosticWindow(true, false, messageOnly: true);
             await Task.WhenAll(target.Ready.Task, probe.Ready.Task).WaitAsync(TimeSpan.FromSeconds(5));
-            await using var pump = new DiagnosticRawInputPump(registerDevices: true, readPackets: false);
+            await using var pump = new DiagnosticRawInputPump(registerDevices: true, readPackets: false, registerKeyboard: registerKeyboard);
             await Task.WhenAll(pump.StartAsync(), pump.StartAsync()).WaitAsync(TimeSpan.FromSeconds(5));
             var ready = pump.Status;
             var owned = WindowsRawInputReceiver.Registrations().Where(d => d.Page == 1 && d.Usage is 2 or 6).ToArray();
             Check(ready is { RegistrationEnabled: true, PacketReadingEnabled: false, Evidence: null, PumpReady: true, Failure: null }
-                && ready.Generation > generation && ready.Hwnd != 0, "count-only readiness or evidence incorrect");
+                && ready.Generation > generation && ready.Hwnd != 0 && ready.KeyboardRegistrationEnabled == registerKeyboard
+                && ready.MouseRegistrationEnabled, "count-only readiness, registration selection or evidence incorrect");
             generation = ready.Generation;
-            Check(owned.Length == 2 && owned.All(d => d.Target == ready.Hwnd && (d.Flags & ~0x2000u) == 0x100)
+            Check(owned.Length == (registerKeyboard ? 2 : 1) && owned.Any(d => d.Usage == 2)
+                && owned.Any(d => d.Usage == 6) == registerKeyboard
+                && owned.All(d => d.Target == ready.Hwnd && (d.Flags & ~0x2000u) == 0x100)
                 && new[] { ready.ThreadId, target.Status.InstallThreadId, probe.Status.InstallThreadId }.Distinct().Count() == 3,
                 "count-only registration flags or thread topology changed");
             await Until(() => pump.Status.TimerMessages > 0);
@@ -365,7 +373,7 @@ internal static class RawInputTests
                 "count-only parsed malformed data, skipped cleanup or published fabricated raw evidence");
             if (run == 1)
             {
-                await using var conflict = new DiagnosticRawInputPump(registerDevices: true, readPackets: false);
+                await using var conflict = new DiagnosticRawInputPump(registerDevices: true, readPackets: false, registerKeyboard: registerKeyboard);
                 try { await conflict.StartAsync(); throw new Exception("count-only control overwrote live registrations"); } catch (RawInputException) { }
                 await conflict.DisposeAsync();
                 Check(conflict.Status is { ThreadExited: true, PumpReady: false, Hwnd: 0 } && conflict.Status.Failure is not null
@@ -378,7 +386,7 @@ internal static class RawInputTests
                 var replacement = owned.Select(d => new WindowsRawInputReceiver.Device { Page = d.Page, Usage = d.Usage, Flags = d.Flags, Target = target.Ready.Task.Result }).ToArray();
                 try
                 {
-                    Check(WindowsRawInputReceiver.RegisterRawInputDevices(replacement, 2, (uint)Marshal.SizeOf<WindowsRawInputReceiver.Device>()), "could not replace registrations");
+                    Check(WindowsRawInputReceiver.RegisterRawInputDevices(replacement, (uint)replacement.Length, (uint)Marshal.SizeOf<WindowsRawInputReceiver.Device>()), "could not replace registrations");
                     Check(WindowsRawInputReceiver.PostMessageW(ready.Hwnd, 0x113, 1, 0), "could not post ownership check");
                     await Until(() => pump.Status.Failure is not null);
                     await pump.DisposeAsync();
@@ -390,12 +398,32 @@ internal static class RawInputTests
                 finally
                 {
                     var remove = replacement.Select(d => new WindowsRawInputReceiver.Device { Page = d.Page, Usage = d.Usage, Flags = 1 }).ToArray();
-                    Check(WindowsRawInputReceiver.RegisterRawInputDevices(remove, 2, (uint)Marshal.SizeOf<WindowsRawInputReceiver.Device>()), "replacement cleanup failed");
+                    Check(WindowsRawInputReceiver.RegisterRawInputDevices(remove, (uint)remove.Length, (uint)Marshal.SizeOf<WindowsRawInputReceiver.Device>()), "replacement cleanup failed");
+                }
+            }
+            if (run == 0 && !registerKeyboard)
+            {
+                WindowsRawInputReceiver.Device[] foreign = [new() { Page = 1, Usage = 6, Flags = 0x100, Target = target.Ready.Task.Result }];
+                try
+                {
+                    Check(WindowsRawInputReceiver.RegisterRawInputDevices(foreign, 1, (uint)Marshal.SizeOf<WindowsRawInputReceiver.Device>()), "could not register unexpected keyboard class");
+                    Check(WindowsRawInputReceiver.PostMessageW(ready.Hwnd, 0x113, 1, 0), "could not post registration selection check");
+                    await Until(() => pump.Status.Failure is not null);
+                    await pump.DisposeAsync();
+                    Check(pump.Status.Failure!.Contains("ownership changed")
+                        && WindowsRawInputReceiver.Registrations().Where(d => d.Page == 1 && d.Usage is 2 or 6).SequenceEqual(foreign),
+                        "unexpected keyboard registration was accepted or removed during mouse cleanup");
+                }
+                finally
+                {
+                    WindowsRawInputReceiver.Device[] remove = [new() { Page = 1, Usage = 6, Flags = 1 }];
+                    Check(WindowsRawInputReceiver.RegisterRawInputDevices(remove, 1, (uint)Marshal.SizeOf<WindowsRawInputReceiver.Device>()), "foreign keyboard cleanup failed");
                 }
             }
             await pump.DisposeAsync(); await pump.DisposeAsync();
             Check(pump.Status is { ThreadExited: true, PumpReady: false, Hwnd: 0, Evidence: null }
-                && pump.Status.InputCleanupCalls == pump.Status.InputMessages && (run == 2 || pump.Status.Failure is null),
+                && pump.Status.InputCleanupCalls == pump.Status.InputMessages
+                && (run == 2 || (!registerKeyboard && run == 0) || pump.Status.Failure is null),
                 "count-only cleanup failed or WM_INPUT missed DefWindowProc");
             try { await pump.StartAsync(); throw new Exception("disposed count-only control restarted"); } catch (ObjectDisposedException) { }
             probe.Dispose(); target.Dispose();
@@ -403,7 +431,7 @@ internal static class RawInputTests
                 && probe.Status is { ThreadExited: true, Failure: null } && target.Status is { ThreadExited: true, Failure: null },
                 "count-only lifecycle leaked registrations or threads");
         }
-        Console.WriteLine("Registered message-only receiver, omitted parsing/evidence, WM_INPUT cleanup, conflicts, ownership loss and generations passed (3 lifecycles; AUTO not inferred)");
+        Console.WriteLine($"Registered message-only receiver keyboard={registerKeyboard}, omitted parsing/evidence, WM_INPUT cleanup, conflicts, ownership loss and generations passed (3 lifecycles; AUTO not inferred)");
     }
     private static byte[] Packet(uint type, int pointerSize, int body)
     {

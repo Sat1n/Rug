@@ -295,6 +295,12 @@ and observation callbacks. Raw evidence is NOT COLLECTED, never successful sourc
 attribution. Message/cleanup counts, thread faults and ownership remain observable;
 real lifecycle tests cover conflicts, omitted parsing and replacement-owner cleanup.
 See [paired steps and branches](../tests/NativeInputProbe/ReceiverRegistrationControl.md#registered-message-count-control-keyboard-messages).
+The user's keyboard-messages run still missed both automatic keyboard Hook paths,
+with complete target delivery, 14,586 input/cleanup calls and clean teardown.
+keyboard-messages-mouse omits only keyboard Raw Input registration, retaining
+mouse registration and count-only handling. Raw attribution remains NOT COLLECTED;
+production Run still registers/reads both classes. Tests check conflicts, unexpected
+keyboard registration, ownership loss and selected-class cleanup.
 No input emitter, C-ABI, Hook forwarding or takeover changes.
 
 Automated parsing/lifecycle/buffering and real native registration tests pass.

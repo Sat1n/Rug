@@ -221,3 +221,64 @@ generations, invalid foreground/sink handles without parsing, device counts,
 DefWindowProc call counts, ownership-loss faults and replacement-owner protection.
 Synthetic message tests are not software/HUMAN acceptance. Interactive paired
 AUTO is NOT RUN by the agent; original managed-sender closure remains required.
+
+## Mouse-only registration: keyboard-messages-mouse
+
+The user's keyboard-messages run still lost automatic keyboard callbacks in both
+Hooks. Each target round delivered down/up 1/1; mouse Hooks captured all ten
+tagged injected events. HUMAN callbacks continued; receiver input/cleanup totals
+were both 14,586, with no faults and zero final registrations. Packet reading,
+parsing, tracking and callbacks are not necessary for this reproduction.
+
+keyboard-messages-mouse changes only device selection from keyboard-messages:
+register page 1 usage 2 (mouse), omit usage 6 (keyboard). Keep 0x2100 flags,
+receiver window/thread/timer, count-only handling and DefWindowProc cleanup;
+retain native sender, managed target, independent managed keyboard Hook and
+native keyboard/mouse Hooks. Ownership checks now require the selected mouse
+class and reject unexpected keyboard/page-wide registrations. Startup still
+rejects conflicting keyboard/mouse entries; cleanup removes only selected owned
+classes, preserving other owners. This internal diagnostic seam cannot weaken
+public production Run, which registers and reads both classes.
+
+Fresh processes, identical elevation/external applications. A FIRST:
+
+~~~powershell
+& F:/Cardinal/Rug/Rug/tests/run_native_input_probe.ps1 -Mode ManagedTarget
+~~~
+
+At A's HWND/PID prompt, B SECOND:
+
+~~~powershell
+dotnet run --project F:/Cardinal/Rug/Rug/tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64 -- --hook-isolation-stage keyboard-messages-mouse
+~~~
+
+Wait for ISOLATION READY. MOUSE MESSAGES PUMP must show RegistrationEnabled=True,
+KeyboardRegistrationEnabled=False, MouseRegistrationEnabled=True,
+PacketReadingEnabled=False, PumpReady=True, ThreadExited=False and no Failure.
+MOUSE REGISTRATIONS must show count=1, mouseOwned=True, keyboardPresent=False.
+Check three distinct thread IDs, managed keyboard Hook installed/mouse absent
+and zero errors. Paste B's MANAGED TARGET HWND/PID into A as 0xHANDLE PID.
+Snapshot selection fields describe configured mode; registration queries verify
+actual ownership, and the final query must show zero entries after cleanup.
+
+HUMAN BEFORE in B target/another app; B baseline, A next, five seconds to focus
+B target then release everything/hands off. Do not manually press F8/B during
+AUTO. After four rounds B snapshot; HUMAN AFTER, A done; wait for A exit, then B
+snapshot/done. Return both complete logs and normal-input/interference confirmation.
+
+Preserve both Hook observers, per-round target delivery, message/cleanup phase
+deltas and registration selection. Raw keyboard/mouse software and candidate
+counts are NOT COLLECTED; reduced registration is not production acceptance.
+Final input/cleanup totals must match, HWND/registrations zero and threads exited.
+
+| Evidence | Direction |
+|---|---|
+| Both keyboard Hooks complete, target complete | Difference correlates with keyboard-class registration in this setup; further confirm before repairing production |
+| Keyboard gap remains, mouse-only ownership/pump healthy | Keyboard-class registration is not necessary; investigate retained mouse registration/ownership/message path |
+| Fault, unexpected registrations, missing target or interference | Inconclusive; resolve that evidence first |
+
+Three automated mouse-only lifecycles cover selected flags/identity, idempotence,
+generations, malformed count-only messages, conflicts, unexpected keyboard faults,
+replacement-owner preservation and cleanup. Original both-class tests remain.
+Interactive paired AUTO/HUMAN is NOT RUN by the agent. No sender, C-ABI, Hook
+forwarding, source filtering or takeover behavior changes.

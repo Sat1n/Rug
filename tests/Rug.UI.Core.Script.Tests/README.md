@@ -8,11 +8,11 @@ tags: [lua, tests, input]
 
 # Lua coroutine bridge tests
 
-Opt-in `--hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split|keyboard-pump|keyboard-direct|keyboard-messages` supports the
+Opt-in `--hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split|keyboard-pump|keyboard-direct|keyboard-messages|keyboard-messages-mouse` supports the
 [controlled comparison](../NativeInputProbe/ControlledStages.md). It sends no
 input; both-raw modes add Raw Input after both Hooks; target-raw adds it without
-managed Hooks. All report software/candidate
-sample deltas and clean registration/subscription teardown. Normal diagnostics
+managed Hooks. Packet-reading stages report software/candidate deltas; count-only
+or omitted collection stages report NOT COLLECTED. All check cleanup. Normal diagnostics
 retain both Hooks.
 both-raw prints its HWND/PID and aggregate target counts for the native
 ManagedTarget comparison. Its query protocol lives in the diagnostic Native
@@ -60,6 +60,12 @@ never zero-candidate evidence. Message/cleanup totals and phase deltas remain
 visible. Three real lifecycles check count-only malformed foreground/sink messages,
 device messages, conflicts, visible ownership loss, replacement-owner protection,
 generations and idempotent cleanup. Interactive AUTO remains NOT RUN by the agent.
+keyboard-messages-mouse retains the count-only setup and managed keyboard Hook,
+registering only mouse usage 2. Snapshots show keyboard/mouse registration selection;
+ownership queries require exactly one owned mouse and no keyboard or page-wide entry.
+Three additional lifecycles verify this selection, conflicts, unexpected keyboard
+registration faults, replacement protection and complete cleanup. Raw attribution
+remains NOT COLLECTED; production Run always registers/reads both classes.
 
 Run `dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64` with the root-pinned .NET SDK `10.0.401`.
 The console test uses fake capture, OCR and input services, so no native Rug.Core
