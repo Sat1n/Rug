@@ -11,7 +11,7 @@ tags: [diagnostics, hooks, isolation]
 This is diagnosis, not Raw Input or takeover acceptance. The native Human probe
 remains the fixed sender/target/observer; the second managed process adds exactly
 one selected cumulative stage. It never sends input, automatically reinstalls
-a Hook, or alters production emitters. Both both-raw modes and target-raw enable Raw Input.
+a Hook, or alters production emitters. Both both-raw modes, target-raw and keyboard-raw enable Raw Input.
 
 | Stage | Managed Rug.Core load | Managed target/message thread | Keyboard Hook | Mouse Hook | Raw Input |
 |---|---|---|---|---|---|
@@ -22,6 +22,7 @@ a Hook, or alters production emitters. Both both-raw modes and target-raw enable
 | both-raw | Yes | Yes | Yes | Yes | Yes |
 | both-raw-split | Yes | Yes, plus separate Hook thread | Yes | Yes | Yes |
 | target-raw | Yes | Yes, plus idle message-only receiver thread | No | No | Yes |
+| keyboard-raw | Yes | Yes, plus same independent receiver thread | Yes | No | Yes |
 
 Use **fresh A and B processes for every stage**, in this order:
 
@@ -289,7 +290,70 @@ Hooks are not necessary to reproduce the failure. Neither outcome proves a CLR,
 Raw Input API or third-party defect. Target/foreground/query/receiver hypotheses
 remain if no cause is localized. Fault/incomplete delivery/interference means no
 causal inference. Agent protocol/lifecycle/full regression checks and Debug/x64
-WinUI build pass; interactive target-raw AUTO/HUMAN is NOT RUN pending user operation.
+WinUI build pass. The subsequent user's target-raw run passed all four native
+rounds: SendInput/F8 and B each had two marked injected keyboard callbacks,
+marked down/up 1/1, target down/up 1/1 and five marked mouse events. Raw Input
+retained software key/mouse 4/10, down/up 2/2; human input continued, source
+fault/overflow/consumer errors and final subscriptions/registrations were zero.
+This localizes a registration/chain interaction but omitting both Hooks cannot
+identify which Hook or their combination is responsible. It does not accept the
+original managed sender/probe scenario. Next add only the managed keyboard Hook.
+
+## Keyboard-only registration: keyboard-raw
+
+The read-only audit found no proven declaration/layout/lifetime/forwarding defect:
+HOOKPROC and CallNextHookEx use int nCode, pointer-sized WPARAM/LPARAM/LRESULT;
+keyboard flags/extra-info offsets 8/16 agree with
+[KBDLLHOOKSTRUCT](https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-kbdllhookstruct)
+and existing layout tests. Only HC_ACTION data is read. Negative codes forward,
+and callbacks return CallNextHookEx's unchanged result; its hhk argument is ignored
+as specified by [Microsoft](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-callnexthookex).
+Delegates remain rooted in instance fields through thread teardown. Default
+platform calling convention is documented by
+[Marshal](https://learn.microsoft.com/en-us/dotnet/api/system.runtime.interopservices.marshal.getfunctionpointerfordelegate?view=net-10.0).
+Immediate install-error capture, message loops and fault/cleanup checks remain
+unchanged. This audit does not prove runtime delivery; no speculative callback,
+import or input-emission repair is made in this comparison.
+
+keyboard-raw preserves target-raw's target, idle receiver window/thread, Raw Input,
+sender and metric query protocol. It adds only the managed keyboard Hook on the
+independent receiver thread; no managed mouse Hook is installed. A's native Hook
+verification remains intact, including both keyboard and mouse. Startup order,
+five-second countdown, software tag and four input rounds remain unchanged.
+
+1. Close both old processes; keep elevation and external applications unchanged.
+   Start A FIRST: `./tests/run_native_input_probe.ps1 -Mode ManagedTarget`.
+2. At A's HWND/PID prompt start B:
+
+   ```powershell
+   dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64 -- --hook-isolation-stage keyboard-raw
+   ```
+
+   Wait for ISOLATION READY. THREAD TOPOLOGY IDs must differ; READY TARGET has
+   neither Hook. READY reports keyboardInstalled=True, mouseInstalled=False and
+   zero install errors. Raw Input must be Ready/fault None. Paste B MANAGED TARGET
+   hwnd/processId into A as `0xHANDLE PID`; A's older both-raw prompt is generic.
+3. Complete HUMAN BEFORE with B's white target and another application. In B type
+   baseline; in A type next. Activate B's white window within five seconds, release
+   keys/buttons and keep hands off throughout AUTO. Do not manually press F8/B.
+4. After A finishes four rounds, enter snapshot in B. Complete HUMAN AFTER and
+   done in A; then snapshot/done in B. Return both COMPLETE outputs and confirm
+   ordinary input/shortcuts and accidental interference. Keep B alive until A exits.
+
+Expected complete evidence: all four A rounds PASS, native marked keyboard down/up
+1/1 per SendInput key and mouse five each; B raw key/mouse 4/10, down/up 2/2 and
+managed tagged/injected keyboard four. B mouse Hook counts are intentionally zero,
+not a failed software round; A must still observe mouse input. Candidate deltas
+include terminal/focus activity. Installation/barriers cannot certify Hook health.
+All message threads/registrations/subscriptions must clean up.
+
+Missing automatic keyboard evidence with complete raw/target data would reproduce
+the failure with only the managed keyboard Hook present, without proving its
+precise cause. A pass requires investigating mouse-only registration or combined
+Hooks next; those further controls are not implemented/accepted here. Faults,
+missing target/raw data or interference remain inconclusive. Real keyboard-only
+startup/metric/fault/cleanup and full existing regressions plus Debug/x64 WinUI
+build pass; interactive keyboard-raw SendInput/HUMAN is NOT RUN by the agent.
 
 ## Remaining acceptance work (2026-10-04)
 
@@ -302,7 +366,7 @@ WinUI build pass; interactive target-raw AUTO/HUMAN is NOT RUN pending user oper
 | Human foreground/background input | User counters show observed input; explicit normal-operation confirmation remains needed |
 | Normal operation/shortcuts/window interaction | Human visual confirmation needed; counters cannot certify this |
 
-The next planned diagnostic is one target-raw paired session. After a supported
+The next planned diagnostic is one keyboard-raw paired session. After a supported
 repair, rerun the ORIGINAL raw-input-diagnostic (managed InputService sender),
 HUMAN BEFORE -> AUTO -> HUMAN AFTER with complete Hook/raw/target evidence,
 and relevant automated regressions. A simplified control passing alone is not

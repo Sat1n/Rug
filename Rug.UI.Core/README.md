@@ -287,7 +287,7 @@ tags and untagged zero-device input remain candidates. This spoofable observatio
 hint grants no authority. See [diagnostics](RawInputEvents.md) for the 5-second
 countdown, separate callback/classification/phase counters and observable
 post-start probe thread faults and independent F8/B AUTO rounds. Manual
-keyboard-probe diagnosis remains pending; [controlled comparisons](../tests/NativeInputProbe/ControlledStages.md) isolate Hook registration and thread placement.
+keyboard-probe diagnosis remains pending; [controlled comparisons](../tests/NativeInputProbe/ControlledStages.md) isolate keyboard registration and thread placement.
 
 ## Native Interop & Memory Safety (CRITICAL)
 

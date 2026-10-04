@@ -251,9 +251,16 @@ observers despite complete target and marked raw key delivery. The target-raw
 control therefore keeps the same target, idle message-only receiver thread and
 Raw Input, but installs no managed Hooks. Native observer verification remains
 required; zero managed counters are intentional, never software acceptance.
-Actual startup/protocol/fault/cleanup tests pass; interactive target-raw comparison
-is NOT RUN pending user operation. SendInput acceptance remains blocked, while
+Actual startup/protocol/fault/cleanup tests pass; the user's subsequent target-raw
+session passed all four native rounds with complete marked Hook/raw/target evidence.
+Original SendInput acceptance remains blocked, while
 normal foreground/background/shortcut behavior needs explicit human confirmation.
+The next keyboard-raw comparison keeps those windows/threads/source/sender,
+installing only the managed keyboard Hook in the independent receiver thread.
+The mouse Hook stays absent; A retains native keyboard/mouse checks, B retains
+keyboard and raw/target evidence. Read-only audit found no proven ABI/layout/
+forwarding/lifetime defect, so callbacks and imports remain unchanged. Keyboard-only
+lifecycle tests pass; its interactive AUTO/HUMAN comparison is NOT RUN by the agent.
 
 Automated parsing/lifecycle/buffering and real native registration tests pass.
 The user's pre-repair same-session reproduction observed SendInput candidates=7
