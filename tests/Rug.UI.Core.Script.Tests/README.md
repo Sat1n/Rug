@@ -8,7 +8,7 @@ tags: [lua, tests, input]
 
 # Lua coroutine bridge tests
 
-Opt-in `--hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw` supports the
+Opt-in `--hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split` supports the
 [controlled comparison](../NativeInputProbe/ControlledStages.md). It sends no
 input; both-raw modes add Raw Input after both Hooks; target-raw adds it without
 managed Hooks. All report software/candidate
@@ -33,6 +33,12 @@ the managed keyboard Hook; mouse Hook remains uninstalled. It prints the selecte
 Hooks, preserves keyboard deltas and intentionally reports zero managed mouse
 Hook counters. Tests cover real keyboard-only startup/protocol, post-ready faults
 with live target/source and three cleanup rounds, alongside both/no-Hook cases.
+keyboard-split preserves keyboard-raw's visible target, independent keyboard-only
+Hook receiver, metric protocol and native sender, but creates no Raw Input source.
+It reports omitted collection and verifies zero registrations at startup/stop;
+absence of raw counters is not successful software attribution. Three additional
+real lifecycle rounds cover target delivery, receiver faults and cleanup without
+Raw Input, giving 12 split lifecycles total. Manual AUTO remains separately required.
 
 Run `dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64` with the root-pinned .NET SDK `10.0.401`.
 The console test uses fake capture, OCR and input services, so no native Rug.Core

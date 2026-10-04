@@ -23,6 +23,7 @@ a Hook, or alters production emitters. Both both-raw modes, target-raw and keybo
 | both-raw-split | Yes | Yes, plus separate Hook thread | Yes | Yes | Yes |
 | target-raw | Yes | Yes, plus idle message-only receiver thread | No | No | Yes |
 | keyboard-raw | Yes | Yes, plus same independent receiver thread | Yes | No | Yes |
+| keyboard-split | Yes | Yes, plus same independent receiver thread | Yes | No | No |
 
 Use **fresh A and B processes for every stage**, in this order:
 
@@ -295,7 +296,7 @@ rounds: SendInput/F8 and B each had two marked injected keyboard callbacks,
 marked down/up 1/1, target down/up 1/1 and five marked mouse events. Raw Input
 retained software key/mouse 4/10, down/up 2/2; human input continued, source
 fault/overflow/consumer errors and final subscriptions/registrations were zero.
-This localizes a registration/chain interaction but omitting both Hooks cannot
+This narrows a registration/chain correlation but omitting both Hooks cannot
 identify which Hook or their combination is responsible. It does not accept the
 original managed sender/probe scenario. Next add only the managed keyboard Hook.
 
@@ -353,7 +354,41 @@ precise cause. A pass requires investigating mouse-only registration or combined
 Hooks next; those further controls are not implemented/accepted here. Faults,
 missing target/raw data or interference remain inconclusive. Real keyboard-only
 startup/metric/fault/cleanup and full existing regressions plus Debug/x64 WinUI
-build pass; interactive keyboard-raw SendInput/HUMAN is NOT RUN by the agent.
+build pass. The user's keyboard-raw run reproduced missing SendInput keyboard
+callbacks in both observers (native AUTO 0, managed injected/tagged 0). Both keys
+reached the target down/up 1/1; raw software key/mouse 4/10, down/up 2/2 were complete.
+Human callbacks continued, PostMessage passed, faults/overflow/subscriptions and
+remaining registrations were zero. Managed mouse registration is not necessary
+to reproduce this condition; precise causality remains unresolved.
+
+## Receiver omitted: keyboard-split
+
+Change only receiver presence from keyboard-raw: same managed visible target,
+independent keyboard-only Hook receiver/thread, native sender, startup order,
+metric protocol and five-second countdown. No Raw Input source, message thread,
+registration or consumer is created. The omitted receiver includes these lifecycle
+differences; a changed result cannot by itself blame the Raw Input API.
+
+Follow the keyboard-raw steps above, starting A FIRST with ManagedTarget, then B:
+
+```powershell
+dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64 -- --hook-isolation-stage keyboard-split
+```
+
+Check distinct target/Hook thread IDs, keyboard installed/mouse absent, zero errors,
+rawInputRegistered=False and READY RAW INPUT OMITTED registrations=0. Paste HWND/PID
+into A. HUMAN BEFORE, B baseline, A next, focus B within five seconds/hands off,
+four AUTO rounds, B snapshot, HUMAN AFTER, A done, B snapshot/done remain unchanged.
+Return both full logs and ordinary-input/shortcut/interference confirmation.
+
+Both Hook observers should show four tagged/injected keyboard events in total;
+A checks each key down/up 1/1, target 1/1 and mouse five per SendInput round.
+B mouse Hook zero is expected. Raw counters are NOT COLLECTED, never inferred
+zero or software-source acceptance. All threads and registrations must clean up.
+If complete, investigate receiver/Hook interaction; if absent with target delivery,
+investigate managed target/Hook paths without requiring Raw Input. Neither branch
+proves a root cause. Agent lifecycle/protocol/fault/cleanup checks cover three
+no-source runs plus nine source runs; interactive AUTO is NOT RUN by the agent.
 
 ## Remaining acceptance work (2026-10-04)
 
@@ -366,7 +401,7 @@ build pass; interactive keyboard-raw SendInput/HUMAN is NOT RUN by the agent.
 | Human foreground/background input | User counters show observed input; explicit normal-operation confirmation remains needed |
 | Normal operation/shortcuts/window interaction | Human visual confirmation needed; counters cannot certify this |
 
-The next planned diagnostic is one keyboard-raw paired session. After a supported
+The next planned diagnostic is one keyboard-split paired session. After a supported
 repair, rerun the ORIGINAL raw-input-diagnostic (managed InputService sender),
 HUMAN BEFORE -> AUTO -> HUMAN AFTER with complete Hook/raw/target evidence,
 and relevant automated regressions. A simplified control passing alone is not

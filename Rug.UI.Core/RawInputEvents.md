@@ -255,12 +255,20 @@ Actual startup/protocol/fault/cleanup tests pass; the user's subsequent target-r
 session passed all four native rounds with complete marked Hook/raw/target evidence.
 Original SendInput acceptance remains blocked, while
 normal foreground/background/shortcut behavior needs explicit human confirmation.
-The next keyboard-raw comparison keeps those windows/threads/source/sender,
+The keyboard-raw comparison keeps those windows/threads/source/sender,
 installing only the managed keyboard Hook in the independent receiver thread.
 The mouse Hook stays absent; A retains native keyboard/mouse checks, B retains
 keyboard and raw/target evidence. Read-only audit found no proven ABI/layout/
 forwarding/lifetime defect, so callbacks and imports remain unchanged. Keyboard-only
-lifecycle tests pass; its interactive AUTO/HUMAN comparison is NOT RUN by the agent.
+lifecycle tests pass. The user's paired run reproduced missing automatic keyboard
+entry in both observers with only the managed keyboard Hook: native AUTO callbacks
+0, managed injected/tagged 0; target F8/B down/up 1/1 per round and raw software
+key/mouse 4/10, down/up 2/2 remained complete. Human callbacks continued and cleanup
+was clean. This does not locate a Hook-chain or receiver defect. The next
+keyboard-split control retains the target and independent keyboard Hook receiver,
+but creates no Raw Input source/registration/consumer. Omitted raw collection is
+not zero-candidate evidence. Real lifecycle/protocol/fault/cleanup checks cover
+both configurations; interactive no-source AUTO remains NOT RUN by the agent.
 
 Automated parsing/lifecycle/buffering and real native registration tests pass.
 The user's pre-repair same-session reproduction observed SendInput candidates=7
