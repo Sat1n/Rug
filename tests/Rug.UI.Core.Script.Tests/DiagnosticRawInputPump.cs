@@ -12,6 +12,7 @@ internal sealed class DiagnosticRawInputPump : IAsyncDisposable
     private readonly TaskCompletionSource _ended = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Thread _thread;
     private readonly bool _registerDevices;
+    private readonly bool _readPackets;
     private readonly RawInputDiagnostics.RawAggregate _aggregate = new();
     private int _started, _disposed;
     private long _unexpectedEvents;
@@ -19,7 +20,8 @@ internal sealed class DiagnosticRawInputPump : IAsyncDisposable
 
     internal sealed record Snapshot(long Generation, uint ThreadId, nint Hwnd, bool RegistrationEnabled,
         bool PumpReady, bool ThreadExited, long TimerMessages, long InputMessages, long DeviceMessages,
-        long UnexpectedEvents, string? Failure, RawInputDiagnostics.RawEvidence? Evidence);
+        long UnexpectedEvents, string? Failure, RawInputDiagnostics.RawEvidence? Evidence,
+        bool PacketReadingEnabled, long InputCleanupCalls);
     internal Snapshot Status
     {
         get
@@ -29,12 +31,15 @@ internal sealed class DiagnosticRawInputPump : IAsyncDisposable
             return new(_generation, p.ThreadId, p.Hwnd, p.RegistrationEnabled,
                 _ready.Task.IsCompletedSuccessfully && !_ended.Task.IsCompleted && failure is null,
                 _ended.Task.IsCompleted && !_thread.IsAlive, p.TimerMessages, p.InputMessages,
-                p.DeviceMessages, Interlocked.Read(ref _unexpectedEvents), failure, _registerDevices ? _aggregate.Read() : null);
+                p.DeviceMessages, Interlocked.Read(ref _unexpectedEvents), failure, _registerDevices && _readPackets ? _aggregate.Read() : null,
+                p.PacketReadingEnabled, p.InputCleanupCalls);
         }
     }
-    internal DiagnosticRawInputPump(bool registerDevices = false)
+    internal DiagnosticRawInputPump(bool registerDevices = false, bool readPackets = true)
     {
+        if (!registerDevices && !readPackets) throw new ArgumentException("Message-count control requires device registration.");
         _registerDevices = registerDevices;
+        _readPackets = readPackets;
         _thread = new Thread(Run) { IsBackground = true, Name = "Rug Raw Input receiver" };
     }
 
@@ -48,7 +53,7 @@ internal sealed class DiagnosticRawInputPump : IAsyncDisposable
         }
         return _ready.Task;
     }
-    // @shape Same receiver window/timer/loop, optional registrations; copied scalar aggregate only, no queue/consumer.
+    // @shape Same receiver window/timer/loop; optional registration or registered count-only control, no queue/consumer.
     // @source Rug.UI.Core/Native/WindowsRawInputReceiver.cs#class:WindowsRawInputReceiver
     private void Run()
     {
@@ -59,7 +64,8 @@ internal sealed class DiagnosticRawInputPump : IAsyncDisposable
                 if (!_registerDevices) Interlocked.Increment(ref _unexpectedEvents);
                 _aggregate.ObserveCopied(observation);
             }
-            if (_registerDevices) _receiver.Run(() => _ready.TrySetResult(), Receive, _stop.Token);
+            if (!_readPackets) _receiver.RunMessageCountDiagnostic(() => _ready.TrySetResult(), _stop.Token);
+            else if (_registerDevices) _receiver.Run(() => _ready.TrySetResult(), Receive, _stop.Token);
             else _receiver.RunUnregisteredDiagnostic(() => _ready.TrySetResult(), Receive, _stop.Token);
             if (!_stop.IsCancellationRequested) throw new InvalidOperationException("Diagnostic receiver pump exited unexpectedly");
         }

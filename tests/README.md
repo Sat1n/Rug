@@ -21,7 +21,7 @@ It builds separately, changes no C-ABI, stores no human key sequences and does
 not integrate takeover. User runs now include a passing paired session and a
 failing opposite order; see [evidence and remaining limits](NativeInputProbe/HookComparison.md).
 The [controlled stages](NativeInputProbe/ControlledStages.md) retain native sending
-while comparing threads, managed Hooks and [receiver registration/delivery](NativeInputProbe/ReceiverRegistrationControl.md).
+while comparing threads, managed Hooks and [receiver registration/packet processing/delivery](NativeInputProbe/ReceiverRegistrationControl.md).
 
 ## Layout
 

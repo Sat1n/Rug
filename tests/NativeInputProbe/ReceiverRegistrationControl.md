@@ -158,3 +158,66 @@ of new registrations from old disposal. Full existing regressions and Debug/x64
 WinUI build pass. Interactive keyboard-direct AUTO/HUMAN is NOT RUN by the agent.
 The original managed-sender diagnostic and real-human normal-operation acceptance
 remain open; no automatic takeover, emitter or production event-source changes.
+
+## Registered message-count control: keyboard-messages
+
+The user's keyboard-direct run reproduced missing automatic keyboard callbacks
+in both observers, with target down/up complete and direct raw software key/mouse
+4/10, down/up 2/2. Human callbacks continued and all threads/registrations cleaned
+up. Source publisher/queue/consumer are therefore not necessary in this reproduction;
+this does not identify the precise registered-receiver cause.
+
+keyboard-messages changes only packet processing from keyboard-direct: retain
+the actual receiver thread/window/timer, both 0x2100 registrations, ownership
+checks and owned-registration removal. Omit GetRawInputData, packet parsing,
+key/device tracking and observation callbacks (including device notifications).
+WM_INPUT/device/timer messages remain counted; DefWindowProc is still called for
+every WM_INPUT and the handler returns zero, preserving
+[foreground system cleanup](https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-input).
+The Core seam is internal; public Run always reads packets. No production receiver,
+emitter, Hook forwarding, C-ABI or takeover policy is weakened.
+
+Use fresh processes and unchanged elevation/external applications. A FIRST:
+
+~~~powershell
+& F:/Cardinal/Rug/Rug/tests/run_native_input_probe.ps1 -Mode ManagedTarget
+~~~
+
+At A's HWND/PID prompt, B SECOND:
+
+~~~powershell
+dotnet run --project F:/Cardinal/Rug/Rug/tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64 -- --hook-isolation-stage keyboard-messages
+~~~
+
+Check MESSAGES PUMP: RegistrationEnabled=True, PacketReadingEnabled=False,
+PumpReady=True, ThreadExited=False, Failure empty and Evidence empty/null.
+DIRECT REGISTRATIONS count=2, keyboardMouseOwned=True must still hold (the
+shared label denotes the same ownership check). Target/Hook/receiver thread IDs
+must differ; B keyboard Hook installed, mouse absent, errors zero. Paste B's
+MANAGED TARGET HWND/PID into A as 0xHANDLE PID.
+
+HUMAN BEFORE in B target and another app; B baseline, A next. Focus B target
+within five seconds, release keys/buttons, hands off AUTO; do not manually press
+F8/B. After four A rounds, B snapshot. HUMAN AFTER, A done; keep B alive until A
+exits, then B snapshot/done. Return both complete logs, ordinary-input/shortcut
+confirmation and any accidental AUTO interference.
+
+Preserve A's per-round Hook/target evidence, B's Hook deltas, and MESSAGES PUMP
+snapshots/MESSAGE DELTA. Input/device/cleanup totals are independently sampled;
+at final stopped snapshot InputCleanupCalls must equal InputMessages. Every raw
+software/candidate field is NOT COLLECTED, not zero; message totals cannot prove
+keyboard classification, so this control alone cannot pass software-source acceptance.
+Pump barriers prove only message-loop health. Final HWND/registrations zero,
+threads exited and no failures remain required.
+
+| Evidence | Direction |
+|---|---|
+| Both Hooks complete, target complete | Difference lies in omitted reading/parsing/tracking/callback path; split that path next |
+| Keyboard gap remains with target delivery and healthy pump | Registration/ownership/basic message-processing condition can reproduce without reading/classification |
+| Fault, incomplete target or interference | Inconclusive; repair evidence before causal inference |
+
+Automated coverage includes three count-only lifecycles, conflict rejection,
+generations, invalid foreground/sink handles without parsing, device counts,
+DefWindowProc call counts, ownership-loss faults and replacement-owner protection.
+Synthetic message tests are not software/HUMAN acceptance. Interactive paired
+AUTO is NOT RUN by the agent; original managed-sender closure remains required.

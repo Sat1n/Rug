@@ -26,6 +26,7 @@ a Hook, or alters production emitters. Both both-raw modes, target-raw and keybo
 | keyboard-split | Yes | Yes, plus same independent receiver thread | Yes | No | No |
 | keyboard-pump | Yes | Yes, plus Hook thread and unregistered receiver pump | Yes | No | No |
 | keyboard-direct | Yes | Yes, plus Hook thread and registered direct receiver | Yes | No | Yes, no source queue |
+| keyboard-messages | Yes | Yes, same registered receiver | Yes | No | Yes, messages only; raw evidence omitted |
 
 Use **fresh A and B processes for every stage**, in this order:
 
@@ -410,7 +411,11 @@ direct copied-observation counts, retaining no event-source queue/consumer:
 | Human foreground/background input | User counters show observed input; explicit normal-operation confirmation remains needed |
 | Normal operation/shortcuts/window interaction | Human visual confirmation needed; counters cannot certify this |
 
-The next planned diagnostic is one keyboard-direct paired session. After a supported
+The user's keyboard-direct session reproduced both Hook gaps with complete target
+and raw software key/mouse 4/10, down/up 2/2, excluding source queue/consumer necessity.
+Next run [keyboard-messages](ReceiverRegistrationControl.md#registered-message-count-control-keyboard-messages),
+retaining registration/ownership/cleanup while omitting packet processing.
+After a supported
 repair, rerun the ORIGINAL raw-input-diagnostic (managed InputService sender),
 HUMAN BEFORE -> AUTO -> HUMAN AFTER with complete Hook/raw/target evidence,
 and relevant automated regressions. A simplified control passing alone is not

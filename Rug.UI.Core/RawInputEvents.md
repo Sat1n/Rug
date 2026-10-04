@@ -287,7 +287,15 @@ diagnostic pump, aggregating copied observations directly without the event-sour
 queue/consumer/subscriptions. Its Hook/raw/target evidence is separate; no source
 Ready or software acceptance follows from startup. Real registration/conflict/
 fault/cleanup and direct aggregate tests cover this mode; AUTO remains NOT RUN by
-the agent. No input emitter, C-ABI, Hook forwarding or takeover changes.
+the agent. The user's keyboard-direct run reproduced both Hook gaps with complete
+target delivery and raw software key/mouse 4/10, down/up 2/2, excluding source
+queue/consumer necessity. keyboard-messages retains registration/ownership/pump
+and WM_INPUT DefWindowProc cleanup, but omits packet reading, parsing, tracking
+and observation callbacks. Raw evidence is NOT COLLECTED, never successful source
+attribution. Message/cleanup counts, thread faults and ownership remain observable;
+real lifecycle tests cover conflicts, omitted parsing and replacement-owner cleanup.
+See [paired steps and branches](../tests/NativeInputProbe/ReceiverRegistrationControl.md#registered-message-count-control-keyboard-messages).
+No input emitter, C-ABI, Hook forwarding or takeover changes.
 
 Automated parsing/lifecycle/buffering and real native registration tests pass.
 The user's pre-repair same-session reproduction observed SendInput candidates=7

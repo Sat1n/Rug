@@ -21,6 +21,7 @@ internal static class RawInputTests
         await SplitProbeLifecycleAsync();
         await UnregisteredPumpLifecycleAsync();
         await DirectPumpLifecycleAsync();
+        await MessagePumpLifecycleAsync();
         await LifecycleAsync();
         await ConsumersAsync();
         await NativeLifecycleAsync();
@@ -89,6 +90,9 @@ internal static class RawInputTests
         Check(RawInputDiagnostics.IsolationStage("keyboard-direct") == (true, true, false)
             && RawInputDiagnostics.UsesSplitProbe("keyboard-direct") && !RawInputDiagnostics.UsesRawInput("keyboard-direct"),
             "direct pump changed Hook selection or creates an event-source queue");
+        Check(RawInputDiagnostics.IsolationStage("keyboard-messages") == (true, true, false)
+            && RawInputDiagnostics.UsesSplitProbe("keyboard-messages") && !RawInputDiagnostics.UsesRawInput("keyboard-messages"),
+            "message-only registered control changed Hook selection or creates an event source");
         var aggregate = new RawInputDiagnostics.RawAggregate();
         var baseline = aggregate.Read();
         aggregate.Observe(new(1, 1, 1, new(InputEventKind.Keyboard, 1, false, ExtraInformation: InputObservation.RugSoftwareInputTag)));
@@ -322,6 +326,84 @@ internal static class RawInputTests
                 "direct pump comparison leaked registrations/threads");
         }
         Console.WriteLine("Registered direct receiver readiness, ownership conflict, generations, faults and cleanup passed (3 lifecycles; software AUTO not inferred)");
+    }
+    // @shape Three registered count-only lifecycles; no native packet parsing, tracking or observations.
+    // @source Rug.UI.Core/Native/WindowsRawInputReceiver.cs#class:WindowsRawInputReceiver
+    private static async Task MessagePumpLifecycleAsync()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        long generation = 0;
+        for (int run = 0; run < 3; run++)
+        {
+            using var target = new RawInputDiagnosticWindow(false, false);
+            using var probe = new RawInputDiagnosticWindow(true, false, messageOnly: true);
+            await Task.WhenAll(target.Ready.Task, probe.Ready.Task).WaitAsync(TimeSpan.FromSeconds(5));
+            await using var pump = new DiagnosticRawInputPump(registerDevices: true, readPackets: false);
+            await Task.WhenAll(pump.StartAsync(), pump.StartAsync()).WaitAsync(TimeSpan.FromSeconds(5));
+            var ready = pump.Status;
+            var owned = WindowsRawInputReceiver.Registrations().Where(d => d.Page == 1 && d.Usage is 2 or 6).ToArray();
+            Check(ready is { RegistrationEnabled: true, PacketReadingEnabled: false, Evidence: null, PumpReady: true, Failure: null }
+                && ready.Generation > generation && ready.Hwnd != 0, "count-only readiness or evidence incorrect");
+            generation = ready.Generation;
+            Check(owned.Length == 2 && owned.All(d => d.Target == ready.Hwnd && (d.Flags & ~0x2000u) == 0x100)
+                && new[] { ready.ThreadId, target.Status.InstallThreadId, probe.Status.InstallThreadId }.Distinct().Count() == 3,
+                "count-only registration flags or thread topology changed");
+            await Until(() => pump.Status.TimerMessages > 0);
+            target.PostTargetMessagesForTest(); await target.SynchronizeAsync(); await probe.SynchronizeAsync();
+            Check(target.Counts.KeyDown > 0 && target.Counts.KeyUp > 0 && probe.Status.KeyboardInstalled && !probe.Status.MouseInstalled,
+                "count-only target protocol or Hook selection changed");
+            long inputs = pump.Status.InputMessages, cleanups = pump.Status.InputCleanupCalls, devices = pump.Status.DeviceMessages;
+            // Invalid native handles would fail ordinary parsing. Both foreground and sink messages
+            // must reach DefWindowProc without reads; invalid device payload must not create observations.
+            Check(WindowsRawInputReceiver.PostMessageW(ready.Hwnd, 0xff, 0, 0)
+                && WindowsRawInputReceiver.PostMessageW(ready.Hwnd, 0xff, 1, 0)
+                && WindowsRawInputReceiver.PostMessageW(ready.Hwnd, 0xfe, 99, 0), "could not post count-only messages");
+            await pump.SynchronizeAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            await Until(() => pump.Status.InputCleanupCalls >= cleanups + 2 && pump.Status.DeviceMessages >= devices + 1);
+            Check(pump.Status.InputMessages >= inputs + 2
+                && pump.Status is { PumpReady: true, Failure: null, UnexpectedEvents: 0, Evidence: null },
+                "count-only parsed malformed data, skipped cleanup or published fabricated raw evidence");
+            if (run == 1)
+            {
+                await using var conflict = new DiagnosticRawInputPump(registerDevices: true, readPackets: false);
+                try { await conflict.StartAsync(); throw new Exception("count-only control overwrote live registrations"); } catch (RawInputException) { }
+                await conflict.DisposeAsync();
+                Check(conflict.Status is { ThreadExited: true, PumpReady: false, Hwnd: 0 } && conflict.Status.Failure is not null
+                    && WindowsRawInputReceiver.Registrations().Where(d => d.Page == 1 && d.Usage is 2 or 6).SequenceEqual(owned),
+                    "count-only conflict fault/cleanup disturbed existing owner");
+            }
+            if (run == 2)
+            {
+                // Simulate a later component replacing registrations; failed old receiver must not remove them.
+                var replacement = owned.Select(d => new WindowsRawInputReceiver.Device { Page = d.Page, Usage = d.Usage, Flags = d.Flags, Target = target.Ready.Task.Result }).ToArray();
+                try
+                {
+                    Check(WindowsRawInputReceiver.RegisterRawInputDevices(replacement, 2, (uint)Marshal.SizeOf<WindowsRawInputReceiver.Device>()), "could not replace registrations");
+                    Check(WindowsRawInputReceiver.PostMessageW(ready.Hwnd, 0x113, 1, 0), "could not post ownership check");
+                    await Until(() => pump.Status.Failure is not null);
+                    await pump.DisposeAsync();
+                    Check(pump.Status is { ThreadExited: true, PumpReady: false, Hwnd: 0, Evidence: null }
+                        && pump.Status.Failure!.Contains("ownership changed")
+                        && WindowsRawInputReceiver.Registrations().Where(d => d.Page == 1 && d.Usage is 2 or 6).SequenceEqual(replacement),
+                        "count-only ownership loss hidden or removed replacement registrations");
+                }
+                finally
+                {
+                    var remove = replacement.Select(d => new WindowsRawInputReceiver.Device { Page = d.Page, Usage = d.Usage, Flags = 1 }).ToArray();
+                    Check(WindowsRawInputReceiver.RegisterRawInputDevices(remove, 2, (uint)Marshal.SizeOf<WindowsRawInputReceiver.Device>()), "replacement cleanup failed");
+                }
+            }
+            await pump.DisposeAsync(); await pump.DisposeAsync();
+            Check(pump.Status is { ThreadExited: true, PumpReady: false, Hwnd: 0, Evidence: null }
+                && pump.Status.InputCleanupCalls == pump.Status.InputMessages && (run == 2 || pump.Status.Failure is null),
+                "count-only cleanup failed or WM_INPUT missed DefWindowProc");
+            try { await pump.StartAsync(); throw new Exception("disposed count-only control restarted"); } catch (ObjectDisposedException) { }
+            probe.Dispose(); target.Dispose();
+            Check(!WindowsRawInputReceiver.Registrations().Any(d => d.Page == 1 && d.Usage is 2 or 6)
+                && probe.Status is { ThreadExited: true, Failure: null } && target.Status is { ThreadExited: true, Failure: null },
+                "count-only lifecycle leaked registrations or threads");
+        }
+        Console.WriteLine("Registered message-only receiver, omitted parsing/evidence, WM_INPUT cleanup, conflicts, ownership loss and generations passed (3 lifecycles; AUTO not inferred)");
     }
     private static byte[] Packet(uint type, int pointerSize, int body)
     {

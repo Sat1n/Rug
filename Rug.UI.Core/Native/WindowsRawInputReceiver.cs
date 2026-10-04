@@ -20,15 +20,17 @@ internal sealed class WindowsRawInputReceiver : IRawInputReceiver
     private Action<InputObservation>? _receive;
     private bool _stopRequested;
     private bool _registrationEnabled = true;
+    private bool _readPackets = true;
     private uint _threadId;
-    private long _timerMessages, _inputMessages, _deviceMessages;
+    private long _timerMessages, _inputMessages, _deviceMessages, _inputCleanupCalls;
 
     internal sealed record PumpSnapshot(uint ThreadId, nint Hwnd, bool RegistrationEnabled,
-        long TimerMessages, long InputMessages, long DeviceMessages);
+        long TimerMessages, long InputMessages, long DeviceMessages, bool PacketReadingEnabled, long InputCleanupCalls);
     internal PumpSnapshot DiagnosticSnapshot
     {
         get { lock (_barrierGate) return new(_threadId, _hwnd, _registrationEnabled,
-            Interlocked.Read(ref _timerMessages), Interlocked.Read(ref _inputMessages), Interlocked.Read(ref _deviceMessages)); }
+            Interlocked.Read(ref _timerMessages), Interlocked.Read(ref _inputMessages), Interlocked.Read(ref _deviceMessages),
+            _readPackets, Interlocked.Read(ref _inputCleanupCalls)); }
     }
 
     internal WindowsRawInputReceiver() => _proc = HandleMessage;
@@ -55,14 +57,18 @@ internal sealed class WindowsRawInputReceiver : IRawInputReceiver
     internal void RunUnregisteredDiagnostic(Action pumpReady, Action<InputObservation> receive, CancellationToken cancellationToken)
         => RunCore(pumpReady, receive, cancellationToken, registerDevices: false);
 
-    /// <summary>@shape registered production receiver or internal unregistered diagnostic pump; @source Win32 RegisterRawInputDevices/WM_INPUT</summary>
-    private void RunCore(Action ready, Action<InputObservation> receive, CancellationToken cancellationToken, bool registerDevices)
+    // Registered message-count control only; not capture readiness and no raw classification evidence.
+    internal void RunMessageCountDiagnostic(Action pumpReady, CancellationToken cancellationToken)
+        => RunCore(pumpReady, null, cancellationToken, registerDevices: true, readPackets: false);
+
+    /// <summary>@shape production packet receiver or internal unregistered/count-only pump; @source Win32 RegisterRawInputDevices/WM_INPUT</summary>
+    private void RunCore(Action ready, Action<InputObservation>? receive, CancellationToken cancellationToken, bool registerDevices, bool readPackets = true)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Raw Input requires Windows.");
         string name = "RugRawInput" + Guid.NewGuid().ToString("N");
         nint instance = GetModuleHandleW(null);
         bool registeredClass = false;
-        lock (_barrierGate) { _threadId = GetCurrentThreadId(); _registrationEnabled = registerDevices; }
+        lock (_barrierGate) { _threadId = GetCurrentThreadId(); _registrationEnabled = registerDevices; _readPackets = readPackets; }
         _receive = receive;
         try
         {
@@ -137,8 +143,8 @@ internal sealed class WindowsRawInputReceiver : IRawInputReceiver
                 if (message == 0xff) Interlocked.Increment(ref _inputMessages);
                 if (message == 0xfe) Interlocked.Increment(ref _deviceMessages);
                 if (_registrationEnabled) lock (RegistrationGate) VerifyOwnership(hwnd);
-                if (message == 0xff) Read(lParam, (wParam & 0xff) == 0);
-                if (message == 0xfe)
+                if (message == 0xff && _readPackets) Read(lParam, (wParam & 0xff) == 0);
+                if (message == 0xfe && _readPackets)
                 {
                     ulong device = unchecked((ulong)(nuint)lParam);
                     if (wParam is not (1 or 2)) throw new RawInputException(InputEventSourceFault.InvalidData, "Invalid device notification.");
@@ -149,7 +155,7 @@ internal sealed class WindowsRawInputReceiver : IRawInputReceiver
         }
         catch (Exception error) { _failure ??= error; PostQuitMessage(0); }
         // RIM_INPUT requires DefWindowProc cleanup, even on malformed data or faults.
-        if (message == 0xff) { DefWindowProcW(hwnd, message, wParam, lParam); return 0; }
+        if (message == 0xff) { DefWindowProcW(hwnd, message, wParam, lParam); Interlocked.Increment(ref _inputCleanupCalls); return 0; }
         return DefWindowProcW(hwnd, message, wParam, lParam);
     }
     private void Read(nint handle, bool foreground)
