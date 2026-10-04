@@ -11,7 +11,7 @@ tags: [diagnostics, hooks, isolation]
 This is diagnosis, not Raw Input or takeover acceptance. The native Human probe
 remains the fixed sender/target/observer; the second managed process adds exactly
 one selected cumulative stage. It never sends input, automatically reinstalls
-a Hook, or alters production emitters. Only both-raw enables Raw Input.
+a Hook, or alters production emitters. Both both-raw modes enable Raw Input.
 
 | Stage | Managed Rug.Core load | Managed target/message thread | Keyboard Hook | Mouse Hook | Raw Input |
 |---|---|---|---|---|---|
@@ -20,6 +20,7 @@ a Hook, or alters production emitters. Only both-raw enables Raw Input.
 | keyboard | Yes | Yes | Yes | No | No |
 | both | Yes | Yes | Yes | Yes | No |
 | both-raw | Yes | Yes | Yes | Yes | Yes |
+| both-raw-split | Yes | Yes, plus separate Hook thread | Yes | Yes | Yes |
 
 Use **fresh A and B processes for every stage**, in this order:
 
@@ -89,8 +90,9 @@ comparison in these stages remains NOT RUN by the agent; user operation required
 User load/target/keyboard/both sessions all passed native F8/B and PostMessage
 rounds. In keyboard/both, managed Hook evidence included four tagged injected
 keyboard events; both also counted ten tagged injected mouse events. This does
-not resolve the original failing managed-sender scenario. both-raw human/native
-comparison is pending; its scripted startup/snapshots/cleanup is not acceptance.
+not resolve the original failing managed-sender scenario. The subsequent user's
+both-raw/native-target comparison passed as recorded below; scripted startup/
+snapshots/cleanup alone remains insufficient for acceptance.
 
 Agent verification: real both-raw scripted baseline/snapshot/done reached Ready,
 reported both Hooks plus Raw Input, then Stopped with zero subscribers and zero
@@ -100,7 +102,7 @@ aggregate tests. Existing Gateway/grant/arbitration/Raw Input/Lua/scheduler suit
 and Debug/x64 WinUI build passed (zero warnings/errors). No native sender or human
 actions were used in the scripted both-raw check; that comparison remains NOT RUN.
 
-## Native sender with managed target (only target changes)
+## Native sender with managed target
 
 The user's both-raw/native-target session passed all four native rounds, both
 Hooks counted four tagged keys/ten tagged mouse events, and Raw Input counted
@@ -154,4 +156,82 @@ mouse down/up 2/4 after the two native ABI PostMessage rounds; cleanup had zero
 subscriptions/registrations. The rounds were INTERFERED / NOT RUN because of
 untagged mouse activity; SendInput was NOT RUN for lack of foreground and HUMAN
 was NOT RUN. This verifies transport/delivery only, not software/human acceptance.
-The managed-target four-round manual comparison remains pending.
+The user's subsequent managed-target run reproduced missing automatic keyboard
+Hook entry in both observers. Native F8/B per-round callback/injected/tagged
+counts were zero, while each managed target key down/up was 1/1. Managed Hook
+software keyboard counts were zero, mouse tagged/injected totals ten. Raw Input
+retained software keyboard/mouse 4/10 and key down/up 2/2; both PostMessage rounds
+passed. Human callbacks resumed without reinstallation; source fault/overflow/
+consumer errors and stop subscriptions/registrations were zero. Thus managed
+InputService/Task.Run is not necessary to reproduce the symptom. Target/foreground/
+thread context and cross-process metric queries remain investigation variables;
+this does not prove a CLR, Raw Input API or permanent-Hook-removal defect.
+
+## Separate managed target and Hook threads
+
+Retain the latest failing native ManagedTarget combination and change only B's
+diagnostic topology to **both-raw-split**. The visible target keeps the same class,
+title, WndProc and scalar metric queries. Both managed Hooks now install in a
+dedicated message-only window/thread using the same counter/parser/forwarding
+callbacks. Raw Input still uses its own unchanged receiver and consumer, starting
+after the two Hook installations. No sender, test key, input tag, ignore interval,
+Hook reinstallation, input permission or takeover behavior changes. Message-only
+windows use HWND_MESSAGE and are invisible, as documented by
+[Microsoft](https://learn.microsoft.com/en-us/windows/win32/winmsg/window-features#message-only-windows).
+The added thread/window is the controlled topology change, not a proven repair.
+
+Close all old diagnostic processes. Keep both terminals at the same elevation
+and external applications in the same state as the previous failing run.
+
+1. In repository root, start A FIRST with the unchanged command:
+
+   ```powershell
+   ./tests/run_native_input_probe.ps1 -Mode ManagedTarget
+   ```
+
+   Wait for its HWND/PID prompt (its native Hooks are already installed).
+2. Start B:
+
+   ```powershell
+   dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64 -- --hook-isolation-stage both-raw-split
+   ```
+
+   Wait for ISOLATION READY. THREAD TOPOLOGY must print different targetThreadId
+   and hookThreadId. READY TARGET has no Hooks; READY has both Hooks installed,
+   errors zero. These are deliberately different probe generations, stable for
+   each thread across the run. Raw Input must be Ready/fault None. Paste B's
+   MANAGED TARGET hwnd and processId into A as `0xHANDLE PID`.
+3. Follow A HUMAN BEFORE using B's visible white window and another app. Press/
+   release B and F8, move/click/scroll and verify ordinary shortcuts work.
+   Enter baseline in B, then next in A. During the unchanged five-second
+   countdown activate B's white window, release all keys/buttons and leave
+   input untouched throughout AUTO. Do not manually press B/F8 during AUTO.
+4. Once A finishes all four rounds, enter snapshot in B. Perform HUMAN AFTER
+   on the same live windows/source, including keyboard/mouse and shortcuts.
+   Enter done in A; finally enter snapshot then done in B. Keep B alive until
+   A finishes, and return both COMPLETE outputs, including cleanup lines.
+
+Expected complete software evidence: native per-round SendInput key down/up 1/1,
+tagged injected keyboard at least two and mouse at least five, all four rounds
+PASS. B's first snapshot should retain software keyboard/mouse 4/10 and software
+key down/up 2/2; its Hook tagged/injected keyboard/mouse totals should include
+4/10. Candidate deltas include terminal/focus changes and cannot alone judge
+AUTO interference. Hooks/target/source faults, parse errors or interference make
+the comparison inconclusive. Thread topology status/barriers cannot prove Hooks
+remain effective. Both threads must exit, with zero source subscribers/registrations.
+
+| Result against previous shared-thread failure | Next branch |
+|---|---|
+| Both observers regain all marked keyboard events | Correlation with shared target/Hook thread; repeat before production repair |
+| Both still miss keyboard events, target and raw complete | Separation is insufficient; retain target/foreground/query/chain hypotheses |
+| Only one observer receives marked keyboard events | Compare Hook order, thread and forwarding-chain evidence |
+| Target/raw delivery, foreground, fault or interference is incomplete | No root-cause inference; preserve evidence and rerun controlled conditions |
+
+Agent checks: full script/Gateway/grant/input-arbitration/cache regressions and
+Debug/x64 WinUI build passed, zero warnings/errors. Three real split lifecycles
+verified distinct threads, target message protocol/delivery, observable post-ready
+Hook fault with live target/source, and cleanup with zero registrations/subscribers.
+Scripted baseline/snapshot/done reached Ready and clean exit for both threads;
+it emitted no input and supplies no software/human acceptance. Interactive
+split-thread SendInput/HUMAN comparison is **NOT RUN / pending user operation**.
+Original shared-thread failure and automatic takeover integration remain open.

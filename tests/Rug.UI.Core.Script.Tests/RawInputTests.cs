@@ -18,6 +18,7 @@ internal static class RawInputTests
         Parse();
         ProbeCounters();
         await ProbeLifecycleAsync();
+        await SplitProbeLifecycleAsync();
         await LifecycleAsync();
         await ConsumersAsync();
         await NativeLifecycleAsync();
@@ -73,6 +74,7 @@ internal static class RawInputTests
         Check(RawInputDiagnostics.IsolationStage("keyboard") == (true, true, false), "keyboard stage enables mouse hook");
         Check(RawInputDiagnostics.IsolationStage("both") == (true, true, true), "both stage mapping incorrect");
         Check(RawInputDiagnostics.IsolationStage("both-raw") == (true, true, true), "both-raw changed hook selection");
+        Check(RawInputDiagnostics.IsolationStage("both-raw-split") == (true, true, true), "split stage changed requested components");
         var aggregate = new RawInputDiagnostics.RawAggregate();
         var baseline = aggregate.Read();
         aggregate.Observe(new(1, 1, 1, new(InputEventKind.Keyboard, 1, false, ExtraInformation: InputObservation.RugSoftwareInputTag)));
@@ -117,6 +119,48 @@ internal static class RawInputTests
         await next.SynchronizeAsync(); // Proves pump/barrier only, not keyboard hook health.
         next.Dispose();
         Check(next.Status is { ThreadExited: true, Failure: null, ExitReason: "WM_QUIT" }, "normal probe cleanup not recorded");
+    }
+    private static async Task SplitProbeLifecycleAsync()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        for (int run = 0; run < 3; run++)
+        {
+            using var target = new RawInputDiagnosticWindow(false, false);
+            using var probe = new RawInputDiagnosticWindow(messageOnly: true);
+            await Task.WhenAll(target.Ready.Task, probe.Ready.Task).WaitAsync(TimeSpan.FromSeconds(5));
+            Check(target.Status.InstallThreadId != probe.Status.InstallThreadId, "split target and Hook share a thread");
+            Check(target.Status is { KeyboardInstalled: false, MouseInstalled: false }
+                && probe.Status is { KeyboardInstalled: true, MouseInstalled: true }, "split Hook ownership incorrect");
+            await using var source = new RawInputEventSource();
+            source.InputReceived += (_, _) => { };
+            await source.StartAsync();
+            Check(source.Snapshot is { State: InputEventSourceState.Ready, Subscribers: 1 }, "split Raw Input did not become ready");
+            Check(target.QueryTargetMetricForTest(0) == RawInputDiagnosticWindow.TargetMetricMagic, "split target protocol changed");
+            var before = target.Counts;
+            target.PostTargetMessagesForTest();
+            await target.SynchronizeAsync(); await probe.SynchronizeAsync(); await source.SynchronizeAsync();
+            Check(target.Counts.KeyDown > before.KeyDown && target.Counts.KeyUp > before.KeyUp
+                && target.Counts.MouseDown > before.MouseDown && target.Counts.MouseUp > before.MouseUp
+                && target.Counts.Move > before.Move, "split target lost its message counters");
+            Check(target.Counts.Keyboard.CallbackTotal == 0 && target.Counts.Mouse.CallbackTotal == 0,
+                "target unexpectedly owns Hook counters");
+            if (run == 2)
+            {
+                probe.InjectThreadFailureForTest();
+                var failed = await probe.Completion.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                Check(failed is { ThreadExited: true, ExitReason: "Fault" } && failed.Failure!.Contains("Controlled"),
+                    "split Hook post-start failure hidden");
+                await target.SynchronizeAsync(); await source.SynchronizeAsync();
+                Check(!target.Status.ThreadExited && source.Snapshot.State == InputEventSourceState.Ready,
+                    "split Hook fault incorrectly used as target/source health");
+            }
+            await source.StopAsync(); probe.Dispose(); target.Dispose();
+            Check(source.Snapshot is { Subscribers: 0, Buffered: 0, Fault: InputEventSourceFault.None }, "split source cleanup failed");
+            Check(target.Status is { ThreadExited: true, Failure: null, ExitReason: "WM_QUIT" }, "split target cleanup failed");
+            Check(probe.Status.ThreadExited && (run == 2 || probe.Status is { Failure: null, ExitReason: "WM_QUIT" }), "split Hook cleanup failed");
+            Check(!WindowsRawInputReceiver.Registrations().Any(d => d.Page == 1 && d.Usage is 2 or 6), "split registration leaked");
+        }
+        Console.WriteLine("Split target/Hook threads, target protocol, observable Hook fault and repeated Raw Input cleanup passed");
     }
     private static byte[] Packet(uint type, int pointerSize, int body)
     {

@@ -78,31 +78,45 @@ internal static class RawInputDiagnostics
         "keyboard" => (true, true, false),
         "both" => (true, true, true),
         "both-raw" => (true, true, true),
-        _ => throw new ArgumentException("Use --hook-isolation-stage load|target|keyboard|both|both-raw")
+        "both-raw-split" => (true, true, true),
+        _ => throw new ArgumentException("Use --hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split")
     };
-    // @shape One fresh process per stage; only both-raw registers Raw Input, never emits/reinstalls Hooks.
+    // @shape One fresh process per stage; both-raw[-split] registers Raw Input, never emits/reinstalls Hooks.
     // @source Existing native sender stays unchanged: tests/NativeInputProbe/main.cpp#class:CoreInput
     internal static async Task RunIsolationAsync(string stage)
     {
         var selection = IsolationStage(stage); // Validate before DLL/window side effects.
         if (!LoadNative()) { Environment.ExitCode = 2; return; }
-        using var window = selection.Target ? new RawInputDiagnosticWindow(selection.Keyboard, selection.Mouse) : null;
-        await using var source = stage == "both-raw" ? new RawInputEventSource() : null;
+        bool split = stage == "both-raw-split";
+        using var window = selection.Target ? new RawInputDiagnosticWindow(selection.Keyboard && !split, selection.Mouse && !split) : null;
+        // Message-only receiver uses the unchanged callback/parser/forwarding implementation.
+        using var separateProbe = split ? new RawInputDiagnosticWindow(messageOnly: true) : null;
+        var probe = separateProbe ?? window;
+        await using var source = stage is "both-raw" or "both-raw-split" ? new RawInputEventSource() : null;
+        RawInputDiagnosticWindow.Counters? ReadCounts()
+        {
+            if (window is null) return null;
+            var target = window.Counts;
+            return separateProbe is null ? target : target with { Keyboard = separateProbe.Counts.Keyboard, Mouse = separateProbe.Counts.Mouse };
+        }
         var aggregate = new RawAggregate();
         var previousRaw = aggregate.Read();
         EventHandler<InputSourceEvent> onInput = (_, e) => aggregate.Observe(e);
         try
         {
             if (window is not null) await window.Ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            if (stage == "both-raw")
+            if (separateProbe is not null) await separateProbe.Ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            if (source is not null)
                 Console.WriteLine($"MANAGED TARGET: hwnd=0x{(nuint)window!.Ready.Task.Result:X} processId={Environment.ProcessId} (diagnostic window only)");
+            if (split)
+                Console.WriteLine($"THREAD TOPOLOGY: targetThreadId={window!.Status.InstallThreadId} hookThreadId={probe!.Status.InstallThreadId} split=True");
             if (source is not null)
             {
                 source.InputReceived += onInput;
                 // Keep both Hook registrations before the only added component.
                 await source.StartAsync();
             }
-            var previous = window?.Counts;
+            var previous = ReadCounts();
             async Task Snapshot(string label)
             {
                 if (source is not null)
@@ -125,8 +139,10 @@ internal static class RawInputDiagnostics
                 }
                 Console.WriteLine($"ISOLATION {label}: stage={stage} processId={Environment.ProcessId} target={selection.Target} keyboardRequested={selection.Keyboard} mouseRequested={selection.Mouse} rawInputRegistered={source?.Snapshot.State == InputEventSourceState.Ready} emitsInput=False");
                 if (window is null) return;
-                await window.SynchronizeAsync(); PrintProbe(window, label);
-                var now = window.Counts;
+                await window.SynchronizeAsync();
+                if (separateProbe is not null) { await separateProbe.SynchronizeAsync(); PrintProbe(window, label + " TARGET"); }
+                PrintProbe(probe!, label);
+                var now = ReadCounts()!;
                 PrintHook(label + " keyboard DELTA", now.Keyboard.Delta(previous!.Keyboard));
                 PrintHook(label + " mouse DELTA", now.Mouse.Delta(previous.Mouse));
                 Console.WriteLine($"{label} target DELTA: move={now.Move - previous.Move} mouseDown/Up={now.MouseDown - previous.MouseDown}/{now.MouseUp - previous.MouseUp} keyDown/Up={now.KeyDown - previous.KeyDown}/{now.KeyUp - previous.KeyUp}");
@@ -152,7 +168,7 @@ internal static class RawInputDiagnostics
             if (source is not null)
             {
                 try { await source.StopAsync(); Print(source, "ISOLATION RAW STOPPED"); }
-                finally { source.InputReceived -= onInput; window?.Dispose(); }
+                finally { source.InputReceived -= onInput; try { separateProbe?.Dispose(); } finally { window?.Dispose(); } }
                 if (source.Snapshot.Fault != InputEventSourceFault.None) Environment.ExitCode = 2;
                 Console.WriteLine($"Keyboard/mouse registrations remaining in this process: {WindowsRawInputReceiver.Registrations().Count(d => d.Page == 1 && d.Usage is 2 or 6)}");
             }
@@ -160,6 +176,11 @@ internal static class RawInputDiagnostics
             {
                 window.Dispose(); PrintProbe(window, "ISOLATION STOPPED");
                 if (window.Status.Failure is not null) Environment.ExitCode = 2;
+            }
+            if (separateProbe is not null)
+            {
+                separateProbe.Dispose(); PrintProbe(separateProbe, "ISOLATION HOOK STOPPED");
+                if (separateProbe.Status.Failure is not null) Environment.ExitCode = 2;
             }
             Console.WriteLine("ISOLATION finished; no software/human acceptance inferred from pump health.");
         }

@@ -77,7 +77,7 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
     private readonly HookCounter _keyCounts = new(), _mouseCounts = new();
     public readonly TaskCompletionSource<nint> Ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Thread _thread;
-    private readonly bool _installKeyboard, _installMouse;
+    private readonly bool _installKeyboard, _installMouse, _messageOnly;
     private readonly WindowsRawInputReceiver.WindowProc _proc;
     private readonly HookProc _keyboard, _mouse;
     private readonly System.Collections.Concurrent.ConcurrentQueue<TaskCompletionSource> _barriers = new();
@@ -85,13 +85,13 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
     private long _move, _down, _up, _keyDown, _keyUp;
     public Counters Counts => new(Interlocked.Read(ref _move), Interlocked.Read(ref _down), Interlocked.Read(ref _up),
         Interlocked.Read(ref _keyDown), Interlocked.Read(ref _keyUp), _keyCounts.Snapshot, _mouseCounts.Snapshot);
-    public RawInputDiagnosticWindow(bool installKeyboard = true, bool installMouse = true)
+    public RawInputDiagnosticWindow(bool installKeyboard = true, bool installMouse = true, bool messageOnly = false)
     {
-        _installKeyboard = installKeyboard; _installMouse = installMouse;
+        _installKeyboard = installKeyboard; _installMouse = installMouse; _messageOnly = messageOnly;
         _proc = Message;
         _keyboard = (code, w, l) => Hook(code, w, l, true);
         _mouse = (code, w, l) => Hook(code, w, l, false);
-        _thread = new Thread(Run) { IsBackground = true, Name = "Rug raw diagnostics isolated window" }; _thread.Start();
+        _thread = new Thread(Run) { IsBackground = true, Name = messageOnly ? "Rug diagnostic Hook receiver" : "Rug raw diagnostics isolated window" }; _thread.Start();
     }
     private nint Hook(int code, nuint w, nint l, bool keyboard)
     {
@@ -147,7 +147,8 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
             var wc = new WindowClass { Proc = Marshal.GetFunctionPointerForDelegate(_proc), Name = name, Instance = instance };
             if (RegisterClassW(ref wc) == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError(), "Diagnostic window registration failed");
             registered = true;
-            _hwnd = CreateWindowExW(0, name, "Rug Raw Input diagnostics - isolated input target", 0x00cf0000, 300, 200, 440, 300, 0, 0, instance, 0);
+            _hwnd = CreateWindowExW(0, name, "Rug Raw Input diagnostics - isolated input target", _messageOnly ? 0u : 0x00cf0000u,
+                300, 200, 440, 300, _messageOnly ? (nint)(-3) : 0, 0, instance, 0);
             if (_hwnd == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError(), "Diagnostic window creation failed");
             if (_installKeyboard)
             {
@@ -163,7 +164,8 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
                 CheckHookInstallation(_mouseHook, _mouseInstallError, "Mouse hook");
                 Volatile.Write(ref _mouseInstalled, 1);
             }
-            ShowWindow(_hwnd, 5); Ready.SetResult(_hwnd);
+            if (!_messageOnly) ShowWindow(_hwnd, 5);
+            Ready.SetResult(_hwnd);
             int status;
             while ((status = GetMessageW(out var m, 0, 0, 0)) > 0) { if (m.Id == 0x8002) throw new InvalidOperationException("Controlled diagnostic thread failure"); TranslateMessage(ref m); DispatchMessageW(ref m); }
             if (status < 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError(), "Diagnostic message pump failed");

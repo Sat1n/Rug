@@ -20,6 +20,8 @@ process. Run `./tests/run_native_input_probe.ps1 -Mode Test` or `-Mode Human`.
 It builds separately, changes no C-ABI, stores no human key sequences and does
 not integrate takeover. User runs now include a passing paired session and a
 failing opposite order; see [evidence and remaining limits](NativeInputProbe/HookComparison.md).
+The [controlled stages](NativeInputProbe/ControlledStages.md) retain native sending
+while comparing managed targets with shared versus separate Hook threads.
 
 ## Layout
 

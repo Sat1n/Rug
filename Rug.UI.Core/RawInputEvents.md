@@ -232,6 +232,19 @@ this is not established as the cause on this host.
 
 ## Current evidence and support boundary
 
+The opt-in both-raw-split controlled stage moves the managed diagnostic Hooks to
+their own message-only window/thread; the visible managed target, metric protocol,
+Raw Input source and native sender remain unchanged. This receiver is not the Raw
+Input receiver. Both selected Hooks must become ready before source startup.
+Target and Hook generations/thread IDs, failures and exits are printed separately;
+snapshots combine target message counts with independent Hook counters. The old
+both-raw mode remains available. Neither mode changes normal application startup.
+See [exact two-terminal steps and evidence](../tests/NativeInputProbe/ControlledStages.md).
+Actual distinct threads, target metric delivery, post-ready Hook fault isolation
+and repeated source/registration/subscription cleanup pass automated checks;
+interactive split-thread SendInput comparison is NOT RUN pending user operation.
+This is a diagnostic topology comparison, not a confirmed keyboard-probe repair.
+
 Automated parsing/lifecycle/buffering and real native registration tests pass.
 The user's pre-repair same-session reproduction observed SendInput candidates=7
 (keyboard 2, mouse 5), zeroDevice=7, extra-info=0, unflagged probe=0 and injected

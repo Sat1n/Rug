@@ -8,14 +8,20 @@ tags: [lua, tests, input]
 
 # Lua coroutine bridge tests
 
-Opt-in `--hook-isolation-stage load|target|keyboard|both|both-raw` supports the
+Opt-in `--hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split` supports the
 [controlled comparison](../NativeInputProbe/ControlledStages.md). It sends no
-input; only both-raw adds Raw Input after both Hooks, with software/candidate
+input; both-raw modes add Raw Input after both Hooks, with software/candidate
 sample deltas and clean registration/subscription teardown. Normal diagnostics
 retain both Hooks.
 both-raw prints its HWND/PID and aggregate target counts for the native
 ManagedTarget comparison. Its query protocol lives in the diagnostic Native
 window; it sends no input and changes no production C-ABI.
+both-raw-split moves both Hooks to a message-only window on a separate thread,
+keeping the visible target and its metric protocol unchanged. THREAD TOPOLOGY
+prints different target/Hook thread IDs; TARGET and Hook statuses/cleanup are
+independent. Tests check actual thread separation, target delivery/protocol,
+post-start Hook faults with live target/source, and three rounds of registration,
+buffer and subscription cleanup. Message barriers do not certify Hook delivery.
 
 Run `dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64` with the root-pinned .NET SDK `10.0.401`.
 The console test uses fake capture, OCR and input services, so no native Rug.Core
