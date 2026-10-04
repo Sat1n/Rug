@@ -82,9 +82,10 @@ internal static class RawInputDiagnostics
         "target-raw" => (true, false, false),
         "keyboard-raw" => (true, true, false),
         "keyboard-split" => (true, true, false),
-        _ => throw new ArgumentException("Use --hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split")
+        "keyboard-pump" => (true, true, false),
+        _ => throw new ArgumentException("Use --hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split|keyboard-pump")
     };
-    internal static bool UsesSplitProbe(string stage) => stage is "both-raw-split" or "target-raw" or "keyboard-raw" or "keyboard-split";
+    internal static bool UsesSplitProbe(string stage) => stage is "both-raw-split" or "target-raw" or "keyboard-raw" or "keyboard-split" or "keyboard-pump";
     internal static bool UsesRawInput(string stage) => stage is "both-raw" or "both-raw-split" or "target-raw" or "keyboard-raw";
     // @shape Fresh process per stage; raw modes register Raw Input, never emit/reinstall Hooks.
     // @source Existing native sender stays unchanged: tests/NativeInputProbe/main.cpp#class:CoreInput
@@ -98,6 +99,7 @@ internal static class RawInputDiagnostics
         using var separateProbe = split ? new RawInputDiagnosticWindow(selection.Keyboard, selection.Mouse, messageOnly: true) : null;
         var probe = separateProbe ?? window;
         await using var source = UsesRawInput(stage) ? new RawInputEventSource() : null;
+        await using var unregisteredPump = stage == "keyboard-pump" ? new UnregisteredRawInputPump() : null;
         RawInputDiagnosticWindow.Counters? ReadCounts()
         {
             if (window is null) return null;
@@ -130,9 +132,26 @@ internal static class RawInputDiagnostics
                 // Preserve startup order: selected diagnostic receivers ready before Raw Input.
                 await source.StartAsync();
             }
+            if (unregisteredPump is not null)
+            {
+                await unregisteredPump.StartAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                Console.WriteLine("RAW INPUT UNREGISTERED CONTROL: original receiver window/timer/message loop retained; no device registration or event-source consumer. Pump readiness is not capture readiness.");
+                PrintRawRegistrations("READY");
+            }
             var previous = ReadCounts();
             async Task Snapshot(string label)
             {
+                if (unregisteredPump is not null)
+                {
+                    await unregisteredPump.SynchronizeAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                    var pumpStatus = unregisteredPump.Status;
+                    Console.WriteLine($"{label} UNREGISTERED PUMP: {pumpStatus}");
+                    if (pumpStatus.Failure is not null || pumpStatus.ThreadExited || !pumpStatus.PumpReady
+                        || pumpStatus.RegistrationEnabled || pumpStatus.InputMessages != 0
+                        || pumpStatus.DeviceMessages != 0 || pumpStatus.UnexpectedEvents != 0)
+                        throw new InvalidOperationException("INCONCLUSIVE: diagnostic receiver pump failed or received unexpected input");
+                    PrintRawRegistrations(label);
+                }
                 if (source is not null)
                 {
                     Print(source, label + " RAW STATUS");
@@ -179,6 +198,12 @@ internal static class RawInputDiagnostics
         }
         finally
         {
+            if (unregisteredPump is not null)
+            {
+                await unregisteredPump.DisposeAsync();
+                Console.WriteLine($"STOPPED UNREGISTERED PUMP: {unregisteredPump.Status}");
+                if (unregisteredPump.Status.Failure is not null) Environment.ExitCode = 2;
+            }
             if (source is not null)
             {
                 try { await source.StopAsync(); Print(source, "ISOLATION RAW STOPPED"); }
@@ -196,7 +221,7 @@ internal static class RawInputDiagnostics
                 separateProbe.Dispose(); PrintProbe(separateProbe, "ISOLATION HOOK STOPPED");
                 if (separateProbe.Status.Failure is not null) Environment.ExitCode = 2;
             }
-            if (stage == "keyboard-split") PrintRawRegistrations("STOPPED");
+            if (stage is "keyboard-split" or "keyboard-pump") PrintRawRegistrations("STOPPED");
             Console.WriteLine("ISOLATION finished; no software/human acceptance inferred from pump health.");
         }
     }

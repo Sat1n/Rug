@@ -19,6 +19,17 @@ internal sealed class WindowsRawInputReceiver : IRawInputReceiver
     private Exception? _failure;
     private Action<InputObservation>? _receive;
     private bool _stopRequested;
+    private bool _registrationEnabled = true;
+    private uint _threadId;
+    private long _timerMessages, _inputMessages, _deviceMessages;
+
+    internal sealed record PumpSnapshot(uint ThreadId, nint Hwnd, bool RegistrationEnabled,
+        long TimerMessages, long InputMessages, long DeviceMessages);
+    internal PumpSnapshot DiagnosticSnapshot
+    {
+        get { lock (_barrierGate) return new(_threadId, _hwnd, _registrationEnabled,
+            Interlocked.Read(ref _timerMessages), Interlocked.Read(ref _inputMessages), Interlocked.Read(ref _deviceMessages)); }
+    }
 
     internal WindowsRawInputReceiver() => _proc = HandleMessage;
     public void RequestStop()
@@ -38,11 +49,20 @@ internal sealed class WindowsRawInputReceiver : IRawInputReceiver
     }
     /// <summary>@shape callbacks: ready once after owned registrations, receive copied scalars; @source messages: Win32 WM_INPUT/WM_INPUT_DEVICE_CHANGE</summary>
     public void Run(Action ready, Action<InputObservation> receive, CancellationToken cancellationToken)
+        => RunCore(ready, receive, cancellationToken, registerDevices: true);
+
+    // Internal diagnostic seam only; this callback certifies a pump, never IInputEventSource readiness.
+    internal void RunUnregisteredDiagnostic(Action pumpReady, Action<InputObservation> receive, CancellationToken cancellationToken)
+        => RunCore(pumpReady, receive, cancellationToken, registerDevices: false);
+
+    /// <summary>@shape registered production receiver or internal unregistered diagnostic pump; @source Win32 RegisterRawInputDevices/WM_INPUT</summary>
+    private void RunCore(Action ready, Action<InputObservation> receive, CancellationToken cancellationToken, bool registerDevices)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Raw Input requires Windows.");
         string name = "RugRawInput" + Guid.NewGuid().ToString("N");
         nint instance = GetModuleHandleW(null);
         bool registeredClass = false;
+        lock (_barrierGate) { _threadId = GetCurrentThreadId(); _registrationEnabled = registerDevices; }
         _receive = receive;
         try
         {
@@ -54,7 +74,7 @@ internal sealed class WindowsRawInputReceiver : IRawInputReceiver
             lock (_barrierGate) _hwnd = hwnd;
             using var stop = cancellationToken.Register(RequestStop);
             cancellationToken.ThrowIfCancellationRequested();
-            lock (RegistrationGate)
+            if (registerDevices) lock (RegistrationGate)
             {
                 if (Registrations().Any(IsRelevant)) throw new RawInputException(InputEventSourceFault.Registration, "Raw keyboard/mouse registration already belongs to another component.");
                 var devices = new[] { new Device { Page = 1, Usage = 2, Flags = 0x2100, Target = hwnd }, new Device { Page = 1, Usage = 6, Flags = 0x2100, Target = hwnd } };
@@ -80,7 +100,7 @@ internal sealed class WindowsRawInputReceiver : IRawInputReceiver
             {
                 if (hwnd != 0)
                 {
-                    lock (RegistrationGate)
+                    if (registerDevices) lock (RegistrationGate)
                     {
                         // Never REMOVE a registration now owned by a replacement receiver.
                         var owned = Registrations().Where(d => IsRelevant(d) && d.Target == hwnd).Select(d => new Device { Page = d.Page, Usage = d.Usage, Flags = 1 }).ToArray();
@@ -113,7 +133,10 @@ internal sealed class WindowsRawInputReceiver : IRawInputReceiver
             { lock (_barrierGate) { if (_barriers.TryDequeue(out var barrier)) barrier.TrySetResult(); } return 0; }
             if (message is 0x113 or 0xff or 0xfe)
             {
-                lock (RegistrationGate) VerifyOwnership(hwnd);
+                if (message == 0x113) Interlocked.Increment(ref _timerMessages);
+                if (message == 0xff) Interlocked.Increment(ref _inputMessages);
+                if (message == 0xfe) Interlocked.Increment(ref _deviceMessages);
+                if (_registrationEnabled) lock (RegistrationGate) VerifyOwnership(hwnd);
                 if (message == 0xff) Read(lParam, (wParam & 0xff) == 0);
                 if (message == 0xfe)
                 {
@@ -172,6 +195,7 @@ internal sealed class WindowsRawInputReceiver : IRawInputReceiver
     [DllImport("user32.dll", SetLastError = true)] private static extern uint GetRegisteredRawInputDevices([Out] Device[]? devices, ref uint count, uint size);
     [DllImport("user32.dll", SetLastError = true)] private static extern uint GetRawInputData(nint handle, uint command, nint data, ref uint size, uint header);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern nint GetModuleHandleW(string? module);
+    [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern ushort RegisterClassW(ref WindowClass windowClass);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern nint CreateWindowExW(uint exStyle, string className, string title, uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint param);
     [DllImport("user32.dll", SetLastError = true)] private static extern int GetMessageW(out Message message, nint hwnd, uint min, uint max);

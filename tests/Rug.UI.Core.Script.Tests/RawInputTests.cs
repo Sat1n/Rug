@@ -19,6 +19,7 @@ internal static class RawInputTests
         ProbeCounters();
         await ProbeLifecycleAsync();
         await SplitProbeLifecycleAsync();
+        await UnregisteredPumpLifecycleAsync();
         await LifecycleAsync();
         await ConsumersAsync();
         await NativeLifecycleAsync();
@@ -81,6 +82,9 @@ internal static class RawInputTests
             && RawInputDiagnostics.UsesSplitProbe("keyboard-split") && !RawInputDiagnostics.UsesRawInput("keyboard-split")
             && RawInputDiagnostics.UsesSplitProbe("keyboard-raw") && RawInputDiagnostics.UsesRawInput("keyboard-raw"),
             "no-source control changed target/Hook placement or enables Raw Input");
+        Check(RawInputDiagnostics.IsolationStage("keyboard-pump") == (true, true, false)
+            && RawInputDiagnostics.UsesSplitProbe("keyboard-pump") && !RawInputDiagnostics.UsesRawInput("keyboard-pump"),
+            "unregistered pump changed Hook selection or registers Raw Input");
         var aggregate = new RawInputDiagnostics.RawAggregate();
         var baseline = aggregate.Read();
         aggregate.Observe(new(1, 1, 1, new(InputEventKind.Keyboard, 1, false, ExtraInformation: InputObservation.RugSoftwareInputTag)));
@@ -185,6 +189,61 @@ internal static class RawInputTests
             Check(!WindowsRawInputReceiver.Registrations().Any(d => d.Page == 1 && d.Usage is 2 or 6), "split registration leaked");
         }
         Console.WriteLine("Split target/receiver threads with both/no/keyboard-only Hooks, optional Raw Input, target protocol, observable thread fault and repeated cleanup passed (12 lifecycles)");
+    }
+    // @shape Three real target/Hook/unregistered-receiver lifecycles; faults and foreign ownership are observable.
+    // @source Rug.UI.Core/Native/WindowsRawInputReceiver.cs#class:WindowsRawInputReceiver
+    private static async Task UnregisteredPumpLifecycleAsync()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        long generation = 0;
+        for (int run = 0; run < 3; run++)
+        {
+            using var target = new RawInputDiagnosticWindow(false, false);
+            using var probe = new RawInputDiagnosticWindow(true, false, messageOnly: true);
+            await Task.WhenAll(target.Ready.Task, probe.Ready.Task).WaitAsync(TimeSpan.FromSeconds(5));
+            await using var pump = new UnregisteredRawInputPump();
+            await Task.WhenAll(pump.StartAsync(), pump.StartAsync()).WaitAsync(TimeSpan.FromSeconds(5));
+            var ready = pump.Status;
+            Check(ready is { PumpReady: true, RegistrationEnabled: false, ThreadExited: false, Failure: null }
+                && ready.Hwnd != 0 && ready.Generation > generation, "unregistered pump startup identity incorrect");
+            generation = ready.Generation;
+            Check(new[] { ready.ThreadId, target.Status.InstallThreadId, probe.Status.InstallThreadId }.Distinct().Count() == 3,
+                "diagnostic receiver shares target/Hook thread");
+            Check(!WindowsRawInputReceiver.Registrations().Any(d => d.Page == 1 && d.Usage is 2 or 6), "unregistered pump installed devices");
+            var before = target.Counts;
+            target.PostTargetMessagesForTest(); await target.SynchronizeAsync(); await probe.SynchronizeAsync();
+            Check(target.Counts.KeyDown > before.KeyDown && target.Counts.KeyUp > before.KeyUp,
+                "pump control lost target delivery");
+            await Until(() => pump.Status.TimerMessages > 0); // Actual SetTimer delivery, not just a posted barrier.
+            long timer = pump.Status.TimerMessages;
+            Check(WindowsRawInputReceiver.PostMessageW(ready.Hwnd, 0x113, 1, 0), "could not post diagnostic timer");
+            await pump.SynchronizeAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            Check(pump.Status.TimerMessages > timer && pump.Status is { UnexpectedEvents: 0, InputMessages: 0, DeviceMessages: 0 },
+                "diagnostic pump timer/messages incorrect");
+            await using var other = new RawInputEventSource();
+            if (run == 2)
+            {
+                await other.StartAsync();
+                var owned = WindowsRawInputReceiver.Registrations().Where(d => d.Page == 1 && d.Usage is 2 or 6).ToArray();
+                Check(WindowsRawInputReceiver.PostMessageW(ready.Hwnd, 0xff, 0, 0), "could not inject diagnostic receiver fault");
+                await Until(() => pump.Status.Failure is not null);
+                await pump.DisposeAsync();
+                Check(pump.Status is { ThreadExited: true, PumpReady: false, InputMessages: 1 }
+                    && pump.Status.Failure!.Contains("GetRawInputData"), "post-ready pump failure hidden");
+                Check(other.Snapshot.State == InputEventSourceState.Ready && WindowsRawInputReceiver.Registrations()
+                    .Where(d => d.Page == 1 && d.Usage is 2 or 6).SequenceEqual(owned),
+                    "unregistered cleanup disturbed another owner's registrations");
+                await other.StopAsync();
+            }
+            await pump.DisposeAsync(); await pump.DisposeAsync();
+            Check(pump.Status is { ThreadExited: true, PumpReady: false, Hwnd: 0 }
+                && (run == 2 || pump.Status.Failure is null), "unregistered receiver cleanup failed");
+            try { await pump.StartAsync(); throw new Exception("disposed pump restarted"); } catch (ObjectDisposedException) { }
+            probe.Dispose(); target.Dispose();
+            Check(probe.Status is { ThreadExited: true, Failure: null } && target.Status is { ThreadExited: true, Failure: null }
+                && !WindowsRawInputReceiver.Registrations().Any(d => d.Page == 1 && d.Usage is 2 or 6), "pump comparison leaked resources");
+        }
+        Console.WriteLine("Unregistered receiver window/thread/timer, repeated startup/disposal, observable fault and foreign registration preservation passed (3 lifecycles)");
     }
     private static byte[] Packet(uint type, int pointerSize, int body)
     {

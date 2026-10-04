@@ -268,7 +268,17 @@ was clean. This does not locate a Hook-chain or receiver defect. The next
 keyboard-split control retains the target and independent keyboard Hook receiver,
 but creates no Raw Input source/registration/consumer. Omitted raw collection is
 not zero-candidate evidence. Real lifecycle/protocol/fault/cleanup checks cover
-both configurations; interactive no-source AUTO remains NOT RUN by the agent.
+both configurations. The user's no-source run passed both keys in both Hook
+observers (four marked injected keyboard events), target delivery and PostMessage,
+with clean thread/registration teardown. This correlates the gap with receiver
+presence, not a proven API defect. The next
+[registration control](../tests/NativeInputProbe/ReceiverRegistrationControl.md)
+retains WindowsRawInputReceiver's actual window/thread/timer/message loop while
+skipping registration and ownership checks. Its internal diagnostic method never
+changes public Run, which always registers devices, or IInputEventSource Ready.
+Only pump readiness/identity/message aggregates are reported; no raw attribution
+is claimed. Lifecycle tests include faults, generations and foreign registration
+preservation. No input emitter, C-ABI, Hook forwarding or takeover changes.
 
 Automated parsing/lifecycle/buffering and real native registration tests pass.
 The user's pre-repair same-session reproduction observed SendInput candidates=7

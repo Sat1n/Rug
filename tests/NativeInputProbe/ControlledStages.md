@@ -24,6 +24,7 @@ a Hook, or alters production emitters. Both both-raw modes, target-raw and keybo
 | target-raw | Yes | Yes, plus idle message-only receiver thread | No | No | Yes |
 | keyboard-raw | Yes | Yes, plus same independent receiver thread | Yes | No | Yes |
 | keyboard-split | Yes | Yes, plus same independent receiver thread | Yes | No | No |
+| keyboard-pump | Yes | Yes, plus Hook thread and unregistered receiver pump | Yes | No | No |
 
 Use **fresh A and B processes for every stage**, in this order:
 
@@ -385,10 +386,13 @@ Both Hook observers should show four tagged/injected keyboard events in total;
 A checks each key down/up 1/1, target 1/1 and mouse five per SendInput round.
 B mouse Hook zero is expected. Raw counters are NOT COLLECTED, never inferred
 zero or software-source acceptance. All threads and registrations must clean up.
-If complete, investigate receiver/Hook interaction; if absent with target delivery,
-investigate managed target/Hook paths without requiring Raw Input. Neither branch
-proves a root cause. Agent lifecycle/protocol/fault/cleanup checks cover three
-no-source runs plus nine source runs; interactive AUTO is NOT RUN by the agent.
+The user's keyboard-split run passed all four rounds, both observers retained four
+tagged/injected keyboard events, target delivery was complete and cleanup clean.
+The keyboard-raw gap therefore correlates with receiver presence; this is not an
+API diagnosis. Next retain the receiver pump and omit registration using
+[keyboard-pump](ReceiverRegistrationControl.md), whose thread/window/timer evidence
+is distinct from registered event-source readiness. Agent lifecycle checks cover
+three no-source runs plus nine source runs; original acceptance remains open.
 
 ## Remaining acceptance work (2026-10-04)
 
@@ -401,7 +405,7 @@ no-source runs plus nine source runs; interactive AUTO is NOT RUN by the agent.
 | Human foreground/background input | User counters show observed input; explicit normal-operation confirmation remains needed |
 | Normal operation/shortcuts/window interaction | Human visual confirmation needed; counters cannot certify this |
 
-The next planned diagnostic is one keyboard-split paired session. After a supported
+The next planned diagnostic is one keyboard-pump paired session. After a supported
 repair, rerun the ORIGINAL raw-input-diagnostic (managed InputService sender),
 HUMAN BEFORE -> AUTO -> HUMAN AFTER with complete Hook/raw/target evidence,
 and relevant automated regressions. A simplified control passing alone is not

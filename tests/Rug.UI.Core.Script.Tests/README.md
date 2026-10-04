@@ -8,7 +8,7 @@ tags: [lua, tests, input]
 
 # Lua coroutine bridge tests
 
-Opt-in `--hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split` supports the
+Opt-in `--hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split|keyboard-pump` supports the
 [controlled comparison](../NativeInputProbe/ControlledStages.md). It sends no
 input; both-raw modes add Raw Input after both Hooks; target-raw adds it without
 managed Hooks. All report software/candidate
@@ -39,6 +39,13 @@ It reports omitted collection and verifies zero registrations at startup/stop;
 absence of raw counters is not successful software attribution. Three additional
 real lifecycle rounds cover target delivery, receiver faults and cleanup without
 Raw Input, giving 12 split lifecycles total. Manual AUTO remains separately required.
+keyboard-pump retains the original receiver window/thread/timer/message loop but
+skips device registration and ownership checks; it uses an internal diagnostic
+seam, not IInputEventSource Ready. Native thread/window identity, timer/input/device
+message counts and post-start faults remain visible; no capture/candidate counters
+are claimed. Three real lifecycles assert thread separation, timer handling,
+idempotent startup/disposal, restart generations, faults and preservation of another
+receiver's registrations. See [steps and result branches](../NativeInputProbe/ReceiverRegistrationControl.md).
 
 Run `dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64` with the root-pinned .NET SDK `10.0.401`.
 The console test uses fake capture, OCR and input services, so no native Rug.Core
