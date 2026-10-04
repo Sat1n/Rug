@@ -223,7 +223,8 @@ using the unchanged real Rug.Core path and same F8/B/tag. Run it alone first,
 then use its passive Observe mode to compare the same managed sender in two
 processes. It does not register Raw Input, so ownership is unaffected. Native
 counter/lifecycle tests and PostMessage rounds pass; native SendInput and human /
-two-process comparison are still NOT RUN pending foreground/user operation. No automatic hook
+two-process comparison were NOT RUN by the agent, with subsequent user evidence
+recorded below and in the controlled comparisons. No automatic hook
 reinstallation, changed emitter, suppressed input or relaxed Hook PASS is used.
 G HUB/PowerToys comparisons are performed by the user, one condition at a time,
 with a fresh diagnostic process. Microsoft describes possible silent timeout
@@ -242,8 +243,17 @@ both-raw mode remains available. Neither mode changes normal application startup
 See [exact two-terminal steps and evidence](../tests/NativeInputProbe/ControlledStages.md).
 Actual distinct threads, target metric delivery, post-ready Hook fault isolation
 and repeated source/registration/subscription cleanup pass automated checks;
-interactive split-thread SendInput comparison is NOT RUN pending user operation.
+interactive split-thread SendInput was not performed by the agent; the user's
+subsequent result is recorded below.
 This is a diagnostic topology comparison, not a confirmed keyboard-probe repair.
+The user's split comparison still missed automatic keyboard Hook entry in both
+observers despite complete target and marked raw key delivery. The target-raw
+control therefore keeps the same target, idle message-only receiver thread and
+Raw Input, but installs no managed Hooks. Native observer verification remains
+required; zero managed counters are intentional, never software acceptance.
+Actual startup/protocol/fault/cleanup tests pass; interactive target-raw comparison
+is NOT RUN pending user operation. SendInput acceptance remains blocked, while
+normal foreground/background/shortcut behavior needs explicit human confirmation.
 
 Automated parsing/lifecycle/buffering and real native registration tests pass.
 The user's pre-repair same-session reproduction observed SendInput candidates=7

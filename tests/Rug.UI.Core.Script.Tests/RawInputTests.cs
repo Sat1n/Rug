@@ -75,6 +75,7 @@ internal static class RawInputTests
         Check(RawInputDiagnostics.IsolationStage("both") == (true, true, true), "both stage mapping incorrect");
         Check(RawInputDiagnostics.IsolationStage("both-raw") == (true, true, true), "both-raw changed hook selection");
         Check(RawInputDiagnostics.IsolationStage("both-raw-split") == (true, true, true), "split stage changed requested components");
+        Check(RawInputDiagnostics.IsolationStage("target-raw") == (true, false, false), "target-raw requested managed Hooks");
         var aggregate = new RawInputDiagnostics.RawAggregate();
         var baseline = aggregate.Read();
         aggregate.Observe(new(1, 1, 1, new(InputEventKind.Keyboard, 1, false, ExtraInformation: InputObservation.RugSoftwareInputTag)));
@@ -120,17 +121,21 @@ internal static class RawInputTests
         next.Dispose();
         Check(next.Status is { ThreadExited: true, Failure: null, ExitReason: "WM_QUIT" }, "normal probe cleanup not recorded");
     }
+    // @shape Three real lifecycles each with/without Hooks; same independent window/receiver threads and Raw Input.
+    // @source Rug.UI.Core/Native/RawInputDiagnosticWindow.cs#class:RawInputDiagnosticWindow
     private static async Task SplitProbeLifecycleAsync()
     {
         if (!OperatingSystem.IsWindows()) return;
+        foreach (bool installHooks in new[] { true, false })
         for (int run = 0; run < 3; run++)
         {
             using var target = new RawInputDiagnosticWindow(false, false);
-            using var probe = new RawInputDiagnosticWindow(messageOnly: true);
+            using var probe = new RawInputDiagnosticWindow(installHooks, installHooks, messageOnly: true);
             await Task.WhenAll(target.Ready.Task, probe.Ready.Task).WaitAsync(TimeSpan.FromSeconds(5));
             Check(target.Status.InstallThreadId != probe.Status.InstallThreadId, "split target and Hook share a thread");
             Check(target.Status is { KeyboardInstalled: false, MouseInstalled: false }
-                && probe.Status is { KeyboardInstalled: true, MouseInstalled: true }, "split Hook ownership incorrect");
+                && probe.Status.KeyboardInstalled == installHooks && probe.Status.MouseInstalled == installHooks,
+                "split Hook ownership incorrect");
             await using var source = new RawInputEventSource();
             source.InputReceived += (_, _) => { };
             await source.StartAsync();
@@ -144,6 +149,9 @@ internal static class RawInputTests
                 && target.Counts.Move > before.Move, "split target lost its message counters");
             Check(target.Counts.Keyboard.CallbackTotal == 0 && target.Counts.Mouse.CallbackTotal == 0,
                 "target unexpectedly owns Hook counters");
+            if (!installHooks)
+                Check(probe.Counts.Keyboard.CallbackTotal == 0 && probe.Counts.Mouse.CallbackTotal == 0,
+                    "target-raw collected managed Hook callbacks");
             if (run == 2)
             {
                 probe.InjectThreadFailureForTest();
@@ -160,7 +168,7 @@ internal static class RawInputTests
             Check(probe.Status.ThreadExited && (run == 2 || probe.Status is { Failure: null, ExitReason: "WM_QUIT" }), "split Hook cleanup failed");
             Check(!WindowsRawInputReceiver.Registrations().Any(d => d.Page == 1 && d.Usage is 2 or 6), "split registration leaked");
         }
-        Console.WriteLine("Split target/Hook threads, target protocol, observable Hook fault and repeated Raw Input cleanup passed");
+        Console.WriteLine("Split target/receiver threads with/without Hooks, target protocol, observable thread fault and repeated Raw Input cleanup passed");
     }
     private static byte[] Packet(uint type, int pointerSize, int body)
     {

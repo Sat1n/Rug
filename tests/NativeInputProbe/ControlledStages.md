@@ -11,7 +11,7 @@ tags: [diagnostics, hooks, isolation]
 This is diagnosis, not Raw Input or takeover acceptance. The native Human probe
 remains the fixed sender/target/observer; the second managed process adds exactly
 one selected cumulative stage. It never sends input, automatically reinstalls
-a Hook, or alters production emitters. Both both-raw modes enable Raw Input.
+a Hook, or alters production emitters. Both both-raw modes and target-raw enable Raw Input.
 
 | Stage | Managed Rug.Core load | Managed target/message thread | Keyboard Hook | Mouse Hook | Raw Input |
 |---|---|---|---|---|---|
@@ -21,6 +21,7 @@ a Hook, or alters production emitters. Both both-raw modes enable Raw Input.
 | both | Yes | Yes | Yes | Yes | No |
 | both-raw | Yes | Yes | Yes | Yes | Yes |
 | both-raw-split | Yes | Yes, plus separate Hook thread | Yes | Yes | Yes |
+| target-raw | Yes | Yes, plus idle message-only receiver thread | No | No | Yes |
 
 Use **fresh A and B processes for every stage**, in this order:
 
@@ -232,6 +233,81 @@ Debug/x64 WinUI build passed, zero warnings/errors. Three real split lifecycles
 verified distinct threads, target message protocol/delivery, observable post-ready
 Hook fault with live target/source, and cleanup with zero registrations/subscribers.
 Scripted baseline/snapshot/done reached Ready and clean exit for both threads;
-it emitted no input and supplies no software/human acceptance. Interactive
-split-thread SendInput/HUMAN comparison is **NOT RUN / pending user operation**.
+it emitted no input and supplies no software/human acceptance. The subsequent
+user's split-thread comparison used target thread 3440 and Hook thread 62092;
+native automatic F8/B keyboard callbacks remained zero, managed injected/tagged
+keyboard counts zero, target keys 1/1 per round, marked Raw Input key/mouse 4/10
+with down/up 2/2, mouse Hook tags ten. Both PostMessage rounds passed, human
+callbacks continued, and cleanup/fault/overflow counts were clean. SendInput
+remained INCONCLUSIVE. Thread separation is insufficient; managed Hook presence
+is the next controlled condition.
 Original shared-thread failure and automatic takeover integration remain open.
+
+## Managed Hooks omitted: target-raw
+
+Compare against the latest both-raw-split failure. target-raw preserves its target
+window, scalar metric queries, native sender, independent message-only receiver
+thread/window and Raw Input receiver/consumer. It only omits both managed Hook
+registrations; keeping the idle receiver avoids also changing thread existence.
+The real Raw Input receiver remains a different thread/window. No automatic
+reinstallation, emitter change, suppression, listener pause or ignore time is used.
+
+Use fresh A/B processes, same elevation/external applications as the failed run.
+
+1. Start A FIRST: `./tests/run_native_input_probe.ps1 -Mode ManagedTarget`.
+   Wait at the HWND/PID prompt; the native Hooks are already installed.
+2. Start B with the new stage:
+
+   ```powershell
+   dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64 -- --hook-isolation-stage target-raw
+   ```
+
+   Wait for ISOLATION READY. Both managed keyboardInstalled/mouseInstalled must
+   be False, requested flags False; THREAD TOPOLOGY still shows distinct IDs.
+   MANAGED HOOKS OMITTED explains intentional absence. Raw Input must be Ready,
+   with fault None. Copy B's MANAGED TARGET HWND/PID into A as `0xHANDLE PID`.
+3. Complete A HUMAN BEFORE on B's visible window and another app, including keys,
+   mouse/wheel and normal shortcuts. Enter baseline in B, then next in A.
+   During the unchanged five-second countdown activate B's white target window;
+   release all keys/buttons and leave input untouched throughout AUTO.
+4. After A's four rounds finish, enter snapshot in B. Complete HUMAN AFTER and
+   done in A; then snapshot and done in B. Keep B alive through A's completion.
+   Return both complete outputs including cleanup, plus confirmation of ordinary
+   input/shortcuts and any accidental AUTO interference.
+
+Only A supplies Hook evidence in this mode. Successful SendInput rounds still
+require marked injected keyboard down/up and mouse counts, actual target delivery
+and no interference. Expected B raw software key/mouse is 4/10, key down/up 2/2.
+Managed Hook counts must be zero even while human/software input is observed;
+this does not mean capture failed and never substitutes for A's Hook checks.
+Broad B candidate intervals include terminal/focus activity, not solely AUTO.
+Both message threads must exit and subscriptions/registrations return to zero.
+
+If A regains marked keys, investigate managed Hook registration/forwarding-chain
+interaction; if A still misses keys despite complete raw/target evidence, managed
+Hooks are not necessary to reproduce the failure. Neither outcome proves a CLR,
+Raw Input API or third-party defect. Target/foreground/query/receiver hypotheses
+remain if no cause is localized. Fault/incomplete delivery/interference means no
+causal inference. Agent protocol/lifecycle/full regression checks and Debug/x64
+WinUI build pass; interactive target-raw AUTO/HUMAN is NOT RUN pending user operation.
+
+## Remaining acceptance work (2026-10-04)
+
+| 05B-01 requirement | Current evidence / outstanding work |
+|---|---|
+| Parsing: key down/up/repeat, mouse buttons/wheel, invalid data | Automated checks passed |
+| Lifecycle: failures, generations, registration/subscription cleanup | Automated real/fake receiver checks passed |
+| Consumers: slow/faulting, high frequency, critical overflow | Automated checks passed |
+| Own software input | PostMessage passed; original SendInput Hook gap unresolved despite complete raw/target evidence |
+| Human foreground/background input | User counters show observed input; explicit normal-operation confirmation remains needed |
+| Normal operation/shortcuts/window interaction | Human visual confirmation needed; counters cannot certify this |
+
+The next planned diagnostic is one target-raw paired session. After a supported
+repair, rerun the ORIGINAL raw-input-diagnostic (managed InputService sender),
+HUMAN BEFORE -> AUTO -> HUMAN AFTER with complete Hook/raw/target evidence,
+and relevant automated regressions. A simplified control passing alone is not
+original-scenario acceptance. Repeat a repaired scenario if needed to address
+the observed order dependence. Additional single-condition controls depend on
+results; there is no evidence-based fixed number yet. No need to rerun every
+historical matrix or vary unrelated external applications at the same time.
+Automatic takeover integration is future development, outside this unit.

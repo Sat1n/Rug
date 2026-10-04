@@ -8,9 +8,10 @@ tags: [lua, tests, input]
 
 # Lua coroutine bridge tests
 
-Opt-in `--hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split` supports the
+Opt-in `--hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw` supports the
 [controlled comparison](../NativeInputProbe/ControlledStages.md). It sends no
-input; both-raw modes add Raw Input after both Hooks, with software/candidate
+input; both-raw modes add Raw Input after both Hooks; target-raw adds it without
+managed Hooks. All report software/candidate
 sample deltas and clean registration/subscription teardown. Normal diagnostics
 retain both Hooks.
 both-raw prints its HWND/PID and aggregate target counts for the native
@@ -22,6 +23,11 @@ prints different target/Hook thread IDs; TARGET and Hook statuses/cleanup are
 independent. Tests check actual thread separation, target delivery/protocol,
 post-start Hook faults with live target/source, and three rounds of registration,
 buffer and subscription cleanup. Message barriers do not certify Hook delivery.
+target-raw keeps the split mode's visible target, idle message-only receiver
+thread, Raw Input source and metric protocol, with neither managed Hook
+installed. Its zero Hook counters are expected; only the native observer supplies
+Hook verification. Real lifecycle tests cover both registration selections,
+post-ready receiver faults, target messages and three cleanups per selection.
 
 Run `dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64` with the root-pinned .NET SDK `10.0.401`.
 The console test uses fake capture, OCR and input services, so no native Rug.Core

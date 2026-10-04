@@ -79,20 +79,21 @@ internal static class RawInputDiagnostics
         "both" => (true, true, true),
         "both-raw" => (true, true, true),
         "both-raw-split" => (true, true, true),
-        _ => throw new ArgumentException("Use --hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split")
+        "target-raw" => (true, false, false),
+        _ => throw new ArgumentException("Use --hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw")
     };
-    // @shape One fresh process per stage; both-raw[-split] registers Raw Input, never emits/reinstalls Hooks.
+    // @shape Fresh process per stage; both-raw[-split]/target-raw register Raw Input, never emit/reinstall Hooks.
     // @source Existing native sender stays unchanged: tests/NativeInputProbe/main.cpp#class:CoreInput
     internal static async Task RunIsolationAsync(string stage)
     {
         var selection = IsolationStage(stage); // Validate before DLL/window side effects.
         if (!LoadNative()) { Environment.ExitCode = 2; return; }
-        bool split = stage == "both-raw-split";
+        bool split = stage is "both-raw-split" or "target-raw";
         using var window = selection.Target ? new RawInputDiagnosticWindow(selection.Keyboard && !split, selection.Mouse && !split) : null;
         // Message-only receiver uses the unchanged callback/parser/forwarding implementation.
-        using var separateProbe = split ? new RawInputDiagnosticWindow(messageOnly: true) : null;
+        using var separateProbe = split ? new RawInputDiagnosticWindow(selection.Keyboard, selection.Mouse, messageOnly: true) : null;
         var probe = separateProbe ?? window;
-        await using var source = stage is "both-raw" or "both-raw-split" ? new RawInputEventSource() : null;
+        await using var source = stage is "both-raw" or "both-raw-split" or "target-raw" ? new RawInputEventSource() : null;
         RawInputDiagnosticWindow.Counters? ReadCounts()
         {
             if (window is null) return null;
@@ -110,10 +111,12 @@ internal static class RawInputDiagnostics
                 Console.WriteLine($"MANAGED TARGET: hwnd=0x{(nuint)window!.Ready.Task.Result:X} processId={Environment.ProcessId} (diagnostic window only)");
             if (split)
                 Console.WriteLine($"THREAD TOPOLOGY: targetThreadId={window!.Status.InstallThreadId} hookThreadId={probe!.Status.InstallThreadId} split=True");
+            if (stage == "target-raw")
+                Console.WriteLine("MANAGED HOOKS OMITTED: dedicated message-only receiver/thread retained; keyboard/mouse hooks intentionally not installed. Use A's native Hook evidence.");
             if (source is not null)
             {
                 source.InputReceived += onInput;
-                // Keep both Hook registrations before the only added component.
+                // Preserve startup order: selected diagnostic receivers ready before Raw Input.
                 await source.StartAsync();
             }
             var previous = ReadCounts();
