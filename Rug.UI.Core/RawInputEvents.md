@@ -301,6 +301,15 @@ keyboard-messages-mouse omits only keyboard Raw Input registration, retaining
 mouse registration and count-only handling. Raw attribution remains NOT COLLECTED;
 production Run still registers/reads both classes. Tests check conflicts, unexpected
 keyboard registration, ownership loss and selected-class cleanup.
+The user's mouse-only control passed both Hook observers (software keys 4,
+mouse 10); restoring both registrations restored the keyboard gap with complete
+target delivery and 15,894 input/cleanup calls. This correlates with device
+selection, without identifying the API or implementation cause.
+keyboard-messages-keyboard now omits only mouse registration from the failing
+both-class count mode. It preserves usage 6, flags, pump, target and Hooks;
+three added lifecycles verify keyboard-only ownership, unexpected mouse faults,
+replacement protection and cleanup. Raw evidence remains NOT COLLECTED.
+See [paired steps](../tests/NativeInputProbe/ReceiverRegistrationControl.md#keyboard-only-registration-keyboard-messages-keyboard).
 No input emitter, C-ABI, Hook forwarding or takeover changes.
 
 Automated parsing/lifecycle/buffering and real native registration tests pass.

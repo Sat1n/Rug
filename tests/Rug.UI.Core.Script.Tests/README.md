@@ -8,7 +8,7 @@ tags: [lua, tests, input]
 
 # Lua coroutine bridge tests
 
-Opt-in `--hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split|keyboard-pump|keyboard-direct|keyboard-messages|keyboard-messages-mouse` supports the
+Opt-in `--hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split|keyboard-pump|keyboard-direct|keyboard-messages|keyboard-messages-mouse|keyboard-messages-keyboard` supports the
 [controlled comparison](../NativeInputProbe/ControlledStages.md). It sends no
 input; both-raw modes add Raw Input after both Hooks; target-raw adds it without
 managed Hooks. Packet-reading stages report software/candidate deltas; count-only
@@ -66,6 +66,12 @@ ownership queries require exactly one owned mouse and no keyboard or page-wide e
 Three additional lifecycles verify this selection, conflicts, unexpected keyboard
 registration faults, replacement protection and complete cleanup. Raw attribution
 remains NOT COLLECTED; production Run always registers/reads both classes.
+keyboard-messages-keyboard instead omits only mouse registration from
+keyboard-messages, keeping usage 6 and the independent managed keyboard Hook.
+Actual ownership must show one keyboard and no mouse/page-wide entry. Three more
+lifecycles cover conflicts, unexpected mouse ownership faults and cleanup, giving
+nine count-only lifecycles across both/single-class selections. Raw evidence stays
+NOT COLLECTED; paired AUTO/HUMAN remains NOT RUN by the agent.
 
 Run `dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64` with the root-pinned .NET SDK `10.0.401`.
 The console test uses fake capture, OCR and input services, so no native Rug.Core

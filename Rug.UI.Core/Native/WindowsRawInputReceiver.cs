@@ -22,6 +22,7 @@ internal sealed class WindowsRawInputReceiver : IRawInputReceiver
     private bool _registrationEnabled = true;
     private bool _readPackets = true;
     private bool _registerKeyboard = true;
+    private bool _registerMouse = true;
     private uint _threadId;
     private long _timerMessages, _inputMessages, _deviceMessages, _inputCleanupCalls;
 
@@ -32,7 +33,7 @@ internal sealed class WindowsRawInputReceiver : IRawInputReceiver
     {
         get { lock (_barrierGate) return new(_threadId, _hwnd, _registrationEnabled,
             Interlocked.Read(ref _timerMessages), Interlocked.Read(ref _inputMessages), Interlocked.Read(ref _deviceMessages),
-            _readPackets, Interlocked.Read(ref _inputCleanupCalls), _registrationEnabled && _registerKeyboard, _registrationEnabled); }
+            _readPackets, Interlocked.Read(ref _inputCleanupCalls), _registrationEnabled && _registerKeyboard, _registrationEnabled && _registerMouse); }
     }
 
     internal WindowsRawInputReceiver() => _proc = HandleMessage;
@@ -60,17 +61,20 @@ internal sealed class WindowsRawInputReceiver : IRawInputReceiver
         => RunCore(pumpReady, receive, cancellationToken, registerDevices: false);
 
     // Registered message-count control only; not capture readiness and no raw classification evidence.
-    internal void RunMessageCountDiagnostic(Action pumpReady, CancellationToken cancellationToken, bool registerKeyboard = true)
-        => RunCore(pumpReady, null, cancellationToken, registerDevices: true, readPackets: false, registerKeyboard: registerKeyboard);
+    internal void RunMessageCountDiagnostic(Action pumpReady, CancellationToken cancellationToken, bool registerKeyboard = true, bool registerMouse = true)
+    {
+        if (!registerKeyboard && !registerMouse) throw new ArgumentException("Registered message control requires a selected device class.");
+        RunCore(pumpReady, null, cancellationToken, registerDevices: true, readPackets: false, registerKeyboard: registerKeyboard, registerMouse: registerMouse);
+    }
 
     /// <summary>@shape production packet receiver or internal unregistered/count-only pump; @source Win32 RegisterRawInputDevices/WM_INPUT</summary>
-    private void RunCore(Action ready, Action<InputObservation>? receive, CancellationToken cancellationToken, bool registerDevices, bool readPackets = true, bool registerKeyboard = true)
+    private void RunCore(Action ready, Action<InputObservation>? receive, CancellationToken cancellationToken, bool registerDevices, bool readPackets = true, bool registerKeyboard = true, bool registerMouse = true)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Raw Input requires Windows.");
         string name = "RugRawInput" + Guid.NewGuid().ToString("N");
         nint instance = GetModuleHandleW(null);
         bool registeredClass = false;
-        lock (_barrierGate) { _threadId = GetCurrentThreadId(); _registrationEnabled = registerDevices; _readPackets = readPackets; _registerKeyboard = registerKeyboard; }
+        lock (_barrierGate) { _threadId = GetCurrentThreadId(); _registrationEnabled = registerDevices; _readPackets = readPackets; _registerKeyboard = registerKeyboard; _registerMouse = registerMouse; }
         _receive = receive;
         try
         {
@@ -86,7 +90,8 @@ internal sealed class WindowsRawInputReceiver : IRawInputReceiver
             {
                 if (Registrations().Any(IsRelevant)) throw new RawInputException(InputEventSourceFault.Registration, "Raw keyboard/mouse registration already belongs to another component.");
                 Device mouse = new() { Page = 1, Usage = 2, Flags = 0x2100, Target = hwnd };
-                Device[] devices = registerKeyboard ? [mouse, new() { Page = 1, Usage = 6, Flags = 0x2100, Target = hwnd }] : [mouse];
+                Device keyboard = new() { Page = 1, Usage = 6, Flags = 0x2100, Target = hwnd };
+                Device[] devices = registerMouse ? (registerKeyboard ? [mouse, keyboard] : [mouse]) : [keyboard];
                 if (!RegisterRawInputDevices(devices, (uint)devices.Length, (uint)Marshal.SizeOf<Device>())) throw Win32("RegisterRawInputDevices", InputEventSourceFault.Registration);
                 VerifyOwnership(hwnd);
             }
@@ -112,7 +117,9 @@ internal sealed class WindowsRawInputReceiver : IRawInputReceiver
                     if (registerDevices) lock (RegistrationGate)
                     {
                         // Never REMOVE a registration now owned by a replacement receiver.
-                        var owned = Registrations().Where(d => IsRelevant(d) && d.Target == hwnd && (registerKeyboard || d.Usage == 2)).Select(d => new Device { Page = d.Page, Usage = d.Usage, Flags = 1 }).ToArray();
+                        var owned = Registrations().Where(d => IsRelevant(d) && d.Target == hwnd
+                            && ((registerKeyboard && registerMouse) || (registerKeyboard && d.Usage == 6) || (registerMouse && d.Usage == 2)))
+                            .Select(d => new Device { Page = d.Page, Usage = d.Usage, Flags = 1 }).ToArray();
                         if (owned.Length != 0 && !RegisterRawInputDevices(owned, (uint)owned.Length, (uint)Marshal.SizeOf<Device>())) throw Win32("Remove raw registration");
                     }
                 }
@@ -129,9 +136,9 @@ internal sealed class WindowsRawInputReceiver : IRawInputReceiver
     private void VerifyOwnership(nint hwnd)
     {
         var devices = Registrations();
-        ushort[] usages = _registerKeyboard ? [2, 6] : [2];
+        ushort[] usages = _registerMouse ? (_registerKeyboard ? [2, 6] : [2]) : [6];
         if (!usages.All(usage => devices.Any(d => d.Page == 1 && d.Usage == usage && d.Target == hwnd && (d.Flags & ~0x2000u) == 0x100))
-            || devices.Any(d => d.Page == 1 && (d.Usage == 0 || (!_registerKeyboard && d.Usage == 6))))
+            || devices.Any(d => d.Page == 1 && (d.Usage == 0 || (!_registerKeyboard && d.Usage == 6) || (!_registerMouse && d.Usage == 2))))
             throw new RawInputException(InputEventSourceFault.OwnershipLost, "Raw keyboard/mouse registration ownership changed: " + string.Join(", ", devices.Where(IsRelevant).Select(d => $"usage={d.Usage}, flags=0x{d.Flags:x}, ownTarget={d.Target == hwnd}")));
     }
     private nint HandleMessage(nint hwnd, uint message, nuint wParam, nint lParam)

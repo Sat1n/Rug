@@ -28,6 +28,7 @@ a Hook, or alters production emitters. Both both-raw modes, target-raw and keybo
 | keyboard-direct | Yes | Yes, plus Hook thread and registered direct receiver | Yes | No | Yes, no source queue |
 | keyboard-messages | Yes | Yes, same registered receiver | Yes | No | Yes, messages only; raw evidence omitted |
 | keyboard-messages-mouse | Yes | Yes, same receiver | Yes | No | Mouse only; messages only |
+| keyboard-messages-keyboard | Yes | Yes, same receiver | Yes | No | Keyboard only; messages only |
 
 Use **fresh A and B processes for every stage**, in this order:
 
@@ -401,7 +402,7 @@ unregistered receiver processed 245 timer messages. Next enable registration and
 direct copied-observation counts, retaining no event-source queue/consumer:
 [keyboard-direct steps](ReceiverRegistrationControl.md#registered-direct-counter-keyboard-direct).
 
-## Remaining acceptance work (2026-10-04)
+## Remaining acceptance work (2026-10-06)
 
 | 05B-01 requirement | Current evidence / outstanding work |
 |---|---|
@@ -412,10 +413,9 @@ direct copied-observation counts, retaining no event-source queue/consumer:
 | Human foreground/background input | User counters show observed input; explicit normal-operation confirmation remains needed |
 | Normal operation/shortcuts/window interaction | Human visual confirmation needed; counters cannot certify this |
 
-keyboard-direct reproduced both Hook gaps with raw software key/mouse 4/10, down/up 2/2.
-keyboard-messages still reproduced them without reading; target delivery/cleanup complete.
-Next [mouse-only registration](ReceiverRegistrationControl.md#mouse-only-registration-keyboard-messages-mouse)
-retains count-only handling and changes only the registered device selection.
+Mouse-only count mode passed both Hooks; restoring both registrations restored
+the keyboard gap with complete target delivery. Next [keyboard-only control](ReceiverRegistrationControl.md#keyboard-only-registration-keyboard-messages-keyboard)
+omits only mouse registration from the failing both-class count mode.
 After a supported
 repair, rerun the ORIGINAL raw-input-diagnostic (managed InputService sender),
 HUMAN BEFORE -> AUTO -> HUMAN AFTER with complete Hook/raw/target evidence,
