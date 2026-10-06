@@ -22,6 +22,8 @@ not integrate takeover. User runs now include a passing paired session and a
 failing opposite order; see [evidence and remaining limits](NativeInputProbe/HookComparison.md).
 The [controlled stages](NativeInputProbe/ControlledStages.md) retain native sending
 while comparing threads, managed Hooks and [device-class registration/packet processing/delivery](NativeInputProbe/ReceiverRegistrationControl.md).
+The runner also builds a [test-only same-process native receiver](NativeInputProbe/NativeReceiverControl.md),
+replacing B's keyboard count receiver without changing Rug.Core or the sender.
 
 ## Layout
 

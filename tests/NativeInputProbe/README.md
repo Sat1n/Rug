@@ -55,9 +55,11 @@ Requires Visual Studio v145 x64 C++ tools and Windows SDK. From repository root:
 .\tests\run_native_input_probe.ps1 -Mode Human
 ```
 
-The runner locates MSBuild via vswhere and builds only NativeInputProbe.vcxproj.
-Output is ignored x64/Debug/Rug.NativeInputProbe.exe. It has no solution or
-Rug.Core project reference, so it does not rebuild or change production DLLs.
+The runner locates MSBuild via vswhere and builds NativeInputProbe.vcxproj plus
+the [diagnostic receiver DLL](NativeReceiverControl.md). Outputs are ignored
+x64/Debug/Rug.NativeInputProbe.exe and Rug.NativeRawReceiver.dll. Neither project
+references Rug.Core or changes production DLLs. The DLL loads only in B's opt-in
+native count control; A's sender and Hook implementation remain unchanged.
 Human/SelfTest need the existing x64/Debug/Rug.Core.dll and dependencies.
 
 | Mode | Behavior |

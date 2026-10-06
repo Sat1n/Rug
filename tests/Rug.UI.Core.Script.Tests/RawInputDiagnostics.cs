@@ -88,9 +88,10 @@ internal static class RawInputDiagnostics
         "keyboard-messages" => (true, true, false),
         "keyboard-messages-mouse" => (true, true, false),
         "keyboard-messages-keyboard" => (true, true, false),
-        _ => throw new ArgumentException("Use --hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split|keyboard-pump|keyboard-direct|keyboard-messages|keyboard-messages-mouse|keyboard-messages-keyboard")
+        "keyboard-native-messages" => (true, true, false),
+        _ => throw new ArgumentException("Use --hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split|keyboard-pump|keyboard-direct|keyboard-messages|keyboard-messages-mouse|keyboard-messages-keyboard|keyboard-native-messages")
     };
-    internal static bool UsesSplitProbe(string stage) => stage is "both-raw-split" or "target-raw" or "keyboard-raw" or "keyboard-split" or "keyboard-pump" or "keyboard-direct" or "keyboard-messages" or "keyboard-messages-mouse" or "keyboard-messages-keyboard";
+    internal static bool UsesSplitProbe(string stage) => stage is "both-raw-split" or "target-raw" or "keyboard-raw" or "keyboard-split" or "keyboard-pump" or "keyboard-direct" or "keyboard-messages" or "keyboard-messages-mouse" or "keyboard-messages-keyboard" or "keyboard-native-messages";
     internal static bool UsesRawInput(string stage) => stage is "both-raw" or "both-raw-split" or "target-raw" or "keyboard-raw";
     // @shape Fresh process per stage; raw modes register Raw Input, never emit/reinstall Hooks.
     // @source Existing native sender stays unchanged: tests/NativeInputProbe/main.cpp#class:CoreInput
@@ -106,11 +107,13 @@ internal static class RawInputDiagnostics
         await using var source = UsesRawInput(stage) ? new RawInputEventSource() : null;
         bool direct = stage == "keyboard-direct";
         bool mouseOnly = stage == "keyboard-messages-mouse";
-        bool keyboardOnly = stage == "keyboard-messages-keyboard";
-        bool messages = stage is "keyboard-messages" or "keyboard-messages-mouse" or "keyboard-messages-keyboard";
+        bool nativeMessages = stage == "keyboard-native-messages";
+        bool keyboardOnly = stage is "keyboard-messages-keyboard" or "keyboard-native-messages";
+        bool messages = stage is "keyboard-messages" or "keyboard-messages-mouse" or "keyboard-messages-keyboard" or "keyboard-native-messages";
         bool registeredPump = direct || messages;
-        string pumpLabel = keyboardOnly ? "KEYBOARD MESSAGES" : mouseOnly ? "MOUSE MESSAGES" : messages ? "MESSAGES" : direct ? "DIRECT" : "UNREGISTERED";
-        await using var receiverPump = stage is "keyboard-pump" or "keyboard-direct" or "keyboard-messages" or "keyboard-messages-mouse" or "keyboard-messages-keyboard"
+        string pumpLabel = nativeMessages ? "NATIVE KEYBOARD MESSAGES" : keyboardOnly ? "KEYBOARD MESSAGES" : mouseOnly ? "MOUSE MESSAGES" : messages ? "MESSAGES" : direct ? "DIRECT" : "UNREGISTERED";
+        await using IDiagnosticRawInputPump? receiverPump = nativeMessages ? new DiagnosticNativeRawInputPump()
+            : stage is "keyboard-pump" or "keyboard-direct" or "keyboard-messages" or "keyboard-messages-mouse" or "keyboard-messages-keyboard"
             ? new DiagnosticRawInputPump(registeredPump, readPackets: !messages, registerKeyboard: !mouseOnly, registerMouse: !keyboardOnly) : null;
         RawInputDiagnosticWindow.Counters? ReadCounts()
         {
@@ -148,7 +151,14 @@ internal static class RawInputDiagnostics
             {
                 await receiverPump.StartAsync().WaitAsync(TimeSpan.FromSeconds(5));
                 if (mouseOnly) Console.WriteLine("RAW REGISTRATION SELECTION: mouse=True keyboard=False; only keyboard device registration omitted from keyboard-messages. Same sender/target/Hook threads and count-only handling; no raw software/candidate classification collected.");
-                if (keyboardOnly) Console.WriteLine("RAW REGISTRATION SELECTION: mouse=False keyboard=True; only mouse device registration omitted from keyboard-messages. Same sender/target/Hook threads and count-only handling; no raw software/candidate classification collected.");
+                if (keyboardOnly && !nativeMessages) Console.WriteLine("RAW REGISTRATION SELECTION: mouse=False keyboard=True; only mouse device registration omitted from keyboard-messages. Same sender/target/Hook threads and count-only handling; no raw software/candidate classification collected.");
+                if (nativeMessages)
+                {
+                    string path = ((DiagnosticNativeRawInputPump)receiverPump).LoadedPath;
+                    using var file = File.OpenRead(path);
+                    string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(file));
+                    Console.WriteLine($"NATIVE RECEIVER: sameProcessId={Environment.ProcessId} path={path} sha256={hash} bytes={file.Length}; native registration/window callback/message loop, no managed receive callbacks. Same dedicated Thread topology, keyboard-only 0x2100, timer=250ms; sender/target/Hooks unchanged.");
+                }
                 Console.WriteLine(messages
                     ? "RAW INPUT MESSAGE CONTROL: normal registration/ownership/timer/WM_INPUT cleanup retained. Packet reading/parsing/tracking/classification and observation callbacks OMITTED. Raw software/candidate evidence NOT COLLECTED; message counts do not certify keyboard delivery or software attribution."
                     : direct
@@ -256,7 +266,7 @@ internal static class RawInputDiagnostics
                 separateProbe.Dispose(); PrintProbe(separateProbe, "ISOLATION HOOK STOPPED");
                 if (separateProbe.Status.Failure is not null) Environment.ExitCode = 2;
             }
-            if (stage is "keyboard-split" or "keyboard-pump" or "keyboard-direct" or "keyboard-messages" or "keyboard-messages-mouse" or "keyboard-messages-keyboard") PrintRawRegistrations("STOPPED");
+            if (stage is "keyboard-split" or "keyboard-pump" or "keyboard-direct" or "keyboard-messages" or "keyboard-messages-mouse" or "keyboard-messages-keyboard" or "keyboard-native-messages") PrintRawRegistrations("STOPPED");
             Console.WriteLine("ISOLATION finished; no software/human acceptance inferred from pump health.");
         }
     }

@@ -310,6 +310,13 @@ both-class count mode. It preserves usage 6, flags, pump, target and Hooks;
 three added lifecycles verify keyboard-only ownership, unexpected mouse faults,
 replacement protection and cleanup. Raw evidence remains NOT COLLECTED.
 See [paired steps](../tests/NativeInputProbe/ReceiverRegistrationControl.md#keyboard-only-registration-keyboard-messages-keyboard).
+The user's keyboard-only run also missed both software keyboard Hook paths;
+targets delivered F8/B 1/1, mouse Hooks captured 10, human callbacks continued,
+and 293 input/cleanup calls matched with zero final registrations. Keyboard
+registration alone correlates in this setup; no API root cause follows.
+The [native receiver control](../tests/NativeInputProbe/NativeReceiverControl.md)
+replaces the same-process count receiver only. Its internal Native adapter loads
+a test DLL explicitly; no production event-source activation or Rug.Core ABI change.
 No input emitter, C-ABI, Hook forwarding or takeover changes.
 
 Automated parsing/lifecycle/buffering and real native registration tests pass.

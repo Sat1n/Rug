@@ -29,6 +29,7 @@ a Hook, or alters production emitters. Both both-raw modes, target-raw and keybo
 | keyboard-messages | Yes | Yes, same registered receiver | Yes | No | Yes, messages only; raw evidence omitted |
 | keyboard-messages-mouse | Yes | Yes, same receiver | Yes | No | Mouse only; messages only |
 | keyboard-messages-keyboard | Yes | Yes, same receiver | Yes | No | Keyboard only; messages only |
+| keyboard-native-messages | Yes | Yes, native receiver body | Yes | No | Keyboard only; messages only |
 
 Use **fresh A and B processes for every stage**, in this order:
 
@@ -413,15 +414,11 @@ direct copied-observation counts, retaining no event-source queue/consumer:
 | Human foreground/background input | User counters show observed input; explicit normal-operation confirmation remains needed |
 | Normal operation/shortcuts/window interaction | Human visual confirmation needed; counters cannot certify this |
 
-Mouse-only count mode passed both Hooks; restoring both registrations restored
-the keyboard gap with complete target delivery. Next [keyboard-only control](ReceiverRegistrationControl.md#keyboard-only-registration-keyboard-messages-keyboard)
-omits only mouse registration from the failing both-class count mode.
-After a supported
-repair, rerun the ORIGINAL raw-input-diagnostic (managed InputService sender),
-HUMAN BEFORE -> AUTO -> HUMAN AFTER with complete Hook/raw/target evidence,
-and relevant automated regressions. A simplified control passing alone is not
-original-scenario acceptance. Repeat a repaired scenario if needed to address
-the observed order dependence. Additional single-condition controls depend on
-results; there is no evidence-based fixed number yet. No need to rerun every
-historical matrix or vary unrelated external applications at the same time.
-Automatic takeover integration is future development, outside this unit.
+Mouse-only count mode passed; both-class and keyboard-only modes missed software
+keyboard Hooks with complete targets. Next [native receiver control](NativeReceiverControl.md)
+replaces only B's same-process keyboard count receiver implementation.
+After a supported repair, rerun ORIGINAL raw-input-diagnostic with managed
+InputService sending, HUMAN BEFORE -> AUTO -> HUMAN AFTER, complete Hook/raw/target
+evidence and regressions. Reduced controls are not acceptance. Further controls
+depend on evidence; do not vary unrelated applications or promise a fixed count.
+Automatic takeover remains deferred.

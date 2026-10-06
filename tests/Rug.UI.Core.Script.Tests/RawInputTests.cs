@@ -24,6 +24,7 @@ internal static class RawInputTests
         await MessagePumpLifecycleAsync();
         await MessagePumpLifecycleAsync(registerKeyboard: false);
         await MessagePumpLifecycleAsync(registerMouse: false);
+        await MessagePumpLifecycleAsync(registerMouse: false, native: true);
         await LifecycleAsync();
         await ConsumersAsync();
         await NativeLifecycleAsync();
@@ -104,6 +105,9 @@ internal static class RawInputTests
             "keyboard-only registration changed Hook selection or creates an event source");
         try { _ = new DiagnosticRawInputPump(registerDevices: true, registerMouse: false); throw new Exception("keyboard-only packet mode accepted"); } catch (ArgumentException) { }
         try { _ = new DiagnosticRawInputPump(registerDevices: true, readPackets: false, registerKeyboard: false, registerMouse: false); throw new Exception("empty device selection accepted"); } catch (ArgumentException) { }
+        Check(RawInputDiagnostics.IsolationStage("keyboard-native-messages") == (true, true, false)
+            && RawInputDiagnostics.UsesSplitProbe("keyboard-native-messages") && !RawInputDiagnostics.UsesRawInput("keyboard-native-messages"),
+            "native receiver changed Hook selection or creates a production source");
         var aggregate = new RawInputDiagnostics.RawAggregate();
         var baseline = aggregate.Read();
         aggregate.Observe(new(1, 1, 1, new(InputEventKind.Keyboard, 1, false, ExtraInformation: InputObservation.RugSoftwareInputTag)));
@@ -340,16 +344,27 @@ internal static class RawInputTests
     }
     // @shape Three count-only lifecycles per registration selection; no packet parsing, tracking or observations.
     // @source Rug.UI.Core/Native/WindowsRawInputReceiver.cs#class:WindowsRawInputReceiver
-    private static async Task MessagePumpLifecycleAsync(bool registerKeyboard = true, bool registerMouse = true)
+    private static async Task MessagePumpLifecycleAsync(bool registerKeyboard = true, bool registerMouse = true, bool native = false)
     {
         if (!OperatingSystem.IsWindows()) return;
+        if (native && !File.Exists(DiagnosticNativeRawInputPump.LibraryPath))
+        { Console.WriteLine("NOT RUN: native count-only lifecycles; build tests/run_native_input_probe.ps1 -Mode Build first."); return; }
+        if (native)
+        {
+            await using var unstarted = new DiagnosticNativeRawInputPump();
+            await Task.WhenAll(unstarted.DisposeAsync().AsTask(), unstarted.DisposeAsync().AsTask());
+            try { await unstarted.StartAsync(); throw new Exception("disposed native receiver started"); } catch (ObjectDisposedException) { }
+            Check(unstarted.Status.Hwnd == 0 && !unstarted.Status.PumpReady, "unstarted native receiver acquired resources");
+        }
+        IDiagnosticRawInputPump CreatePump() => native ? new DiagnosticNativeRawInputPump()
+            : new DiagnosticRawInputPump(registerDevices: true, readPackets: false, registerKeyboard: registerKeyboard, registerMouse: registerMouse);
         long generation = 0;
         for (int run = 0; run < 3; run++)
         {
             using var target = new RawInputDiagnosticWindow(false, false);
             using var probe = new RawInputDiagnosticWindow(true, false, messageOnly: true);
             await Task.WhenAll(target.Ready.Task, probe.Ready.Task).WaitAsync(TimeSpan.FromSeconds(5));
-            await using var pump = new DiagnosticRawInputPump(registerDevices: true, readPackets: false, registerKeyboard: registerKeyboard, registerMouse: registerMouse);
+            await using var pump = CreatePump();
             await Task.WhenAll(pump.StartAsync(), pump.StartAsync()).WaitAsync(TimeSpan.FromSeconds(5));
             var ready = pump.Status;
             var owned = WindowsRawInputReceiver.Registrations().Where(d => d.Page == 1 && d.Usage is 2 or 6).ToArray();
@@ -379,8 +394,11 @@ internal static class RawInputTests
                 "count-only parsed malformed data, skipped cleanup or published fabricated raw evidence");
             if (run == 1)
             {
-                await using var conflict = new DiagnosticRawInputPump(registerDevices: true, readPackets: false, registerKeyboard: registerKeyboard, registerMouse: registerMouse);
-                try { await conflict.StartAsync(); throw new Exception("count-only control overwrote live registrations"); } catch (RawInputException) { }
+                await using var conflict = CreatePump();
+                Exception? rejected = null;
+                try { await conflict.StartAsync(); } catch (Exception error) { rejected = error; }
+                Check(native ? rejected is InvalidOperationException && conflict.Status.Failure!.Contains("code=1")
+                    : rejected is RawInputException, "count-only conflict did not report registration rejection");
                 await conflict.DisposeAsync();
                 Check(conflict.Status is { ThreadExited: true, PumpReady: false, Hwnd: 0 } && conflict.Status.Failure is not null
                     && WindowsRawInputReceiver.Registrations().Where(d => d.Page == 1 && d.Usage is 2 or 6).SequenceEqual(owned),
@@ -438,7 +456,7 @@ internal static class RawInputTests
                 && probe.Status is { ThreadExited: true, Failure: null } && target.Status is { ThreadExited: true, Failure: null },
                 "count-only lifecycle leaked registrations or threads");
         }
-        Console.WriteLine($"Registered message-only receiver keyboard={registerKeyboard} mouse={registerMouse}, omitted parsing/evidence, WM_INPUT cleanup, conflicts, ownership loss and generations passed (3 lifecycles; AUTO not inferred)");
+        Console.WriteLine($"Registered message-only receiver native={native} keyboard={registerKeyboard} mouse={registerMouse}, omitted parsing/evidence, WM_INPUT cleanup, conflicts, ownership loss and generations passed (3 lifecycles; AUTO not inferred)");
     }
     private static byte[] Packet(uint type, int pointerSize, int body)
     {

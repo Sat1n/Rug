@@ -2,7 +2,7 @@ using Rug.UI.Core.Native;
 using Rug.UI.Core.Models;
 
 /// <summary>Diagnostic pump only; never implements the registered event-source contract.</summary>
-internal sealed class DiagnosticRawInputPump : IAsyncDisposable
+internal sealed class DiagnosticRawInputPump : IDiagnosticRawInputPump
 {
     private static long _nextGeneration;
     private readonly long _generation = Interlocked.Increment(ref _nextGeneration);
@@ -24,7 +24,7 @@ internal sealed class DiagnosticRawInputPump : IAsyncDisposable
         bool PumpReady, bool ThreadExited, long TimerMessages, long InputMessages, long DeviceMessages,
         long UnexpectedEvents, string? Failure, RawInputDiagnostics.RawEvidence? Evidence,
         bool PacketReadingEnabled, long InputCleanupCalls, bool KeyboardRegistrationEnabled, bool MouseRegistrationEnabled);
-    internal Snapshot Status
+    public Snapshot Status
     {
         get
         {
@@ -49,7 +49,7 @@ internal sealed class DiagnosticRawInputPump : IAsyncDisposable
         _thread = new Thread(Run) { IsBackground = true, Name = "Rug Raw Input receiver" };
     }
 
-    internal Task StartAsync()
+    public Task StartAsync()
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         if (Interlocked.Exchange(ref _started, 1) == 0)
@@ -79,7 +79,7 @@ internal sealed class DiagnosticRawInputPump : IAsyncDisposable
         catch (Exception error) { Volatile.Write(ref _failure, error.Message); _ready.TrySetException(error); }
         finally { _ended.TrySetResult(); }
     }
-    internal Task SynchronizeAsync() => _receiver.SynchronizeAsync();
+    public Task SynchronizeAsync() => _receiver.SynchronizeAsync();
     public async ValueTask DisposeAsync()
     {
         bool ownsDisposal = Interlocked.Exchange(ref _disposed, 1) == 0;
@@ -91,4 +91,11 @@ internal sealed class DiagnosticRawInputPump : IAsyncDisposable
         }
         if (ownsDisposal) _stop.Dispose();
     }
+}
+
+internal interface IDiagnosticRawInputPump : IAsyncDisposable
+{
+    DiagnosticRawInputPump.Snapshot Status { get; }
+    Task StartAsync();
+    Task SynchronizeAsync();
 }

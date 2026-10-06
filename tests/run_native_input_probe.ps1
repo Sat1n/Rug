@@ -14,6 +14,9 @@ if (-not $probeMsbuild) {
 if (-not $probeMsbuild) { throw 'Visual Studio C++ v145 tools and Windows SDK are required; MSBuild was not found.' }
 & $probeMsbuild $probeProject /p:Configuration=Debug /p:Platform=x64 /v:minimal /nologo
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$probeReceiverProject = Join-Path $PSScriptRoot 'NativeInputProbe/NativeRawReceiver.vcxproj'
+& $probeMsbuild $probeReceiverProject /p:Configuration=Debug /p:Platform=x64 /v:minimal /nologo
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($Mode -eq 'Build') { exit 0 }
 if ($Mode -in @('Human', 'SelfTest', 'ManagedTarget')) {
     $probeCore = Join-Path $probeRoot 'x64/Debug/Rug.Core.dll'

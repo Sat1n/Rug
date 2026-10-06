@@ -339,3 +339,9 @@ Three additional keyboard-only lifecycles check flags, conflicts, unexpected
 mouse ownership, malformed count-only messages, replacement protection and
 cleanup. Both/mouse-only tests remain. Paired AUTO/HUMAN is NOT RUN by the agent;
 repair and ORIGINAL diagnostics must pass before automatic takeover integration.
+
+The user's keyboard-only round reproduced missing software keyboard callbacks
+in both Hooks, with targets 1/1 per F8/B round, tagged mouse 10, continuing human
+callbacks, 293 matching input/cleanup calls and clean teardown. Next compare the
+[same-process native receiver](NativeReceiverControl.md), retaining keyboard-only
+registration and all sender/target/Hook conditions. Raw attribution remains absent.

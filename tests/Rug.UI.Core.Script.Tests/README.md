@@ -8,7 +8,7 @@ tags: [lua, tests, input]
 
 # Lua coroutine bridge tests
 
-Opt-in `--hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split|keyboard-pump|keyboard-direct|keyboard-messages|keyboard-messages-mouse|keyboard-messages-keyboard` supports the
+Opt-in `--hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split|keyboard-pump|keyboard-direct|keyboard-messages|keyboard-messages-mouse|keyboard-messages-keyboard|keyboard-native-messages` supports the
 [controlled comparison](../NativeInputProbe/ControlledStages.md). It sends no
 input; both-raw modes add Raw Input after both Hooks; target-raw adds it without
 managed Hooks. Packet-reading stages report software/candidate deltas; count-only
@@ -72,6 +72,15 @@ Actual ownership must show one keyboard and no mouse/page-wide entry. Three more
 lifecycles cover conflicts, unexpected mouse ownership faults and cleanup, giving
 nine count-only lifecycles across both/single-class selections. Raw evidence stays
 NOT COLLECTED; paired AUTO/HUMAN remains NOT RUN by the agent.
+keyboard-native-messages replaces only the keyboard-only count receiver with a
+[same-process native implementation](../NativeInputProbe/NativeReceiverControl.md).
+It calls a test-only DLL on the same dedicated managed Thread topology, keeping
+target/Hooks and sender intact. There are no native-to-managed message callbacks;
+startup/barriers poll detached scalar snapshots. Three native lifecycles reuse
+the managed assertions for flags/ownership, malformed count messages, conflicts,
+foreign-registration preservation and cleanup; unstarted disposal is covered.
+Build the DLL with tests/run_native_input_probe.ps1 -Mode Build; absent DLL means
+these native tests are explicitly NOT RUN. Paired AUTO remains separate.
 
 Run `dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64` with the root-pinned .NET SDK `10.0.401`.
 The console test uses fake capture, OCR and input services, so no native Rug.Core
