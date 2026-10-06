@@ -317,6 +317,10 @@ registration alone correlates in this setup; no API root cause follows.
 The [native receiver control](../tests/NativeInputProbe/NativeReceiverControl.md)
 replaces the same-process count receiver only. Its internal Native adapter loads
 a test DLL explicitly; no production event-source activation or Rug.Core ABI change.
+The user's native receiver retained both Hook gaps: B delivered 1/1, F8 0/1
+(separate incomplete-delivery evidence), mouse Hooks 10, cleanup 307, no fault.
+target-native-messages omits B's managed keyboard Hook while retaining its idle
+thread and native receiver. B zero Hook counts are expected; A remains the observer.
 No input emitter, C-ABI, Hook forwarding or takeover changes.
 
 Automated parsing/lifecycle/buffering and real native registration tests pass.

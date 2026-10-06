@@ -89,9 +89,10 @@ internal static class RawInputDiagnostics
         "keyboard-messages-mouse" => (true, true, false),
         "keyboard-messages-keyboard" => (true, true, false),
         "keyboard-native-messages" => (true, true, false),
-        _ => throw new ArgumentException("Use --hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split|keyboard-pump|keyboard-direct|keyboard-messages|keyboard-messages-mouse|keyboard-messages-keyboard|keyboard-native-messages")
+        "target-native-messages" => (true, false, false),
+        _ => throw new ArgumentException("Use --hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split|keyboard-pump|keyboard-direct|keyboard-messages|keyboard-messages-mouse|keyboard-messages-keyboard|keyboard-native-messages|target-native-messages")
     };
-    internal static bool UsesSplitProbe(string stage) => stage is "both-raw-split" or "target-raw" or "keyboard-raw" or "keyboard-split" or "keyboard-pump" or "keyboard-direct" or "keyboard-messages" or "keyboard-messages-mouse" or "keyboard-messages-keyboard" or "keyboard-native-messages";
+    internal static bool UsesSplitProbe(string stage) => stage is "both-raw-split" or "target-raw" or "keyboard-raw" or "keyboard-split" or "keyboard-pump" or "keyboard-direct" or "keyboard-messages" or "keyboard-messages-mouse" or "keyboard-messages-keyboard" or "keyboard-native-messages" or "target-native-messages";
     internal static bool UsesRawInput(string stage) => stage is "both-raw" or "both-raw-split" or "target-raw" or "keyboard-raw";
     // @shape Fresh process per stage; raw modes register Raw Input, never emit/reinstall Hooks.
     // @source Existing native sender stays unchanged: tests/NativeInputProbe/main.cpp#class:CoreInput
@@ -107,9 +108,9 @@ internal static class RawInputDiagnostics
         await using var source = UsesRawInput(stage) ? new RawInputEventSource() : null;
         bool direct = stage == "keyboard-direct";
         bool mouseOnly = stage == "keyboard-messages-mouse";
-        bool nativeMessages = stage == "keyboard-native-messages";
-        bool keyboardOnly = stage is "keyboard-messages-keyboard" or "keyboard-native-messages";
-        bool messages = stage is "keyboard-messages" or "keyboard-messages-mouse" or "keyboard-messages-keyboard" or "keyboard-native-messages";
+        bool nativeMessages = stage is "keyboard-native-messages" or "target-native-messages";
+        bool keyboardOnly = stage is "keyboard-messages-keyboard" or "keyboard-native-messages" or "target-native-messages";
+        bool messages = stage is "keyboard-messages" or "keyboard-messages-mouse" or "keyboard-messages-keyboard" or "keyboard-native-messages" or "target-native-messages";
         bool registeredPump = direct || messages;
         string pumpLabel = nativeMessages ? "NATIVE KEYBOARD MESSAGES" : keyboardOnly ? "KEYBOARD MESSAGES" : mouseOnly ? "MOUSE MESSAGES" : messages ? "MESSAGES" : direct ? "DIRECT" : "UNREGISTERED";
         await using IDiagnosticRawInputPump? receiverPump = nativeMessages ? new DiagnosticNativeRawInputPump()
@@ -134,6 +135,8 @@ internal static class RawInputDiagnostics
                 Console.WriteLine($"THREAD TOPOLOGY: targetThreadId={window!.Status.InstallThreadId} hookThreadId={probe!.Status.InstallThreadId} split=True");
             if (stage == "target-raw")
                 Console.WriteLine("MANAGED HOOKS OMITTED: dedicated message-only receiver/thread retained; keyboard/mouse hooks intentionally not installed. Use A's native Hook evidence.");
+            if (stage == "target-native-messages")
+                Console.WriteLine("MANAGED HOOKS OMITTED: only keyboard Hook installation omitted from keyboard-native-messages; idle message-only Hook window/thread retained. Same native keyboard count receiver/target/sender; use A's native Hook evidence. B's zero Hook counters are expected, not acceptance.");
             if (stage == "keyboard-raw")
                 Console.WriteLine("MANAGED HOOK SELECTION: keyboard=True mouse=False; same dedicated receiver/thread as target-raw. Preserve A's native and B's keyboard Hook evidence.");
             if (stage == "keyboard-split")
@@ -157,7 +160,7 @@ internal static class RawInputDiagnostics
                     string path = ((DiagnosticNativeRawInputPump)receiverPump).LoadedPath;
                     using var file = File.OpenRead(path);
                     string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(file));
-                    Console.WriteLine($"NATIVE RECEIVER: sameProcessId={Environment.ProcessId} path={path} sha256={hash} bytes={file.Length}; native registration/window callback/message loop, no managed receive callbacks. Same dedicated Thread topology, keyboard-only 0x2100, timer=250ms; sender/target/Hooks unchanged.");
+                    Console.WriteLine($"NATIVE RECEIVER: sameProcessId={Environment.ProcessId} path={path} sha256={hash} bytes={file.Length}; native registration/window callback/message loop, no managed receive callbacks. Same dedicated Thread topology, keyboard-only 0x2100, timer=250ms; sender/target/native Hooks unchanged, managed selection reported separately.");
                 }
                 Console.WriteLine(messages
                     ? "RAW INPUT MESSAGE CONTROL: normal registration/ownership/timer/WM_INPUT cleanup retained. Packet reading/parsing/tracking/classification and observation callbacks OMITTED. Raw software/candidate evidence NOT COLLECTED; message counts do not certify keyboard delivery or software attribution."
@@ -220,6 +223,13 @@ internal static class RawInputDiagnostics
                 await window.SynchronizeAsync();
                 if (separateProbe is not null) { await separateProbe.SynchronizeAsync(); PrintProbe(window, label + " TARGET"); }
                 PrintProbe(probe!, label);
+                if (stage == "target-native-messages")
+                {
+                    var idle = probe!.Status; var idleCounts = probe.Counts;
+                    if (idle.KeyboardInstalled || idle.MouseInstalled || idle.ThreadExited || idle.Failure is not null
+                        || idleCounts.Keyboard.CallbackTotal != 0 || idleCounts.Mouse.CallbackTotal != 0)
+                        throw new InvalidOperationException("INCONCLUSIVE: omitted-Hook receiver is not the expected healthy idle thread");
+                }
                 var now = ReadCounts()!;
                 PrintHook(label + " keyboard DELTA", now.Keyboard.Delta(previous!.Keyboard));
                 PrintHook(label + " mouse DELTA", now.Mouse.Delta(previous.Mouse));
@@ -266,7 +276,7 @@ internal static class RawInputDiagnostics
                 separateProbe.Dispose(); PrintProbe(separateProbe, "ISOLATION HOOK STOPPED");
                 if (separateProbe.Status.Failure is not null) Environment.ExitCode = 2;
             }
-            if (stage is "keyboard-split" or "keyboard-pump" or "keyboard-direct" or "keyboard-messages" or "keyboard-messages-mouse" or "keyboard-messages-keyboard" or "keyboard-native-messages") PrintRawRegistrations("STOPPED");
+            if (stage is "keyboard-split" or "keyboard-pump" or "keyboard-direct" or "keyboard-messages" or "keyboard-messages-mouse" or "keyboard-messages-keyboard" or "keyboard-native-messages" or "target-native-messages") PrintRawRegistrations("STOPPED");
             Console.WriteLine("ISOLATION finished; no software/human acceptance inferred from pump health.");
         }
     }

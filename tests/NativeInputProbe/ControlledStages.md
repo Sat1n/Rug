@@ -30,6 +30,7 @@ a Hook, or alters production emitters. Both both-raw modes, target-raw and keybo
 | keyboard-messages-mouse | Yes | Yes, same receiver | Yes | No | Mouse only; messages only |
 | keyboard-messages-keyboard | Yes | Yes, same receiver | Yes | No | Keyboard only; messages only |
 | keyboard-native-messages | Yes | Yes, native receiver body | Yes | No | Keyboard only; messages only |
+| target-native-messages | Yes | Yes, same native receiver + idle Hook thread | No | No | Keyboard only; messages only |
 
 Use **fresh A and B processes for every stage**, in this order:
 
@@ -416,7 +417,9 @@ direct copied-observation counts, retaining no event-source queue/consumer:
 
 Mouse-only count mode passed; both-class and keyboard-only modes missed software
 keyboard Hooks with complete targets. Next [native receiver control](NativeReceiverControl.md)
-replaces only B's same-process keyboard count receiver implementation.
+compares B's native keyboard count receiver with/without its managed Hook,
+retaining the idle thread. Native-receiver B-key delivery was complete with Hook
+gaps; F8 delivered 0/1 and remains separately inconclusive.
 After a supported repair, rerun ORIGINAL raw-input-diagnostic with managed
 InputService sending, HUMAN BEFORE -> AUTO -> HUMAN AFTER, complete Hook/raw/target
 evidence and regressions. Reduced controls are not acceptance. Further controls

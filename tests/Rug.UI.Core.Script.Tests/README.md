@@ -8,7 +8,7 @@ tags: [lua, tests, input]
 
 # Lua coroutine bridge tests
 
-Opt-in `--hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split|keyboard-pump|keyboard-direct|keyboard-messages|keyboard-messages-mouse|keyboard-messages-keyboard|keyboard-native-messages` supports the
+Opt-in `--hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split|keyboard-pump|keyboard-direct|keyboard-messages|keyboard-messages-mouse|keyboard-messages-keyboard|keyboard-native-messages|target-native-messages` supports the
 [controlled comparison](../NativeInputProbe/ControlledStages.md). It sends no
 input; both-raw modes add Raw Input after both Hooks; target-raw adds it without
 managed Hooks. Packet-reading stages report software/candidate deltas; count-only
@@ -81,6 +81,12 @@ the managed assertions for flags/ownership, malformed count messages, conflicts,
 foreign-registration preservation and cleanup; unstarted disposal is covered.
 Build the DLL with tests/run_native_input_probe.ps1 -Mode Build; absent DLL means
 these native tests are explicitly NOT RUN. Paired AUTO remains separate.
+target-native-messages omits only the managed keyboard Hook installation from
+keyboard-native-messages, retaining its idle message-only window/thread and the
+same native keyboard count receiver. Both B Hook flags/counters must be false/zero;
+only A supplies Hook evidence. Three additional native lifecycles assert thread
+separation, target query/delivery, exact registration and full fault/cleanup behavior.
+This is not disabling Hook verification in the original diagnostics or A.
 
 Run `dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64` with the root-pinned .NET SDK `10.0.401`.
 The console test uses fake capture, OCR and input services, so no native Rug.Core

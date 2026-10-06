@@ -111,3 +111,49 @@ Build with tests/run_native_input_probe.ps1 -Mode Build before normal script tes
 missing DLL explicitly reports native lifecycles NOT RUN, never as passed.
 Interactive paired AUTO/HUMAN is NOT RUN by the agent. Original integrated failure
 still requires supported repair and original diagnostics; automatic takeover waits.
+
+## No managed Hook: target-native-messages
+
+The user's native-receiver run retained missing tagged software keys in both
+Hooks. SendInput/B delivered target down/up 1/1; SendInput/F8 delivered 0/1,
+so F8 does NOT supply complete-target evidence. Both PostMessage rounds passed.
+Native mouse Hooks observed 10 tagged injected events; human keyboard BEFORE/
+AFTER callbacks were 85/81. Same-process keyboard-only ownership was verified,
+input/cleanup totals 307, timer 426, no faults and zero final registrations.
+Thus managed Raw Input callback/loop implementation is not necessary for the
+B-key reproduction. No Windows or Hook-chain root cause is established.
+
+target-native-messages changes only B's managed keyboard Hook installation from
+keyboard-native-messages. Keep its idle message-only window/thread, the SAME
+native receiver DLL/registration/timer/count handling, managed visible target and
+A's native sender/two Hooks. This does not weaken original Hook verification:
+B's omitted counters are EXPECTED ZERO; A is the sole Hook observer in this mode.
+
+Use the same A-first command and paired HUMAN BEFORE/AUTO/HUMAN AFTER sequence
+above. At A's HWND/PID prompt, B SECOND:
+
+~~~powershell
+dotnet run --project F:/Cardinal/Rug/Rug/tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64 -- --hook-isolation-stage target-native-messages
+~~~
+
+Check MANAGED HOOKS OMITTED, ISOLATION READY keyboardRequested=False/mouseRequested=False,
+both managed Hook flags False/error 0, and separate target/idle/Raw thread IDs.
+Native PUMP remains keyboard registration True/mouse False/reading False/no
+Failure; actual registration count=1, keyboardOwned=True, mousePresent=False.
+Native receiver sameProcessId matches B; its DLL hash should match the preceding
+native-receiver control when not rebuilt. A's two Hooks must remain installed.
+Raw software/candidate evidence remains NOT COLLECTED. B zero Hook counters and
+healthy barriers are NOT software acceptance. F8 and B target counts are judged
+separately; any missing down/up remains INCONCLUSIVE, even if Hook counts recover.
+
+| Evidence | Direction |
+|---|---|
+| A's tagged keyboard down/up and targets complete | Missing managed Hook installation correlates with recovery; reverse-confirm before repairing |
+| A still misses software keys, human callbacks/targets complete | Managed Hook is not necessary under this native receiver; investigate retained process/target/registration conditions |
+| Partial target delivery, fault, interference or wrong registration | Keep that round inconclusive; do not use another key's success to hide it |
+
+Three additional no-managed-Hook native lifecycles verify the unchanged receiver,
+idle thread flags/zero counters, target query/delivery, barriers/timers, conflicts,
+ownership loss, foreign-owner preservation, generations and cleanup. Prior native
+Hook-enabled tests remain. Paired AUTO/HUMAN is NOT RUN by the agent. No production
+listener, input emitter, C-ABI, Hook forwarding or automatic takeover change.

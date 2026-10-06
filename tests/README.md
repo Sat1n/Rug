@@ -24,6 +24,7 @@ The [controlled stages](NativeInputProbe/ControlledStages.md) retain native send
 while comparing threads, managed Hooks and [device-class registration/packet processing/delivery](NativeInputProbe/ReceiverRegistrationControl.md).
 The runner also builds a [test-only same-process native receiver](NativeInputProbe/NativeReceiverControl.md),
 replacing B's keyboard count receiver without changing Rug.Core or the sender.
+Its no-managed-Hook control retains B's idle receiver thread and uses A's observers.
 
 ## Layout
 

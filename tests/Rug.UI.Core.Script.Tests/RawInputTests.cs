@@ -25,6 +25,7 @@ internal static class RawInputTests
         await MessagePumpLifecycleAsync(registerKeyboard: false);
         await MessagePumpLifecycleAsync(registerMouse: false);
         await MessagePumpLifecycleAsync(registerMouse: false, native: true);
+        await MessagePumpLifecycleAsync(registerMouse: false, native: true, managedKeyboard: false);
         await LifecycleAsync();
         await ConsumersAsync();
         await NativeLifecycleAsync();
@@ -108,6 +109,9 @@ internal static class RawInputTests
         Check(RawInputDiagnostics.IsolationStage("keyboard-native-messages") == (true, true, false)
             && RawInputDiagnostics.UsesSplitProbe("keyboard-native-messages") && !RawInputDiagnostics.UsesRawInput("keyboard-native-messages"),
             "native receiver changed Hook selection or creates a production source");
+        Check(RawInputDiagnostics.IsolationStage("target-native-messages") == (true, false, false)
+            && RawInputDiagnostics.UsesSplitProbe("target-native-messages") && !RawInputDiagnostics.UsesRawInput("target-native-messages"),
+            "no-Hook native receiver changed target/thread selection or creates a production source");
         var aggregate = new RawInputDiagnostics.RawAggregate();
         var baseline = aggregate.Read();
         aggregate.Observe(new(1, 1, 1, new(InputEventKind.Keyboard, 1, false, ExtraInformation: InputObservation.RugSoftwareInputTag)));
@@ -344,7 +348,7 @@ internal static class RawInputTests
     }
     // @shape Three count-only lifecycles per registration selection; no packet parsing, tracking or observations.
     // @source Rug.UI.Core/Native/WindowsRawInputReceiver.cs#class:WindowsRawInputReceiver
-    private static async Task MessagePumpLifecycleAsync(bool registerKeyboard = true, bool registerMouse = true, bool native = false)
+    private static async Task MessagePumpLifecycleAsync(bool registerKeyboard = true, bool registerMouse = true, bool native = false, bool managedKeyboard = true)
     {
         if (!OperatingSystem.IsWindows()) return;
         if (native && !File.Exists(DiagnosticNativeRawInputPump.LibraryPath))
@@ -362,7 +366,7 @@ internal static class RawInputTests
         for (int run = 0; run < 3; run++)
         {
             using var target = new RawInputDiagnosticWindow(false, false);
-            using var probe = new RawInputDiagnosticWindow(true, false, messageOnly: true);
+            using var probe = new RawInputDiagnosticWindow(managedKeyboard, false, messageOnly: true);
             await Task.WhenAll(target.Ready.Task, probe.Ready.Task).WaitAsync(TimeSpan.FromSeconds(5));
             await using var pump = CreatePump();
             await Task.WhenAll(pump.StartAsync(), pump.StartAsync()).WaitAsync(TimeSpan.FromSeconds(5));
@@ -379,8 +383,12 @@ internal static class RawInputTests
                 "count-only registration flags or thread topology changed");
             await Until(() => pump.Status.TimerMessages > 0);
             target.PostTargetMessagesForTest(); await target.SynchronizeAsync(); await probe.SynchronizeAsync();
-            Check(target.Counts.KeyDown > 0 && target.Counts.KeyUp > 0 && probe.Status.KeyboardInstalled && !probe.Status.MouseInstalled,
+            Check(target.QueryTargetMetricForTest(0) == RawInputDiagnosticWindow.TargetMetricMagic
+                && target.Counts.KeyDown > 0 && target.Counts.KeyUp > 0
+                && probe.Status.KeyboardInstalled == managedKeyboard && !probe.Status.MouseInstalled,
                 "count-only target protocol or Hook selection changed");
+            if (!managedKeyboard) Check(probe.Counts.Keyboard.CallbackTotal == 0 && probe.Counts.Mouse.CallbackTotal == 0,
+                "idle no-Hook thread unexpectedly collected callbacks");
             long inputs = pump.Status.InputMessages, cleanups = pump.Status.InputCleanupCalls, devices = pump.Status.DeviceMessages;
             // Invalid native handles would fail ordinary parsing. Both foreground and sink messages
             // must reach DefWindowProc without reads; invalid device payload must not create observations.
@@ -456,7 +464,7 @@ internal static class RawInputTests
                 && probe.Status is { ThreadExited: true, Failure: null } && target.Status is { ThreadExited: true, Failure: null },
                 "count-only lifecycle leaked registrations or threads");
         }
-        Console.WriteLine($"Registered message-only receiver native={native} keyboard={registerKeyboard} mouse={registerMouse}, omitted parsing/evidence, WM_INPUT cleanup, conflicts, ownership loss and generations passed (3 lifecycles; AUTO not inferred)");
+        Console.WriteLine($"Registered message-only receiver native={native} keyboard={registerKeyboard} mouse={registerMouse} managedKeyboardHook={managedKeyboard}, omitted parsing/evidence, WM_INPUT cleanup, conflicts, ownership loss and generations passed (3 lifecycles; AUTO not inferred)");
     }
     private static byte[] Packet(uint type, int pointerSize, int body)
     {
