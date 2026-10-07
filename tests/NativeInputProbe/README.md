@@ -10,6 +10,8 @@ tags: [diagnostics, input, hooks, native]
 
 [Controlled managed-component stages](ControlledStages.md) keep native emission
 fixed while adding DLL load, target window and individual Hook registrations.
+The next [module/send evidence control](InputEvidenceControl.md) separates native
+send returns, specific F8/B target delivery and the unresolved Hook discrepancy.
 `-Mode ManagedTarget` binds only B's validated diagnostic HWND/PID and keeps the
 native Rug.Core sender; see the controlled guide for startup/focus/counter rules.
 
@@ -30,6 +32,7 @@ CallNextHookEx total/max QPC ticks. Maxima are lifetime values even in delta lin
 Native offsetof static assertions verify x64 keyboard/mouse flags and extra-info
 layout. Snapshot reads are detached atomic aggregates, not cross-thread atomic
 transactions. Only known **tagged synthetic** F8/B down/up counts are separated;
+target message F8/B aggregates are also separated without asserting their origin;
 no human key sequences, text or full mouse trajectories are printed or saved.
 
 Each receiver has a generation, installation OS thread ID, architecture, install
@@ -41,7 +44,8 @@ and joins threads. Input and waits run in the console harness, never a host UI.
 [CoreInput](main.cpp#class:CoreInput) loads x64/Debug/Rug.Core.dll next to the probe
 using the current **unchanged** C-ABI. Moves, click, F8/B down/up and button release
 use real Rug.Core Win32InputController emitters with the existing 0x52554749 tag.
-The probe never edits production input or injects into a game/existing app. The
+Opt-in bounded native send recording preserves the input algorithm and ABI.
+The probe never injects into a game/existing app. The
 interactive mode refuses foreground input unless its own isolated target is
 already foreground; it does not bypass Windows activation policy. Background
 PostMessage remains confined to that window. No host grants/takeover are changed.
@@ -51,7 +55,7 @@ PostMessage remains confined to that window. No host grants/takeover are changed
 Requires Visual Studio v145 x64 C++ tools and Windows SDK. From repository root:
 
 ```powershell
-.\tests\run_native_input_probe.ps1 -Mode Test
+.\tests\run_native_input_probe.ps1 -Mode Test -BuildCore
 .\tests\run_native_input_probe.ps1 -Mode Human
 ```
 
@@ -60,14 +64,16 @@ the [diagnostic receiver DLL](NativeReceiverControl.md) and separate
 [keyboard callback DLL](NativeHookCallbackControl.md). Outputs are ignored
 x64/Debug/Rug.NativeInputProbe.exe, Rug.NativeRawReceiver.dll and
 Rug.NativeKeyboardHook.dll. None of these projects
-references Rug.Core or changes production DLLs. The DLL loads only in B's opt-in
+links to Rug.Core; `-BuildCore` explicitly builds/deploys the instrumented Core DLL.
+The test DLLs load only in B's opt-in
 native controls; A's sender and Hook implementation remain unchanged.
-Human/SelfTest need the existing x64/Debug/Rug.Core.dll and dependencies.
+Test/Human/SelfTest need x64/Debug/Rug.Core.dll and dependencies. See the evidence
+guide for deployment and fixed-binary comparisons.
 
 | Mode | Behavior |
 |---|---|
 | Build | Build only |
-| Test | Deterministic keyboard/mouse classification, layout/timing, post-ready fault, generation and repeated cleanup tests; no synthetic input |
+| Test | Deterministic classification/lifecycle/send-buffer/target-protocol tests and real Rug.Core PostMessage success/failure on an isolated hidden window; no physical SendInput |
 | Human (default) | HUMAN BEFORE -> AUTO F8/B in both modes -> HUMAN AFTER |
 | SelfTest | Same native software rounds without human acceptance; denied foreground is NOT RUN |
 | Observe | Passive independent native Hook observer, no synthetic input or DLL needed |
@@ -86,7 +92,8 @@ Human/SelfTest need the existing x64/Debug/Rug.Core.dll and dependencies.
    Missing BEFORE human callback evidence keeps the session INCONCLUSIVE, even
    if software rounds continue for diagnosis; it cannot become accepted.
 
-Native SendInput Hook verification requires actual target messages, tagged
+Native SendInput verification also requires complete native send records and
+exact specific tested-key target down/up=1/1. Hook verification requires tagged
 injected key >=2, tagged injected mouse >=5, tested-key down/up >=1 each, no
 parse/thread fault and no untagged-unflagged interference. PostMessage requires
 target delivery and no tagged hook input; ordinary user interference is NOT RUN.

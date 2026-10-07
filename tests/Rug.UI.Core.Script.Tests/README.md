@@ -87,10 +87,16 @@ same native keyboard count receiver. Both B Hook flags/counters must be false/ze
 only A supplies Hook evidence. Three additional native lifecycles assert thread
 separation, target query/delivery, exact registration and full fault/cleanup behavior.
 This is not disabling Hook verification in the original diagnostics or A.
-keyboard-native-callback retains keyboard-native-messages' installation parameters,
+keyboard-native-callback retains keyboard-native-messages' thread topology,
 managed Hook thread/pump/target and unchanged receiver DLL, replacing only its
 keyboard callback with a separate native count/forward DLL. See
 [paired steps and branches](../NativeInputProbe/NativeHookCallbackControl.md).
+Its default Hook hmod now uses the actual callback DLL, independently of the
+window instance. `--hook-module original` selects the former main-module parameter
+only in this stage; unsupported combinations fail before loading Core or creating
+windows. [Module/send evidence control](../NativeInputProbe/InputEvidenceControl.md)
+defines fresh original/callback/original runs. Automated tests cover three real
+lifecycles per selection and v2 F8/B target down/up including system messages.
 Native parser tests and three real lifecycles check classification, thread binding,
 attachment conflicts, unsafe-unload rejection, receiver ownership and fault cleanup.
 Paired HUMAN/AUTO is NOT RUN by the agent; this control is not original acceptance.

@@ -11,6 +11,7 @@
 #pragma once
 
 #include "IInputController.h"
+#include "InputSendEvidence.h"
 
 namespace rug::core::input {
 
@@ -49,6 +50,7 @@ private:
     HumanizeConfig m_cfg;
     mutable int    m_curX = 0;   // last commanded position (client px when bound, else screen px)
     mutable int    m_curY = 0;
+    diagnostics::InputSendEvidence m_sendEvidence; // Disabled unless native test host explicitly owns a channel.
 };
 
 }  // namespace rug::core::input

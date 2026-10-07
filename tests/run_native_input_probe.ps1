@@ -1,4 +1,4 @@
-param([ValidateSet('Human','Observe','Test','SelfTest','Build','ManagedTarget')][string]$Mode = 'Human')
+param([ValidateSet('Human','Observe','Test','SelfTest','Build','ManagedTarget')][string]$Mode = 'Human', [switch]$BuildCore)
 $ErrorActionPreference = 'Stop'
 $probeRoot = Split-Path -Parent $PSScriptRoot
 $probeProject = Join-Path $PSScriptRoot 'NativeInputProbe/NativeInputProbe.vcxproj'
@@ -12,6 +12,17 @@ if (-not $probeMsbuild) {
     if ($probeCommand) { $probeMsbuild = $probeCommand.Source }
 }
 if (-not $probeMsbuild) { throw 'Visual Studio C++ v145 tools and Windows SDK are required; MSBuild was not found.' }
+if ($BuildCore) {
+    & $probeMsbuild (Join-Path $probeRoot 'Rug.Core/Rug.Core.vcxproj') /p:Configuration=Debug /p:Platform=x64 /p:TreatWarningAsError=true /v:minimal /nologo
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    # This standalone vcxproj emits under Rug.Core/x64/Debug; the probe loads next to its EXE.
+    $probeBuiltCore = Join-Path $probeRoot 'Rug.Core/x64/Debug/Rug.Core.dll'
+    $probeDeployedCore = Join-Path $probeRoot 'x64/Debug/Rug.Core.dll'
+    if (-not (Test-Path -LiteralPath $probeBuiltCore)) { throw "Built native core not found: $probeBuiltCore" }
+    New-Item -ItemType Directory -Path (Split-Path -Parent $probeDeployedCore) -Force | Out-Null
+    Copy-Item -LiteralPath $probeBuiltCore -Destination $probeDeployedCore -Force
+    Write-Host "CORE DEPLOYED: path=$probeDeployedCore sha256=$((Get-FileHash -LiteralPath $probeDeployedCore -Algorithm SHA256).Hash)"
+}
 & $probeMsbuild $probeProject /p:Configuration=Debug /p:Platform=x64 /v:minimal /nologo
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $probeReceiverProject = Join-Path $PSScriptRoot 'NativeInputProbe/NativeRawReceiver.vcxproj'

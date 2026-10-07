@@ -178,6 +178,7 @@
     <ClInclude Include="Input\IInputController.h" />
     <ClInclude Include="Input\KmboxInputController.h" />
     <ClInclude Include="Input\Win32InputController.h" />
+    <ClInclude Include="Input\InputSendEvidence.h" />
     <ClInclude Include="IOcrEngine.h" />
     <ClInclude Include="ImageView.h" />
     <ClInclude Include="ModelCatalog.h" />

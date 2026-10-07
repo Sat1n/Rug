@@ -123,7 +123,10 @@ void Win32InputController::EmitKey(bool down, int virtualKey) {
     if (UsePost()) {
         // lParam: repeat count 1; on key-up set prev-state (bit30) and transition (bit31).
         LPARAM lp = down ? 1 : (1 | (1L << 30) | (1L << 31));
-        PostMessageW(m_hwnd, down ? WM_KEYDOWN : WM_KEYUP, static_cast<WPARAM>(virtualKey), lp);
+        const auto started = m_sendEvidence.Begin();
+        const BOOL sent = PostMessageW(m_hwnd, down ? WM_KEYDOWN : WM_KEYUP, static_cast<WPARAM>(virtualKey), lp);
+        const DWORD error = sent ? 0 : GetLastError(); // Capture immediately, before timing or recording.
+        m_sendEvidence.End(started, virtualKey, down, true, 1, sent ? 1u : 0u, error);
     } else {
         INPUT in{};
         in.type = INPUT_KEYBOARD;
@@ -131,7 +134,10 @@ void Win32InputController::EmitKey(bool down, int virtualKey) {
         in.ki.wScan = static_cast<WORD>(MapVirtualKeyW(virtualKey, MAPVK_VK_TO_VSC));
         in.ki.dwExtraInfo = RugSoftwareInputTag;
         in.ki.dwFlags = down ? 0 : KEYEVENTF_KEYUP;
-        SendInput(1, &in, sizeof(INPUT));
+        const auto started = m_sendEvidence.Begin();
+        const UINT sent = SendInput(1, &in, sizeof(INPUT));
+        const DWORD error = sent == 1 ? 0 : GetLastError(); // Does not diagnose UIPI or change existing ABI result.
+        m_sendEvidence.End(started, virtualKey, down, false, 1, sent, error);
     }
 }
 

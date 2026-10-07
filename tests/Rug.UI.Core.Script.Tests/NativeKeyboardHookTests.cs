@@ -11,6 +11,14 @@ internal static class NativeKeyboardHookTests
         if (!OperatingSystem.IsWindows() || !File.Exists(LibraryPath))
         { Console.WriteLine("NOT RUN: native callback parser/ownership; build tests/run_native_input_probe.ps1 -Mode Build first."); return; }
         using var native = new NativeKeyboardHookDiagnostic(LibraryPath);
+        RawInputTests.Check(native.Procedure != 0 && native.ProcedureModule != 0, "callback module could not be resolved");
+        RawInputDiagnostics.ValidateHookModule("keyboard-native-callback", "original");
+        RawInputDiagnostics.ValidateHookModule("keyboard-native-callback", "callback");
+        foreach (var (stage, module) in new[] { ("both", "original"), ("keyboard-native-callback", "bad") })
+        {
+            try { RawInputDiagnostics.ValidateHookModule(stage, module); throw new Exception("invalid module control accepted"); }
+            catch (ArgumentException) { }
+        }
         native.ObserveForTest(-1, 0, 1); native.ObserveForTest(1, 0, 1);
         RawInputTests.Check(native.Status is { CallbackTotal: 2, ActionableTotal: 0, ParseErrors: 0 }, "native non-action callback read sentinel");
         nint data = Marshal.AllocHGlobal(24);

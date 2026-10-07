@@ -78,6 +78,9 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
     private readonly NativeKeyboardHookDiagnostic? _nativeKeyboard;
     internal NativeKeyboardHookDiagnostic? NativeKeyboard => _nativeKeyboard;
     internal nint HookInstallModule { get; private set; }
+    internal nint WindowInstanceModule { get; private set; }
+    internal bool OriginalHookModule { get; }
+    private long _targetF8Down, _targetF8Up, _targetBDown, _targetBUp;
     public readonly TaskCompletionSource<nint> Ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Thread _thread;
     private readonly bool _installKeyboard, _installMouse, _messageOnly;
@@ -88,10 +91,12 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
     private long _move, _down, _up, _keyDown, _keyUp;
     public Counters Counts => new(Interlocked.Read(ref _move), Interlocked.Read(ref _down), Interlocked.Read(ref _up),
         Interlocked.Read(ref _keyDown), Interlocked.Read(ref _keyUp), _nativeKeyboard?.Status.Counts ?? _keyCounts.Snapshot, _mouseCounts.Snapshot);
-    public RawInputDiagnosticWindow(bool installKeyboard = true, bool installMouse = true, bool messageOnly = false, string? nativeKeyboardPath = null)
+    public RawInputDiagnosticWindow(bool installKeyboard = true, bool installMouse = true, bool messageOnly = false, string? nativeKeyboardPath = null, bool originalHookModule = false)
     {
         if (nativeKeyboardPath is not null && (!installKeyboard || installMouse || !messageOnly))
             throw new ArgumentException("Native callback comparison requires the separate keyboard-only Hook probe.");
+        if (originalHookModule && nativeKeyboardPath is null) throw new ArgumentException("Original-module control requires the native callback mode.");
+        OriginalHookModule = originalHookModule;
         _nativeKeyboard = nativeKeyboardPath is null ? null : new NativeKeyboardHookDiagnostic(nativeKeyboardPath);
         _installKeyboard = installKeyboard; _installMouse = installMouse; _messageOnly = messageOnly;
         _proc = Message;
@@ -131,6 +136,7 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
     // Diagnostic-only cross-process counters; no pointers, key contents or C-ABI changes.
     internal const uint TargetMetricMessage = 0x8010;
     internal const int TargetMetricMagic = 0x52554744;
+    internal const int TargetMetricVersion = 2;
     internal nint QueryTargetMetricForTest(uint index)
     {
         if (SendMessageTimeoutW(_hwnd, TargetMetricMessage + index, 0, 0, 3, 3000, out var value) == 0)
@@ -141,6 +147,12 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
     {
         foreach (uint message in new uint[] { 0x200, 0x201, 0x202, 0x100, 0x101 }) PostMessageW(_hwnd, message, 0, 0);
     }
+    internal void PostTestKeyMessages(int key, bool system = false)
+    {
+        if (!PostMessageW(_hwnd, system ? 0x104u : 0x100u, (nuint)key, 0)
+            || !PostMessageW(_hwnd, system ? 0x105u : 0x101u, (nuint)key, 0))
+            throw new InvalidOperationException("Diagnostic key-message post failed");
+    }
     internal static nint CheckHookInstallation(nint handle, int error, string name)
         => handle != 0 ? handle : throw new System.ComponentModel.Win32Exception(error, name + " installation failed; win32Error=" + error);
     private void Run()
@@ -148,7 +160,8 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
         _installThreadId = GetCurrentThreadId();
         string name = "RugRawDiagnostic" + Guid.NewGuid().ToString("N");
         nint instance = GetModuleHandleW(null);
-        HookInstallModule = instance;
+        WindowInstanceModule = instance;
+        HookInstallModule = _nativeKeyboard is not null && !OriginalHookModule ? _nativeKeyboard.ProcedureModule : instance;
         bool registered = false;
         try
         {
@@ -162,7 +175,7 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
             {
                 _nativeKeyboard?.Attach();
                 _keyHook = _nativeKeyboard is null ? SetWindowsHookExW(13, _keyboard, instance, 0)
-                    : SetWindowsHookPointer(13, _nativeKeyboard.Procedure, instance, 0);
+                    : SetWindowsHookPointer(13, _nativeKeyboard.Procedure, HookInstallModule, 0);
                 _keyboardInstallError = _keyHook == 0 ? Marshal.GetLastPInvokeError() : 0;
                 CheckHookInstallation(_keyHook, _keyboardInstallError, "Keyboard hook");
                 Volatile.Write(ref _keyboardInstalled, 1);
@@ -205,17 +218,29 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
     }
     private nint Message(nint hwnd, uint message, nuint wParam, nint lParam)
     {
-        if (message is >= TargetMetricMessage and <= TargetMetricMessage + 5)
+        if (message is >= TargetMetricMessage and <= TargetMetricMessage + 10)
             return (nint)((message - TargetMetricMessage) switch
             {
                 0 => TargetMetricMagic, 1 => Interlocked.Read(ref _move), 2 => Interlocked.Read(ref _down),
-                3 => Interlocked.Read(ref _up), 4 => Interlocked.Read(ref _keyDown), _ => Interlocked.Read(ref _keyUp)
+                3 => Interlocked.Read(ref _up), 4 => Interlocked.Read(ref _keyDown), 5 => Interlocked.Read(ref _keyUp),
+                6 => Interlocked.Read(ref _targetF8Down), 7 => Interlocked.Read(ref _targetF8Up),
+                8 => Interlocked.Read(ref _targetBDown), 9 => Interlocked.Read(ref _targetBUp), _ => TargetMetricVersion
             });
         if (message == 0x200) Interlocked.Increment(ref _move);
         if (message == 0x201) Interlocked.Increment(ref _down);
         if (message == 0x202) Interlocked.Increment(ref _up);
-        if (message == 0x100) Interlocked.Increment(ref _keyDown);
-        if (message == 0x101) Interlocked.Increment(ref _keyUp);
+        if (message is 0x100 or 0x104)
+        {
+            Interlocked.Increment(ref _keyDown);
+            if (wParam == 0x77) Interlocked.Increment(ref _targetF8Down);
+            if (wParam == 0x42) Interlocked.Increment(ref _targetBDown);
+        }
+        if (message is 0x101 or 0x105)
+        {
+            Interlocked.Increment(ref _keyUp);
+            if (wParam == 0x77) Interlocked.Increment(ref _targetF8Up);
+            if (wParam == 0x42) Interlocked.Increment(ref _targetBUp);
+        }
         if (message == 0x8001) { if (_barriers.TryDequeue(out var b)) b.TrySetResult(); return 0; }
         if (message == 2) PostQuitMessage(0);
         return DefWindowProcW(hwnd, message, wParam, lParam);

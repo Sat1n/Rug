@@ -19,12 +19,12 @@ Mouse software counts and human keyboard callbacks remained present. This
 missing/recovered/missing correlation does not establish a callback or CLR defect.
 
 `keyboard-native-callback` compares against `keyboard-native-messages`.
-Only B's keyboard callback pointer changes: a separate test DLL counts and calls
-CallNextHookEx unchanged. B still installs WH_KEYBOARD_LL=13 on its original
-managed Hook thread, with the original message-only window, managed message loop,
-GetModuleHandleW(null) hmod and thread parameter 0. The callback DLL is intentionally
-NOT substituted for hmod; an installation failure is inconclusive, not permission
-to silently change the control. Target thread/window, A sender/two native Hooks,
+The historical experiment changed B's callback pointer to a separate count/forward
+DLL but retained GetModuleHandleW(null), which was not the callback's owning module.
+The [module/send contract repair](InputEvidenceControl.md) now defaults to the
+actual callback DLL hmod and offers `--hook-module original` for the reverse
+control. It keeps WH_KEYBOARD_LL=13, thread parameter 0, the original managed
+Hook thread/message loop/window and original window instance. Target thread/window, A sender/two native Hooks,
 and B native Raw receiver remain unchanged. No managed delegate runs inside this
 keyboard Hook callback. No reinstallation, filtering or input-ignore interval.
 
@@ -48,14 +48,17 @@ join the actual thread, and only then destroy storage/unload. If unhook/detach
 fails, retain the DLL/storage and report a cleanup fault; do not claim success.
 
 The receiver STILL does not read Raw packets: software/candidate attribution is
-NOT COLLECTED. A/B Hook and target evidence are independent of pump readiness.
+NOT COLLECTED. A/B share the low-level Hook mechanism; target processing is a
+separate evidence lane. No observation is inferred from pump readiness.
 Timers/barriers do not certify Hook health. Aggregate software key counts are
 cumulative snapshots; keyboard DELTA retains per-phase callback classification.
 
 ## Paired run
 
+Use the [three-round original/callback/original procedure](InputEvidenceControl.md)
+next. The commands below select the repaired default, not the old experiment.
 Use fresh A/B processes, same elevation/external applications and no other Rug
-input tasks. A FIRST:
+input tasks. A FIRST (build/deploy Core once as instructed above):
 
 ~~~powershell
 & F:/Cardinal/Rug/Rug/tests/run_native_input_probe.ps1 -Mode ManagedTarget
@@ -64,12 +67,13 @@ input tasks. A FIRST:
 At A's diagnostic HWND/PID prompt, B SECOND:
 
 ~~~powershell
-dotnet run --project F:/Cardinal/Rug/Rug/tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64 -- --hook-isolation-stage keyboard-native-callback
+dotnet run --project F:/Cardinal/Rug/Rug/tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64 --no-build -- --hook-isolation-stage keyboard-native-callback --hook-module callback
 ~~~
 
 1. B READY: callback/receiver actual loaded paths, bytes/hash and process IDs;
    keyboard Hook installed True/error 0, mouse False; native callback attached=1,
-   boundThreadId equals hookThreadId, threadMismatch=0. Target/Hook/Raw thread IDs
+   boundThreadId equals hookThreadId, threadMismatch=0, Hook hmod equals the callback
+   module while window instance remains the main module. Target/Hook/Raw thread IDs
    distinct; Raw keyboard-only owned registration count=1, reading=False, no fault.
    Receiver hash must match above; otherwise keep the run inconclusive.
 2. Copy B MANAGED TARGET HWND/PID to A. HUMAN BEFORE: use B's white target and
@@ -93,7 +97,7 @@ dotnet run --project F:/Cardinal/Rug/Rug/tests/Rug.UI.Core.Script.Tests/Rug.UI.C
 | Partial target, fault, registration/hash mismatch or interference | Keep that round inconclusive; do not hide it with another key's success |
 
 Automated parser/intersection/owner/unload-guard tests emit no input. Three real
-callback-installation lifecycles cover thread binding, target protocol, receiver
+callback-installation lifecycles PER hmod selection cover thread binding, target protocol, receiver
 flags/conflicts/ownership loss/WM_INPUT cleanup and Hook thread fault cleanup.
 Paired HUMAN/AUTO is **NOT RUN by the agent**. Reduced controls do not close the
 original integrated SendInput failure. After a supported repair, rerun the original

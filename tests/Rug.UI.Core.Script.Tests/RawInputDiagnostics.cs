@@ -22,7 +22,7 @@ internal static class RawInputDiagnostics
         if (window.NativeKeyboard is { } native)
         {
             var n = native.Status;
-            Console.WriteLine($"{label} NATIVE CALLBACK: boundThreadId={n.ThreadId} attached={n.Attached} threadMismatch={n.ThreadMismatch} hookInstallHmod=0x{(nuint)window.HookInstallModule:X} hmodSource=GetModuleHandleW(null) hookThreadParameter=0; tagged F8 down/up={n.F8Down}/{n.F8Up} B down/up={n.BDown}/{n.BUp} frequency={n.Frequency}");
+            Console.WriteLine($"{label} NATIVE CALLBACK: boundThreadId={n.ThreadId} attached={n.Attached} threadMismatch={n.ThreadMismatch} callbackAddress=0x{(nuint)native.Procedure:X} callbackModule=0x{(nuint)native.ProcedureModule:X} callbackModulePath={native.LoadedPath} windowInstance=0x{(nuint)window.WindowInstanceModule:X} hookInstallHmod=0x{(nuint)window.HookInstallModule:X} hmodSource={(window.OriginalHookModule ? "original-main-module" : "callback-DLL")} hookType=13 hookThreadParameter=0; tagged F8 down/up={n.F8Down}/{n.F8Up} B down/up={n.BDown}/{n.BUp} frequency={n.Frequency}");
         }
     }
     internal static string CompareKeyCallbacks(long? f8, long? b)
@@ -102,16 +102,22 @@ internal static class RawInputDiagnostics
     internal static bool UsesRawInput(string stage) => stage is "both-raw" or "both-raw-split" or "target-raw" or "keyboard-raw";
     // @shape Fresh process per stage; raw modes register Raw Input, never emit/reinstall Hooks.
     // @source Existing native sender stays unchanged: tests/NativeInputProbe/main.cpp#class:CoreInput
-    internal static async Task RunIsolationAsync(string stage)
+    internal static void ValidateHookModule(string stage, string module)
+    {
+        if (module is not ("callback" or "original") || module == "original" && stage != "keyboard-native-callback")
+            throw new ArgumentException("--hook-module callback|original; original is only valid with keyboard-native-callback");
+    }
+    internal static async Task RunIsolationAsync(string stage, string module = "callback")
     {
         var selection = IsolationStage(stage); // Validate before DLL/window side effects.
+        ValidateHookModule(stage, module);
         if (!LoadNative()) { Environment.ExitCode = 2; return; }
         bool split = UsesSplitProbe(stage);
         using var window = selection.Target ? new RawInputDiagnosticWindow(selection.Keyboard && !split, selection.Mouse && !split) : null;
         bool nativeCallback = stage == "keyboard-native-callback";
         // Only this opt-in mode replaces the callback pointer; original install parameters/thread remain.
         using var separateProbe = split ? new RawInputDiagnosticWindow(selection.Keyboard, selection.Mouse, messageOnly: true,
-            nativeKeyboardPath: nativeCallback ? NativeKeyboardHookTests.LibraryPath : null) : null;
+            nativeKeyboardPath: nativeCallback ? NativeKeyboardHookTests.LibraryPath : null, originalHookModule: module == "original") : null;
         var probe = separateProbe ?? window;
         await using var source = UsesRawInput(stage) ? new RawInputEventSource() : null;
         bool direct = stage == "keyboard-direct";
@@ -145,7 +151,7 @@ internal static class RawInputDiagnostics
             {
                 string path = probe!.NativeKeyboard!.LoadedPath;
                 using var file = File.OpenRead(path);
-                Console.WriteLine($"NATIVE CALLBACK LOADED: sameProcessId={Environment.ProcessId} path={path} sha256={Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(file))} bytes={file.Length}; callback pointer ONLY replaced, same managed thread/window/pump/WH_KEYBOARD_LL=13/GetModuleHandleW(null)/thread=0. No managed callback, no Hook reinstallation, same native Raw receiver DLL. Native count/forward is not source acceptance.");
+                Console.WriteLine($"NATIVE CALLBACK LOADED: sameProcessId={Environment.ProcessId} path={path} sha256={Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(file))} bytes={file.Length}; moduleControl={module}, callback/pump/thread/window unchanged; window class uses original main module, Hook hmod independently selected. No managed keyboard callback or reinstallation; same native Raw DLL. This is contract repair/control, not a proven root cause.");
             }
             if (stage == "target-raw")
                 Console.WriteLine("MANAGED HOOKS OMITTED: dedicated message-only receiver/thread retained; keyboard/mouse hooks intentionally not installed. Use A's native Hook evidence.");
@@ -252,6 +258,7 @@ internal static class RawInputDiagnostics
                 PrintHook(label + " keyboard DELTA", now.Keyboard.Delta(previous!.Keyboard));
                 PrintHook(label + " mouse DELTA", now.Mouse.Delta(previous.Mouse));
                 Console.WriteLine($"{label} target DELTA: move={now.Move - previous.Move} mouseDown/Up={now.MouseDown - previous.MouseDown}/{now.MouseUp - previous.MouseUp} keyDown/Up={now.KeyDown - previous.KeyDown}/{now.KeyUp - previous.KeyUp}");
+                Console.WriteLine($"{label} target tested-key SNAPSHOT: protocol={window.QueryTargetMetricForTest(10)} F8 down/up={window.QueryTargetMetricForTest(6)}/{window.QueryTargetMetricForTest(7)} B down/up={window.QueryTargetMetricForTest(8)}/{window.QueryTargetMetricForTest(9)}");
                 previous = now;
             }
             await Snapshot("READY");

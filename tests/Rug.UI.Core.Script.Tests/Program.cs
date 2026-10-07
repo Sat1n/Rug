@@ -21,7 +21,9 @@ if (args.Contains("--hook-isolation-stage"))
     try
     {
         int index = Array.IndexOf(args, "--hook-isolation-stage");
-        await RawInputDiagnostics.RunIsolationAsync(index + 1 < args.Length ? args[index + 1] : "");
+        int moduleIndex = Array.IndexOf(args, "--hook-module");
+        await RawInputDiagnostics.RunIsolationAsync(index + 1 < args.Length ? args[index + 1] : "",
+            moduleIndex < 0 ? "callback" : moduleIndex + 1 < args.Length ? args[moduleIndex + 1] : "");
     }
     catch (Exception error) { Console.WriteLine($"ISOLATION FAILED: {error.Message}"); Environment.ExitCode = 1; }
     return;

@@ -418,8 +418,8 @@ direct copied-observation counts, retaining no event-source queue/consumer:
 Mouse-only count mode passed; keyboard registration retained both Hook gaps.
 [Native receiver control](NativeReceiverControl.md) with B's Hook removed recovered
 A's callbacks; restoring it restored both gaps with complete F8/B targets. Next
-[native callback comparison](NativeHookCallbackControl.md) retains the Hook
-thread/parameters and receiver DLL, replacing only B's keyboard callback.
+[module/send evidence control](InputEvidenceControl.md) checks the callback DLL
+hmod and actual sends before investigating installation order or process roles.
 After a supported repair, rerun ORIGINAL raw-input-diagnostic with managed
 InputService sending, HUMAN BEFORE -> AUTO -> HUMAN AFTER, complete Hook/raw/target
 evidence and regressions. Reduced controls are not acceptance. Further controls

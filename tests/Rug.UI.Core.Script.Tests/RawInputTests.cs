@@ -28,6 +28,7 @@ internal static class RawInputTests
         await MessagePumpLifecycleAsync(registerMouse: false, native: true);
         await MessagePumpLifecycleAsync(registerMouse: false, native: true, managedKeyboard: false);
         await MessagePumpLifecycleAsync(registerMouse: false, native: true, nativeCallback: true);
+        await MessagePumpLifecycleAsync(registerMouse: false, native: true, nativeCallback: true, originalHookModule: true);
         await LifecycleAsync();
         await ConsumersAsync();
         await NativeLifecycleAsync();
@@ -350,7 +351,7 @@ internal static class RawInputTests
     }
     // @shape Three count-only lifecycles per registration selection; no packet parsing, tracking or observations.
     // @source Rug.UI.Core/Native/WindowsRawInputReceiver.cs#class:WindowsRawInputReceiver
-    private static async Task MessagePumpLifecycleAsync(bool registerKeyboard = true, bool registerMouse = true, bool native = false, bool managedKeyboard = true, bool nativeCallback = false)
+    private static async Task MessagePumpLifecycleAsync(bool registerKeyboard = true, bool registerMouse = true, bool native = false, bool managedKeyboard = true, bool nativeCallback = false, bool originalHookModule = false)
     {
         if (!OperatingSystem.IsWindows()) return;
         if (native && !File.Exists(DiagnosticNativeRawInputPump.LibraryPath))
@@ -371,7 +372,7 @@ internal static class RawInputTests
         {
             using var target = new RawInputDiagnosticWindow(false, false);
             using var probe = new RawInputDiagnosticWindow(managedKeyboard, false, messageOnly: true,
-                nativeKeyboardPath: nativeCallback ? NativeKeyboardHookTests.LibraryPath : null);
+                nativeKeyboardPath: nativeCallback ? NativeKeyboardHookTests.LibraryPath : null, originalHookModule: originalHookModule);
             await Task.WhenAll(target.Ready.Task, probe.Ready.Task).WaitAsync(TimeSpan.FromSeconds(5));
             await using var pump = CreatePump();
             await Task.WhenAll(pump.StartAsync(), pump.StartAsync()).WaitAsync(TimeSpan.FromSeconds(5));
@@ -388,6 +389,11 @@ internal static class RawInputTests
                 "count-only registration flags or thread topology changed");
             await Until(() => pump.Status.TimerMessages > 0);
             target.PostTargetMessagesForTest(); await target.SynchronizeAsync(); await probe.SynchronizeAsync();
+            Check(target.QueryTargetMetricForTest(10) == RawInputDiagnosticWindow.TargetMetricVersion
+                && target.QueryTargetMetricForTest(6) == 0 && target.QueryTargetMetricForTest(8) == 0, "unrelated key counted as F8/B");
+            target.PostTestKeyMessages(0x77); target.PostTestKeyMessages(0x42, system: true);
+            await target.SynchronizeAsync();
+            Check(Enumerable.Range(6, 4).All(i => target.QueryTargetMetricForTest((uint)i) == 1), "specific F8/B down/up protocol incomplete");
             Check(target.QueryTargetMetricForTest(0) == RawInputDiagnosticWindow.TargetMetricMagic
                 && target.Counts.KeyDown > 0 && target.Counts.KeyUp > 0
                 && probe.Status.KeyboardInstalled == managedKeyboard && !probe.Status.MouseInstalled,
@@ -395,8 +401,10 @@ internal static class RawInputTests
             if (!managedKeyboard) Check(probe.Counts.Keyboard.CallbackTotal == 0 && probe.Counts.Mouse.CallbackTotal == 0,
                 "idle no-Hook thread unexpectedly collected callbacks");
             if (nativeCallback) Check(probe.NativeKeyboard!.Status is { Attached: 1, ThreadMismatch: 0 }
-                && probe.NativeKeyboard.Status.ThreadId == probe.Status.InstallThreadId && probe.HookInstallModule != 0,
-                "native callback binding or original Hook installation module changed");
+                && probe.NativeKeyboard.Status.ThreadId == probe.Status.InstallThreadId
+                && probe.WindowInstanceModule != probe.NativeKeyboard.ProcedureModule
+                && probe.HookInstallModule == (originalHookModule ? probe.WindowInstanceModule : probe.NativeKeyboard.ProcedureModule),
+                "native callback module control or window instance changed");
             long inputs = pump.Status.InputMessages, cleanups = pump.Status.InputCleanupCalls, devices = pump.Status.DeviceMessages;
             // Invalid native handles would fail ordinary parsing. Both foreground and sink messages
             // must reach DefWindowProc without reads; invalid device payload must not create observations.
@@ -481,7 +489,7 @@ internal static class RawInputTests
                 && target.Status is { ThreadExited: true, Failure: null },
                 "count-only lifecycle leaked registrations or threads");
         }
-        Console.WriteLine($"Registered message-only receiver native={native} keyboard={registerKeyboard} mouse={registerMouse} managedKeyboardHook={managedKeyboard} nativeCallback={nativeCallback}, omitted parsing/evidence, WM_INPUT cleanup, conflicts, ownership loss and generations passed (3 lifecycles; AUTO not inferred)");
+            Console.WriteLine($"Registered message-only receiver native={native} keyboard={registerKeyboard} mouse={registerMouse} managedKeyboardHook={managedKeyboard} nativeCallback={nativeCallback} originalHookModule={originalHookModule}, omitted parsing/evidence, WM_INPUT cleanup, conflicts, ownership loss and generations passed (3 lifecycles; AUTO not inferred)");
     }
     private static byte[] Packet(uint type, int pointerSize, int body)
     {

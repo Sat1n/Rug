@@ -128,6 +128,12 @@ C-ABI signatures/layouts are unchanged. See [diagnostics](../Rug.UI.Core/RawInpu
 
 ## Coding Standards (C++20)
 
+Diagnostic-only [InputSendEvidence](Input/InputSendEvidence.h#class:InputSendEvidence) observes actual EmitKey send returns
+through a host-created, same-process bounded mapping; disabled by default, it
+does not change key construction/timing/retries or C-ABI statuses. Failure errors
+are captured immediately; insertion is not target delivery. See
+[evidence contract and deployment](../tests/NativeInputProbe/InputEvidenceControl.md).
+
 * Compile with `/utf-8`.
 * Normalize OCR coordinates against **Per-Monitor V2** DPI scaling before passing
   them to `InputController`.

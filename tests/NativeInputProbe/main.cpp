@@ -12,6 +12,7 @@
 #include <string>
 #include <thread>
 #include "../../Rug.Core/include/RugCoreAbi.h"
+#include "SendEvidenceSession.h"
 
 namespace {
 constexpr ULONG_PTR Tag = 0x52554749u;
@@ -48,7 +49,17 @@ void Print(const std::string& label, const Values& v) {
 void Check(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
 std::runtime_error Error(const char* message, DWORD code) { return std::runtime_error(std::string(message) + "; win32Error=" + std::to_string(code)); }
 std::atomic<long long> Generation{};
-struct Snapshot { Values key, mouse; long long f8Down, f8Up, bDown, bUp, move, down, up, keyDown, keyUp; };
+struct Snapshot {
+    Values key, mouse;
+    long long f8Down, f8Up, bDown, bUp, move, down, up, keyDown, keyUp;
+    long long targetF8Down, targetF8Up, targetBDown, targetBUp;
+};
+bool TestedKeyDelivered(const Snapshot& before, const Snapshot& after, int vk) {
+    if (vk != VK_F8 && vk != 'B') return false;
+    const auto down = vk == VK_F8 ? after.targetF8Down - before.targetF8Down : after.targetBDown - before.targetBDown;
+    const auto up = vk == VK_F8 ? after.targetF8Up - before.targetF8Up : after.targetBUp - before.targetBUp;
+    return down == 1 && up == 1; // Wrong key, missing release or duplicate message cannot stand in for delivery.
+}
 class Pump;
 thread_local Pump* Current = nullptr;
 // Independent native callback and message thread; never feeds managed Raw Input or filters input.
@@ -68,8 +79,12 @@ class Pump {
             if (msg == WM_MOUSEMOVE) ++p->move;
             if (msg == WM_LBUTTONDOWN) ++p->down;
             if (msg == WM_LBUTTONUP) ++p->up;
-            if (msg == WM_KEYDOWN) ++p->keyDown;
-            if (msg == WM_KEYUP) ++p->keyUp;
+            if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) {
+                ++p->keyDown; if (w == VK_F8) ++p->targetF8Down; if (w == 'B') ++p->targetBDown;
+            }
+            if (msg == WM_KEYUP || msg == WM_SYSKEYUP) {
+                ++p->keyUp; if (w == VK_F8) ++p->targetF8Up; if (w == 'B') ++p->targetBUp;
+            }
         }
         if (msg == WM_APP + 1) return 1; // Pump barrier only; does not certify hook health.
         if (msg == WM_CLOSE) { DestroyWindow(hwnd); return 0; }
@@ -137,6 +152,7 @@ public:
     const long long generation = ++Generation;
     Counter key, mouse;
     std::atomic<long long> f8Down{}, f8Up{}, bDown{}, bUp{}, move{}, down{}, up{}, keyDown{}, keyUp{};
+    std::atomic<long long> targetF8Down{}, targetF8Up{}, targetBDown{}, targetBUp{};
     explicit Pump(bool hooks) : _hooks(hooks) {
         auto ready = _ready.get_future(); _thread = std::thread([this] { Run(); });
         try { Check(ready.wait_for(std::chrono::seconds(5)) == std::future_status::ready, "Probe startup timed out"); ready.get(); }
@@ -157,7 +173,8 @@ public:
         Check(Healthy(), "Probe failed during barrier");
     }
     void FailForTest() { PostMessageW(Hwnd(), WM_APP + 2, 0, 0); }
-    Snapshot Read() const { return {key.Read(), mouse.Read(), f8Down, f8Up, bDown, bUp, move, down, up, keyDown, keyUp}; }
+    Snapshot Read() const { return {key.Read(), mouse.Read(), f8Down, f8Up, bDown, bUp, move, down, up, keyDown, keyUp,
+        targetF8Down, targetF8Up, targetBDown, targetBUp}; }
     void Status(const std::string& label) {
         std::lock_guard lock(_errorGate);
         LARGE_INTEGER frequency{}; QueryPerformanceFrequency(&frequency);
@@ -253,14 +270,69 @@ public:
             && GetWindowTextW(_hwnd, title, 256) > 0 && std::wstring(title) == L"Rug Raw Input diagnostics - isolated input target",
             "Managed diagnostic target identity changed");
         Check(Metric(0) == 0x52554744, "Target does not support diagnostic counters");
+        Check(Metric(10) == 2, "Target metric protocol must be version 2; rebuild/restart B");
     }
     void Sync() const { Validate(); if (_native) _native->Sync(); }
     Snapshot Read() const {
         Validate(); if (_native) return _native->Read();
-        Snapshot s{}; s.move = Metric(1); s.down = Metric(2); s.up = Metric(3); s.keyDown = Metric(4); s.keyUp = Metric(5); return s;
+        Snapshot s{}; s.move = Metric(1); s.down = Metric(2); s.up = Metric(3); s.keyDown = Metric(4); s.keyUp = Metric(5);
+        s.targetF8Down = Metric(6); s.targetF8Up = Metric(7); s.targetBDown = Metric(8); s.targetBUp = Metric(9); return s;
     }
 };
 void Tests() {
+    {
+        using namespace rug::core::input::diagnostics;
+        rug::diagnostics::SendEvidenceSession session;
+        InputSendEvidence producer; Check(producer.Begin().round == 0, "Unarmed evidence recorded");
+        session.BeginRound(1);
+        producer.End(producer.Begin(), VK_F8, true, false, 1, 1, 0);
+        producer.End(producer.Begin(), VK_F8, false, false, 1, 1, 0);
+        auto records = session.Records(1);
+        auto complete = [&](const auto& r) { return rug::diagnostics::CompleteSendEvidence(r, 1, VK_F8, false, GetCurrentThreadId(), session.Dropped()); };
+        Check(complete(records), "Complete send evidence rejected");
+        auto bad = records; bad[1].returned = 0; bad[1].error = 5; Check(!complete(bad), "Failed send accepted");
+        bad = records; bad[1].virtualKey = 'B'; Check(!complete(bad), "Wrong key accepted");
+        bad = records; bad[1].down = 1; Check(!complete(bad), "Missing release accepted");
+        bad = records; bad[0].down = 0; bad[1].down = 1; Check(!complete(bad), "Reversed key actions accepted");
+        bad = records; bad[1].backend = 1; Check(!complete(bad), "Wrong backend accepted");
+        bad = records; bad.pop_back(); Check(!complete(bad), "Partial evidence accepted");
+        bad = records; bad[1].before = bad[0].after - 1; Check(!complete(bad), "Overlapping evidence accepted");
+        session.BeginRound(2); producer.End(producer.Begin(), 'B', true, true, 1, 0, 1400);
+        Check(session.Records(1).size() == 2 && records[1].returned == 1 && session.Records(2)[0].error == 1400, "Round/copy isolation failed");
+        for (int i = 0; i < EvidenceCapacity; ++i) producer.End(producer.Begin(), 'B', false, true, 1, 1, 0);
+        Check(session.Dropped() == 3 && session.Records(1).size() == 2 && !complete(records), "Overflow was hidden or overwritten");
+        SendBuffer invalid{}; Check(!Valid(invalid), "Invalid mapping accepted");
+        invalid.magic = EvidenceMagic; invalid.version = EvidenceVersion; invalid.frequency = 1; invalid.ownerPid = GetCurrentProcessId() + 1;
+        Check(!Valid(invalid), "Foreign process evidence accepted");
+    }
+    {
+        Pump target(false); auto before = target.Read();
+        SendMessageW(target.Hwnd(), WM_KEYDOWN, 'C', 0); SendMessageW(target.Hwnd(), WM_KEYUP, 'C', 0);
+        target.Sync(); Check(!TestedKeyDelivered(before, target.Read(), VK_F8), "Generic messages accepted as F8");
+        SendMessageW(target.Hwnd(), WM_KEYDOWN, VK_F8, 0); target.Sync();
+        Check(!TestedKeyDelivered(before, target.Read(), VK_F8), "Missing release accepted by target");
+        SendMessageW(target.Hwnd(), WM_KEYUP, VK_F8, 0); target.Sync();
+        Check(TestedKeyDelivered(before, target.Read(), VK_F8) && !TestedKeyDelivered(before, target.Read(), 'B'), "Specific key delivery incorrect");
+        SendMessageW(target.Hwnd(), WM_KEYDOWN, VK_F8, 0); target.Sync();
+        Check(!TestedKeyDelivered(before, target.Read(), VK_F8), "Duplicate key delivery accepted");
+        before = target.Read();
+        SendMessageW(target.Hwnd(), WM_SYSKEYDOWN, 'B', 0); SendMessageW(target.Hwnd(), WM_SYSKEYUP, 'B', 0);
+        target.Sync(); Check(TestedKeyDelivered(before, target.Read(), 'B'), "System key delivery omitted");
+        // Real Rug.Core path, isolated hidden window, background messages only.
+        rug::diagnostics::SendEvidenceSession evidence; CoreInput input(target.Hwnd());
+        for (int vk : {VK_F8, 0x42}) {
+            before = target.Read(); evidence.BeginRound(vk); input.Round(vk, true);
+            auto until = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+            while (!TestedKeyDelivered(before, target.Read(), vk) && std::chrono::steady_clock::now() < until) std::this_thread::yield();
+            Check(TestedKeyDelivered(before, target.Read(), vk), "Real Rug.Core specific target delivery failed");
+            Check(rug::diagnostics::CompleteSendEvidence(evidence.Records(vk), vk, vk, true, GetCurrentThreadId(), evidence.Dropped()), "Real EmitKey evidence absent/incomplete; rebuild Rug.Core with -BuildCore");
+        }
+        target.Stop(); Check(!IsWindow(target.Hwnd()), "Target did not release");
+        evidence.BeginRound(999); CoreInput::Ok(input.keyDown(input.Handle(), 'B')); CoreInput::Ok(input.keyUp(input.Handle(), 'B'));
+        const auto failed = evidence.Records(999);
+        Check(failed.size() == 2 && failed[0].returned == 0 && failed[1].returned == 0 && failed[0].error != 0 && failed[1].error != 0,
+            "Actual failed PostMessage error/result evidence missing");
+    }
     auto parsed = ParseManagedTarget("0x1234 42"); Check(reinterpret_cast<uintptr_t>(parsed.first) == 0x1234 && parsed.second == 42, "Target parser failed");
     for (const auto& line : {"0 42", "1234 0", "12oops 42", "1234 42x", "1234 42 extra"}) {
         bool rejected = false; try { ParseManagedTarget(line); } catch (const std::exception&) { rejected = true; }
@@ -281,7 +353,7 @@ void Tests() {
     bool rejected = false; try { TargetEndpoint invalid(next.Hwnd(), GetCurrentProcessId()); } catch (const std::exception&) { rejected = true; }
     Check(rejected, "Destroyed/arbitrary target accepted");
     for (int i = 0; i < 3; ++i) { Pump receiver(true); Pump target(false); receiver.Sync(); target.Sync(); receiver.Stop(); target.Stop(); Check(receiver.Clean() && target.Clean() && !IsWindow(target.Hwnd()), "Repeated cleanup failed"); }
-    std::cout << "Native counter/layout/thread lifecycle tests PASS (no synthetic input)\n";
+    std::cout << "Native counter/layout/lifecycle/send evidence/specific target tests PASS (isolated background messages; physical SendInput NOT RUN)\n";
 }
 int Run(bool observe, bool human, bool managed = false) {
     Pump probe(true); Pump target(false); Snapshot previous{}; Evidence(probe, "STARTED", previous);
@@ -311,15 +383,25 @@ int Run(bool observe, bool human, bool managed = false) {
         std::cout << "Countdown 5 seconds: activate " << (managed ? "MANAGED B" : "native") << " isolated target, then hands off.\n";
         std::this_thread::sleep_for(std::chrono::seconds(5));
     }
-    Evidence(probe, "AUTO BEFORE", previous); endpoint.Validate(); CoreInput input(endpoint.Hwnd()); bool passed = humanBeforeComplete;
+    Evidence(probe, "AUTO BEFORE", previous); endpoint.Validate();
+    rug::diagnostics::SendEvidenceSession sendEvidence; CoreInput input(endpoint.Hwnd()); bool passed = humanBeforeComplete;
+    LONG round = 0;
     for (bool post : {false, true}) for (int vk : {VK_F8, 0x42}) {
         std::string label = std::string(post ? "PostMessage/" : "SendInput/") + (vk == VK_F8 ? "F8" : "B");
         endpoint.Validate();
         if (!post && GetForegroundWindow() != endpoint.Hwnd()) { std::cout << label << " NOT RUN: isolated target is not foreground\n"; passed = false; continue; }
         probe.Sync(); endpoint.Sync(); auto before = probe.Read(); auto targetBefore = endpoint.Read();
-        input.Round(vk, post);
+        sendEvidence.BeginRound(++round); input.Round(vk, post);
+        const auto sends = sendEvidence.Records(round);
+        for (const auto& r : sends) std::cout << "SEND_CALL round=" << round << " label=" << label << " api=" << (r.backend ? "PostMessage" : "SendInput")
+            << " testedKey=" << (r.virtualKey == VK_F8 ? "F8" : r.virtualKey == 'B' ? "B" : "unexpected") << " action=" << (r.down ? "Down" : "Up")
+            << " requested=" << r.requested << " returned=" << r.returned << " beforeTicks=" << r.before << " afterTicks=" << r.after
+            << " frequency=" << sendEvidence.Frequency() << " thread=" << r.thread << " failureError=" << r.error << " errorApplicable=" << (r.returned != r.requested) << '\n';
+        const bool sendComplete = rug::diagnostics::CompleteSendEvidence(sends, round, vk, post, GetCurrentThreadId(), sendEvidence.Dropped());
+        std::cout << label << " SEND_EVIDENCE=" << (sendComplete ? "COMPLETE" : "INCOMPLETE") << " records=" << sends.size() << " dropped=" << sendEvidence.Dropped()
+            << "; successful insertion/posting does not prove target processing; error cannot identify UIPI\n";
         auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5); Snapshot messages{};
-        do { probe.Sync(); endpoint.Sync(); messages = endpoint.Read(); if (messages.keyDown > targetBefore.keyDown && messages.keyUp > targetBefore.keyUp && messages.move > targetBefore.move && messages.down > targetBefore.down && messages.up > targetBefore.up) break;
+        do { probe.Sync(); endpoint.Sync(); messages = endpoint.Read(); if (TestedKeyDelivered(targetBefore, messages, vk) && messages.move > targetBefore.move && messages.down > targetBefore.down && messages.up > targetBefore.up) break;
             std::this_thread::yield(); } while (std::chrono::steady_clock::now() < deadline);
         auto after = probe.Read(); auto key = Delta(after.key, before.key); auto mouse = Delta(after.mouse, before.mouse);
         Print(label + " keyboard DELTA", key); Print(label + " mouse DELTA", mouse);
@@ -327,10 +409,15 @@ int Run(bool observe, bool human, bool managed = false) {
         auto ups = vk == VK_F8 ? after.f8Up - before.f8Up : after.bUp - before.bUp;
         std::cout << label << " tagged key down/up=" << downs << '/' << ups << " targetKeyDown/Up=" << messages.keyDown - targetBefore.keyDown << '/' << messages.keyUp - targetBefore.keyUp
             << " targetMove=" << messages.move - targetBefore.move << " targetMouseDown/Up=" << messages.down - targetBefore.down << '/' << messages.up - targetBefore.up << '\n';
-        bool delivered = messages.keyDown > targetBefore.keyDown && messages.keyUp > targetBefore.keyUp && messages.move > targetBefore.move && messages.down > targetBefore.down && messages.up > targetBefore.up;
+        const auto targetDown = vk == VK_F8 ? messages.targetF8Down - targetBefore.targetF8Down : messages.targetBDown - targetBefore.targetBDown;
+        const auto targetUp = vk == VK_F8 ? messages.targetF8Up - targetBefore.targetF8Up : messages.targetBUp - targetBefore.targetBUp;
+        bool delivered = TestedKeyDelivered(targetBefore, messages, vk) && messages.move > targetBefore.move && messages.down > targetBefore.down && messages.up > targetBefore.up;
+        std::cout << label << " TARGET_EVIDENCE=" << (delivered ? "COMPLETE" : "INCOMPLETE") << " testedKeyDown/Up=" << targetDown << '/' << targetUp << " (includes WM_SYSKEYDOWN/UP)\n";
         bool interference = key[3] > key[6] || mouse[3] > mouse[6];
         if (interference) { std::cout << label << " INTERFERED / NOT RUN\n"; passed = false; continue; }
-        bool complete = delivered && probe.Healthy() && target.Healthy() && key[7] == 0 && mouse[7] == 0 && (post ? key[4] == 0 && mouse[4] == 0 : key[5] >= 2 && mouse[5] >= 5 && downs >= 1 && ups >= 1);
+        bool hookComplete = probe.Healthy() && target.Healthy() && key[7] == 0 && mouse[7] == 0 && (post ? key[4] == 0 && mouse[4] == 0 : key[5] >= 2 && mouse[5] >= 5 && downs >= 1 && ups >= 1);
+        std::cout << label << " HOOK_EVIDENCE=" << (hookComplete ? "COMPLETE" : "INCOMPLETE") << " (A/B share Windows low-level Hook mechanism)\n";
+        bool complete = sendComplete && delivered && hookComplete;
         std::cout << label << (complete ? " native Hook verification PASS\n" : " INCONCLUSIVE: incomplete native hook/target evidence\n"); passed &= complete;
     }
     Evidence(probe, "AUTO AFTER", previous);

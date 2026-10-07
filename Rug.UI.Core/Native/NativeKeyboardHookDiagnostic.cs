@@ -28,6 +28,7 @@ internal sealed class NativeKeyboardHookDiagnostic : IDisposable
     private Snapshot _last;
     internal string LoadedPath { get; }
     internal nint Procedure { get; }
+    internal nint ProcedureModule { get; }
     internal NativeKeyboardHookDiagnostic(string path)
     {
         if (RuntimeInformation.ProcessArchitecture != Architecture.X64 || Marshal.SizeOf<Snapshot>() != 160)
@@ -41,6 +42,10 @@ internal sealed class NativeKeyboardHookDiagnostic : IDisposable
             _attach = Export<Change>("Hook_Attach"); _detach = Export<Change>("Hook_Detach"); _destroy = Export<Change>("Hook_Destroy");
             _read = Export<Read>("Hook_Read"); _observe = Export<Observe>("Hook_ObserveForTest");
             Procedure = Export<Pointer>("Hook_Procedure")();
+            if (!GetModuleHandleExW(0x6, Procedure, out var owner)) // FROM_ADDRESS | UNCHANGED_REFCOUNT; existing load owns lifetime.
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError(), "Callback module lookup failed");
+            if (owner != _library) throw new InvalidOperationException("Keyboard callback is not owned by the loaded diagnostic DLL.");
+            ProcedureModule = owner;
             _counter = Export<Pointer>("Hook_Create")();
             if (_counter == 0 || Procedure == 0) throw new InvalidOperationException("Native callback allocation failed.");
         }
@@ -66,4 +71,5 @@ internal sealed class NativeKeyboardHookDiagnostic : IDisposable
             _counter = 0; NativeLibrary.Free(_library); _library = 0;
         }
     }
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GetModuleHandleExW(uint flags, nint address, out nint module);
 }

@@ -25,9 +25,11 @@ while comparing threads, managed Hooks and [device-class registration/packet pro
 The runner also builds a [test-only same-process native receiver](NativeInputProbe/NativeReceiverControl.md),
 replacing B's keyboard count receiver without changing Rug.Core or the sender.
 Its no-managed-Hook control retains B's idle receiver thread and uses A's observers.
-The next [native callback control](NativeInputProbe/NativeHookCallbackControl.md)
-retains B's Hook/thread/parameters and receiver DLL, replacing only its keyboard
-callback in a separate test DLL. Original integrated acceptance remains open.
+The [native callback control](NativeInputProbe/NativeHookCallbackControl.md) retains
+B's thread/receiver while selecting a separate callback DLL. The next
+[module/send evidence repair](NativeInputProbe/InputEvidenceControl.md) verifies its
+owning hmod, native send returns and specific F8/B target down/up before new
+order/role controls. Original integrated acceptance remains open.
 
 ## Layout
 
