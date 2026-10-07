@@ -17,6 +17,9 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $probeReceiverProject = Join-Path $PSScriptRoot 'NativeInputProbe/NativeRawReceiver.vcxproj'
 & $probeMsbuild $probeReceiverProject /p:Configuration=Debug /p:Platform=x64 /v:minimal /nologo
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$probeHookProject = Join-Path $PSScriptRoot 'NativeInputProbe/NativeKeyboardHook.vcxproj'
+& $probeMsbuild $probeHookProject /p:Configuration=Debug /p:Platform=x64 /v:minimal /nologo
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($Mode -eq 'Build') { exit 0 }
 if ($Mode -in @('Human', 'SelfTest', 'ManagedTarget')) {
     $probeCore = Join-Path $probeRoot 'x64/Debug/Rug.Core.dll'

@@ -415,11 +415,11 @@ direct copied-observation counts, retaining no event-source queue/consumer:
 | Human foreground/background input | User counters show observed input; explicit normal-operation confirmation remains needed |
 | Normal operation/shortcuts/window interaction | Human visual confirmation needed; counters cannot certify this |
 
-Mouse-only count mode passed; both-class and keyboard-only modes missed software
-keyboard Hooks with complete targets. Next [native receiver control](NativeReceiverControl.md)
-compares B's native keyboard count receiver with/without its managed Hook,
-retaining the idle thread. Native-receiver B-key delivery was complete with Hook
-gaps; F8 delivered 0/1 and remains separately inconclusive.
+Mouse-only count mode passed; keyboard registration retained both Hook gaps.
+[Native receiver control](NativeReceiverControl.md) with B's Hook removed recovered
+A's callbacks; restoring it restored both gaps with complete F8/B targets. Next
+[native callback comparison](NativeHookCallbackControl.md) retains the Hook
+thread/parameters and receiver DLL, replacing only B's keyboard callback.
 After a supported repair, rerun ORIGINAL raw-input-diagnostic with managed
 InputService sending, HUMAN BEFORE -> AUTO -> HUMAN AFTER, complete Hook/raw/target
 evidence and regressions. Reduced controls are not acceptance. Further controls

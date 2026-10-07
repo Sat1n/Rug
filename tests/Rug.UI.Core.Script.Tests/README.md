@@ -8,7 +8,7 @@ tags: [lua, tests, input]
 
 # Lua coroutine bridge tests
 
-Opt-in `--hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split|keyboard-pump|keyboard-direct|keyboard-messages|keyboard-messages-mouse|keyboard-messages-keyboard|keyboard-native-messages|target-native-messages` supports the
+Opt-in `--hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split|keyboard-pump|keyboard-direct|keyboard-messages|keyboard-messages-mouse|keyboard-messages-keyboard|keyboard-native-messages|target-native-messages|keyboard-native-callback` supports the
 [controlled comparison](../NativeInputProbe/ControlledStages.md). It sends no
 input; both-raw modes add Raw Input after both Hooks; target-raw adds it without
 managed Hooks. Packet-reading stages report software/candidate deltas; count-only
@@ -87,6 +87,13 @@ same native keyboard count receiver. Both B Hook flags/counters must be false/ze
 only A supplies Hook evidence. Three additional native lifecycles assert thread
 separation, target query/delivery, exact registration and full fault/cleanup behavior.
 This is not disabling Hook verification in the original diagnostics or A.
+keyboard-native-callback retains keyboard-native-messages' installation parameters,
+managed Hook thread/pump/target and unchanged receiver DLL, replacing only its
+keyboard callback with a separate native count/forward DLL. See
+[paired steps and branches](../NativeInputProbe/NativeHookCallbackControl.md).
+Native parser tests and three real lifecycles check classification, thread binding,
+attachment conflicts, unsafe-unload rejection, receiver ownership and fault cleanup.
+Paired HUMAN/AUTO is NOT RUN by the agent; this control is not original acceptance.
 
 Run `dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64` with the root-pinned .NET SDK `10.0.401`.
 The console test uses fake capture, OCR and input services, so no native Rug.Core

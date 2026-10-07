@@ -321,6 +321,10 @@ The user's native receiver retained both Hook gaps: B delivered 1/1, F8 0/1
 (separate incomplete-delivery evidence), mouse Hooks 10, cleanup 307, no fault.
 target-native-messages omits B's managed keyboard Hook while retaining its idle
 thread and native receiver. B zero Hook counts are expected; A remains the observer.
+Restoring B's Hook restored both gaps with complete target delivery. The next
+[native callback comparison](../tests/NativeInputProbe/NativeHookCallbackControl.md)
+retains that Hook's installation thread/parameters and the unchanged receiver DLL,
+replacing only its callback in a separate test DLL. Automatic takeover remains pending.
 No input emitter, C-ABI, Hook forwarding or takeover changes.
 
 Automated parsing/lifecycle/buffering and real native registration tests pass.

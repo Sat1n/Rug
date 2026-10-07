@@ -8,6 +8,11 @@ tags: [diagnostics, raw-input, native, isolation]
 
 # Same-process native keyboard receiver control
 
+Next [native callback comparison](NativeHookCallbackControl.md) retains this
+receiver DLL unchanged. Omitting B's Hook recovered A's software callbacks;
+restoring it restored both Hook gaps with complete F8/B targets (2026-10-07).
+This correlation does not establish a root cause; original acceptance is open.
+
 ## Evidence and audit (2026-10-06)
 
 Mouse-only count registration passed both software keyboard Hook observers.

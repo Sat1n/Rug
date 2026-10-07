@@ -75,6 +75,9 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
         Volatile.Read(ref _mouseInstallError), Volatile.Read(ref _exited) != 0, Volatile.Read(ref _failure), Volatile.Read(ref _exitReason));
     public readonly TaskCompletionSource<ProbeStatus> Completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly HookCounter _keyCounts = new(), _mouseCounts = new();
+    private readonly NativeKeyboardHookDiagnostic? _nativeKeyboard;
+    internal NativeKeyboardHookDiagnostic? NativeKeyboard => _nativeKeyboard;
+    internal nint HookInstallModule { get; private set; }
     public readonly TaskCompletionSource<nint> Ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Thread _thread;
     private readonly bool _installKeyboard, _installMouse, _messageOnly;
@@ -84,14 +87,18 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
     private nint _hwnd, _keyHook, _mouseHook;
     private long _move, _down, _up, _keyDown, _keyUp;
     public Counters Counts => new(Interlocked.Read(ref _move), Interlocked.Read(ref _down), Interlocked.Read(ref _up),
-        Interlocked.Read(ref _keyDown), Interlocked.Read(ref _keyUp), _keyCounts.Snapshot, _mouseCounts.Snapshot);
-    public RawInputDiagnosticWindow(bool installKeyboard = true, bool installMouse = true, bool messageOnly = false)
+        Interlocked.Read(ref _keyDown), Interlocked.Read(ref _keyUp), _nativeKeyboard?.Status.Counts ?? _keyCounts.Snapshot, _mouseCounts.Snapshot);
+    public RawInputDiagnosticWindow(bool installKeyboard = true, bool installMouse = true, bool messageOnly = false, string? nativeKeyboardPath = null)
     {
+        if (nativeKeyboardPath is not null && (!installKeyboard || installMouse || !messageOnly))
+            throw new ArgumentException("Native callback comparison requires the separate keyboard-only Hook probe.");
+        _nativeKeyboard = nativeKeyboardPath is null ? null : new NativeKeyboardHookDiagnostic(nativeKeyboardPath);
         _installKeyboard = installKeyboard; _installMouse = installMouse; _messageOnly = messageOnly;
         _proc = Message;
         _keyboard = (code, w, l) => Hook(code, w, l, true);
         _mouse = (code, w, l) => Hook(code, w, l, false);
-        _thread = new Thread(Run) { IsBackground = true, Name = messageOnly ? "Rug diagnostic Hook receiver" : "Rug raw diagnostics isolated window" }; _thread.Start();
+        _thread = new Thread(Run) { IsBackground = true, Name = messageOnly ? "Rug diagnostic Hook receiver" : "Rug raw diagnostics isolated window" };
+        try { _thread.Start(); } catch { _nativeKeyboard?.Dispose(); throw; }
     }
     private nint Hook(int code, nuint w, nint l, bool keyboard)
     {
@@ -141,6 +148,7 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
         _installThreadId = GetCurrentThreadId();
         string name = "RugRawDiagnostic" + Guid.NewGuid().ToString("N");
         nint instance = GetModuleHandleW(null);
+        HookInstallModule = instance;
         bool registered = false;
         try
         {
@@ -152,7 +160,9 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
             if (_hwnd == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError(), "Diagnostic window creation failed");
             if (_installKeyboard)
             {
-                _keyHook = SetWindowsHookExW(13, _keyboard, instance, 0);
+                _nativeKeyboard?.Attach();
+                _keyHook = _nativeKeyboard is null ? SetWindowsHookExW(13, _keyboard, instance, 0)
+                    : SetWindowsHookPointer(13, _nativeKeyboard.Procedure, instance, 0);
                 _keyboardInstallError = _keyHook == 0 ? Marshal.GetLastPInvokeError() : 0;
                 CheckHookInstallation(_keyHook, _keyboardInstallError, "Keyboard hook");
                 Volatile.Write(ref _keyboardInstalled, 1);
@@ -174,18 +184,24 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
         catch (Exception error) { _failure = error.GetType().Name + ": " + error.Message; _exitReason = "Fault"; Ready.TrySetException(error); }
         finally
         {
-            RemoveHook(_keyHook, "Keyboard hook"); RemoveHook(_mouseHook, "Mouse hook");
+            bool keyboardRemoved = RemoveHook(_keyHook, "Keyboard hook"); RemoveHook(_mouseHook, "Mouse hook");
+            if (keyboardRemoved && _nativeKeyboard?.Status.Attached == 1)
+            {
+                try { _nativeKeyboard.Detach(); }
+                catch (Exception error) { _failure = (_failure is null ? "" : _failure + "; ") + error.Message; _exitReason = "CleanupFault"; }
+            }
             if (_hwnd != 0) DestroyWindow(_hwnd); if (registered) UnregisterClassW(name, instance);
             while (_barriers.TryDequeue(out var b)) b.TrySetException(new InvalidOperationException(_failure ?? "Diagnostic thread exited"));
             Volatile.Write(ref _exited, 1); Completion.TrySetResult(Status);
         }
     }
-    private void RemoveHook(nint handle, string name)
+    private bool RemoveHook(nint handle, string name)
     {
-        if (handle == 0 || UnhookWindowsHookEx(handle)) return;
+        if (handle == 0 || UnhookWindowsHookEx(handle)) return true;
         int error = Marshal.GetLastPInvokeError();
         _failure = (_failure is null ? "" : _failure + "; ") + name + " removal failed; win32Error=" + error;
         _exitReason = "CleanupFault";
+        return false;
     }
     private nint Message(nint hwnd, uint message, nuint wParam, nint lParam)
     {
@@ -210,6 +226,7 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
         if (Interlocked.Exchange(ref _disposeRequested, 1) != 0) return;
         if (_hwnd != 0) PostMessageW(_hwnd, 0x10, 0, 0);
         if (!_thread.Join(TimeSpan.FromSeconds(5))) throw new Exception("Diagnostic window cleanup timed out");
+        _nativeKeyboard?.Dispose();
         GC.KeepAlive(_proc); GC.KeepAlive(_keyboard); GC.KeepAlive(_mouse);
     }
     private delegate nint HookProc(int code, nuint wParam, nint lParam);
@@ -233,6 +250,7 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
     [DllImport("user32.dll")] private static extern bool DestroyWindow(nint hwnd);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern bool UnregisterClassW(string name, nint instance);
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern nint SetWindowsHookExW(int id, HookProc proc, nint instance, uint thread);
+    [DllImport("user32.dll", EntryPoint = "SetWindowsHookExW", CharSet = CharSet.Unicode, SetLastError = true)] private static extern nint SetWindowsHookPointer(int id, nint proc, nint instance, uint thread);
     [DllImport("user32.dll")] private static extern nint CallNextHookEx(nint hook, int code, nuint w, nint l);
     [DllImport("user32.dll", SetLastError = true)] private static extern bool UnhookWindowsHookEx(nint hook);
 }
