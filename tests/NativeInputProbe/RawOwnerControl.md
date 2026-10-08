@@ -140,5 +140,53 @@ B/C console counts are not A AUTO interference evidence.
 | Some observers recover | Preserve per-observer results and compare bindings/chain counts |
 | Ownership/clock/hash mismatch, partial delivery, fault or AUTO interference | Inconclusive; fix experiment validity first |
 
-Manual owner comparison is **NOT RUN by development agent / pending user**.
+## Reviewed owner B / C / B evidence (2026-10-08)
+
+The user supplied all nine logs for fixed B-C Hook order. All three sessions
+observed four tagged keyboard events in EACH A/B/C observer, F8 and B down/up
+1/1. All eight keyboard send records per session returned one; both SendInput
+and PostMessage processed each tested key down/up 1/1 in B. Both roles prepared
+before installation, B installed before C, both installed and baselined before
+emission, snapshots followed emission. Raw module/registration ownership moved
+B/C/B; target/Core stayed in B, CLR absent, existing DLL hashes unchanged.
+Owner received/cleaned 307/307, 373/373, 354/354; final registrations zero, no
+fault, mismatch or parse error. A AUTO had four injected keyboard and ten injected
+mouse callbacks, no unflagged events; before/after human callbacks persisted.
+Normal-operation/shortcut acceptance still requires the user's confirmation.
+
+This weakens the claim that Raw ownership in the last Hook installer alone is
+sufficient for missing keyboard observations in this topology. It does not
+invalidate the previous C-B missing session or close the original failure.
+Raw software/candidate attribution was NOT COLLECTED in these count-only runs.
+
+## Next manual comparison: FIX C-B installation, owner B / C / B
+
+Reuse the EXACT A/B/C commands and owner table above; no new binary, rebuild,
+input implementation or receiver option is needed. Start processes A then B
+then C in every session, WAIT BOTH PREPARED/COMMANDS. The ONE changed procedure
+relative to the previous comparison is the fixed Hook installation order:
+
+1. In C, type install; WAIT for C INSTALLED.
+2. In B, type install; WAIT for B INSTALLED.
+3. Confirm C hookActualAfterTicks < B hookActualBeforeTicks; both installs must
+   follow both PREPARED observedTicks. Every session uses C-B, including session 2.
+
+Sessions 1/3: both roles --raw-owner B. Session 2: both roles --raw-owner C.
+Use B's target HWND/PID in A regardless of owner. Preserve the earlier HUMAN
+BEFORE, B/C baseline, A next, five-second B foreground/hands-off countdown,
+first B/C snapshots BEFORE HUMAN AFTER, A done, second B/C snapshots and B/C done.
+Keep elevation, external applications and process start order unchanged; use
+fresh processes. Return nine complete logs grouped C-B/owner B, C-B/owner C,
+C-B/owner B, plus normal-operation and accidental-input confirmation.
+
+| Fixed C-B order, complete sends/targets and valid ownership/clocks/lifecycle | Predeclared interpretation |
+|---|---|
+| Missing / complete / missing | Supports a joint association of Raw ownership in target B and B-last installation here; moving receiver involves DLL/thread/registration/foreground ownership together, not one API root cause |
+| Missing / missing / missing | Raw/target co-location is not necessary in this topology; investigate B-last target/Core/process association; target and Core are still not separated |
+| All complete, or either B-owner control differs | Prior missing control not stably reproduced; no ownership inference, audit environment/preparation before adding another probe |
+| Only some observers recover | Retain separate A/B/C callback and tagged-key results; do not collapse into one pass/fail |
+| Wrong order/owner, incomplete send/target, fault/hash mismatch or AUTO interference | Inconclusive; repair experiment validity first |
+
+The B-C owner comparison was **RUN by user**. The new C-B owner comparison is
+**NOT RUN / pending user**; automated no-AUTO contract checks are separate.
 Automatic takeover remains disabled; original failure still needs closure.

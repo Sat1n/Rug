@@ -48,7 +48,9 @@ Original integrated acceptance remains open and automatic takeover stays closed.
 That native user run also recovered/missed/recovered without CLR. The next
 [Raw owner control](NativeInputProbe/RawOwnerControl.md) fixes Hook order and
 compares owner B/C/B while B retains the target/Core. Subprocess tests accept
-`-RawOwner B|C`; new manual ownership acceptance is pending, takeover stays closed.
+`-RawOwner B|C`. The user's fixed B-C ownership run was complete in all three
+sessions; the next fixed C-B/owner B-C-B control reuses the same binaries and is
+pending. Count-only Raw attribution is NOT COLLECTED; takeover stays closed.
 
 ## Layout
 

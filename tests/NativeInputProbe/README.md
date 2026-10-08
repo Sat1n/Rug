@@ -25,6 +25,9 @@ DLLs while replacing B/C hosting; it is a structural comparison, not a CLR diagn
 The pure-native reversal also recovered/missed/recovered. The next
 [Raw owner comparison](RawOwnerControl.md) keeps Hook order B-C and target/Core in
 B, relocates the unchanged receiver to C, then restores owner B in fresh sessions.
+The user's nine B-C logs were complete in all three owners. The same guide now
+defines fixed C-B order with owner B/C/B to fill the remaining interaction cell;
+existing commands suffice, no sender/receiver code change. This user run is pending.
 `-Mode ManagedTarget` binds only B's validated diagnostic HWND/PID and keeps the
 native Rug.Core sender; see the controlled guide for startup/focus/counter rules.
 
