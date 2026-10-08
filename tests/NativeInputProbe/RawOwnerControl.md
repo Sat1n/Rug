@@ -32,8 +32,8 @@ Hooks share one mechanism. Ordinary operation needs the user's confirmation.
 
 Both native roles accept `--raw-owner B|C`, default B. Invalid values, misplaced
 options, mixed roles and use with --test reject BEFORE module/thread/window
-startup. [RunRole](NativeRoles.cpp#function:RunRole) retains target and Core
-exclusively in B, one deferred keyboard Hook in each B/C, and creates
+startup. In this comparison [RunRole](NativeRoles.cpp#function:RunRole) retains
+the default target and Core in B, one deferred keyboard Hook in each B/C, and creates
 [RawHost](NativeRoles.cpp#class:RawHost) ONLY in the selected owner. The owner
 loads the same receiver DLL and calls its unchanged Run on one native thread:
 keyboard usage 6, INPUTSINK|DEVNOTIFY, 250ms timer, no packet reading, original
@@ -41,7 +41,9 @@ DefWindowProc cleanup. No receiver or callback DLL source changes/rebuild.
 
 Every phase includes rawOwner, actual local rawRegistrations and readiness QPC.
 Owner verifies live HWND/usage/flags before install/snapshot; nonowner verifies
-zero registrations and no receiver module. C never loads Core or creates a target.
+zero registrations and no receiver module. C never loads Core; target defaults B.
+The separate [target control](TargetOwnerControl.md) changes target ownership only
+when both roles explicitly select --target-owner C.
 Target/Hook/Raw threads in an owner are distinct. Both roles must prepare before
 either Hook. Duplicate install preserves timestamps; no registration transfer or
 reinstallation within a session. Stop joins/clears owned resources. Incomplete
@@ -187,6 +189,8 @@ C-B/owner B, plus normal-operation and accidental-input confirmation.
 | Only some observers recover | Retain separate A/B/C callback and tagged-key results; do not collapse into one pass/fail |
 | Wrong order/owner, incomplete send/target, fault/hash mismatch or AUTO interference | Inconclusive; repair experiment validity first |
 
-The B-C owner comparison was **RUN by user**. The new C-B owner comparison is
-**NOT RUN / pending user**; automated no-AUTO contract checks are separate.
+Both B-C and C-B owner comparisons were **RUN by user**. The C-B nine-log run
+reproduced missing/complete/missing; exact counts/clocks and the next independent
+[target B/C/B control](TargetOwnerControl.md) are recorded there. Core/Raw remain
+in B for that next comparison; new target control is NOT RUN / pending user.
 Automatic takeover remains disabled; original failure still needs closure.

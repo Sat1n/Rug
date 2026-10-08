@@ -26,9 +26,10 @@ The pure-native reversal also recovered/missed/recovered. The next
 [Raw owner comparison](RawOwnerControl.md) keeps Hook order B-C and target/Core in
 B, relocates the unchanged receiver to C, then restores owner B in fresh sessions.
 The user's nine B-C logs were complete in all three owners. The same guide now
-defines fixed C-B order with owner B/C/B to fill the remaining interaction cell;
-existing commands suffice, no sender/receiver code change. This user run is pending.
-`-Mode ManagedTarget` binds only B's validated diagnostic HWND/PID and keeps the
+records fixed C-B/owner B-C-B missing/complete/missing. The next
+[target owner control](TargetOwnerControl.md) fixes Core/Raw B and C-B Hook order,
+moving target B/C/B with --target-owner B|C. This manual target run is pending.
+`-Mode ManagedTarget` binds the selected owner's validated diagnostic HWND/PID and keeps the
 native Rug.Core sender; see the controlled guide for startup/focus/counter rules.
 
 See [paired-session evidence and source audit](HookComparison.md) for the passing
@@ -103,6 +104,10 @@ Raw and callback DLLs remain unchanged; no production or solution reference is a
 Role EXE's `--raw-owner B|C` selects the receiver host, default B. Run that script
 with `-RawOwner B` and `-RawOwner C` for both contract variants; direct EXE
 commands in the owner guide keep both roles' selected owner consistent.
+Independent --target-owner B|C defaults B. Subprocess tests also accept
+-TargetOwner B|C; all four owner combinations verify Core remains B, real A
+binding to the selected target, preserved target identity and complete cleanup.
+Old NativeB/NativeC runner modes retain both default owners B.
 
 ### First run alone
 
