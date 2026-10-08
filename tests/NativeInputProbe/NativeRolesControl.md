@@ -30,6 +30,11 @@ This is reverse-confirmed correlation with the final Hook installation context,
 not a proven root cause. Raw software/candidate data were NOT COLLECTED. Low-level
 Hooks share one Windows mechanism. Original integrated acceptance remains open.
 
+The user's subsequent nine pure-native logs reproduced complete/missing/complete
+in A/B/C without CLR; sends/targets and cleanup remained complete. Exact clocks
+and the next [Raw owner B/C/B comparison](RawOwnerControl.md) are recorded there.
+Managed hosting is not necessary for that correlation in this topology.
+
 ## Replacement boundary
 
 `Rug.NativeRoleProbe.exe` is a NEW diagnostic executable, separate from unchanged
@@ -140,5 +145,6 @@ Raw classification stays NOT COLLECTED and cannot be spliced from an older round
 | Only some observers recover | Compare each observer's counts, module/installation identity and chain timings separately |
 | Hash/identity/clock/fault/target/send mismatch or AUTO interference | Inconclusive; repair experiment validity first |
 
-Manual input comparison is **NOT RUN by the development agent / pending user**.
+Manual input is **NOT RUN by the development agent**; the user's native comparison
+is recorded above. The new owner comparison remains pending user execution.
 Automatic takeover remains disabled; no reduced pass closes the original failure.

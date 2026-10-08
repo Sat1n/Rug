@@ -22,6 +22,9 @@ observers and B Raw registration before either Hook, changing only install order
 That B-C/C-B/B-C user run recovered/missed/recovered all three observers. The next
 [native B/C host comparison](NativeRolesControl.md) retains A and both diagnostic
 DLLs while replacing B/C hosting; it is a structural comparison, not a CLR diagnosis.
+The pure-native reversal also recovered/missed/recovered. The next
+[Raw owner comparison](RawOwnerControl.md) keeps Hook order B-C and target/Core in
+B, relocates the unchanged receiver to C, then restores owner B in fresh sessions.
 `-Mode ManagedTarget` binds only B's validated diagnostic HWND/PID and keeps the
 native Rug.Core sender; see the controlled guide for startup/focus/counter rules.
 
@@ -94,6 +97,9 @@ guide for deployment and fixed-binary comparisons.
 Run `tests/run_native_role_tests.ps1` after building for real A/B/C subprocess gate,
 protocol binding, order/duplicate/EOF/cleanup checks without AUTO. Core, sender EXE,
 Raw and callback DLLs remain unchanged; no production or solution reference is added.
+Role EXE's `--raw-owner B|C` selects the receiver host, default B. Run that script
+with `-RawOwner B` and `-RawOwner C` for both contract variants; direct EXE
+commands in the owner guide keep both roles' selected owner consistent.
 
 ### First run alone
 

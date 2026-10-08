@@ -240,30 +240,36 @@ void PrintRaw(const std::string& label, const RawSnapshot& raw) {
         << " timer=" << raw.timer << " input=" << raw.input << " deviceChanges=" << raw.device << " cleanup=" << raw.cleanup << " fault=" << raw.fault
         << " error=" << raw.error << " cleanupError=" << raw.cleanupError << " packetReading=False\n";
 }
-int RunRole(bool isB) {
+// @shape B always owns target/Core; selected B/C owns the unchanged Raw DLL/thread/registration.
+// @source RawReceiver.cpp#class:Receiver; KeyboardHook.cpp#function:callback
+int RunRole(bool isB, char rawOwner = 'B') {
     const std::string role = isB ? "B" : "C";
+    const bool ownsRaw = (isB ? 'B' : 'C') == rawOwner;
     std::unique_ptr<Module> core; if (isB) core = std::make_unique<Module>(L"Rug.Core.dll");
     std::unique_ptr<RoleWindow> target; if (isB) target = std::make_unique<RoleWindow>();
     HookApi api; RoleWindow hook(&api);
-    std::unique_ptr<RawHost> raw; if (isB) raw = std::make_unique<RawHost>();
-    const auto rawReady = isB ? Tick() : 0; HookSnapshot previous{};
+    std::unique_ptr<RawHost> raw; if (ownsRaw) raw = std::make_unique<RawHost>();
+    const auto rawReady = ownsRaw ? Tick() : 0; HookSnapshot previous{};
     if (target) { ShowWindow(target->Hwnd(), SW_SHOW); std::cout << "NATIVE TARGET: hwnd=0x" << std::hex << reinterpret_cast<uintptr_t>(target->Hwnd()) << std::dec << " processId=" << GetCurrentProcessId() << '\n'; }
     auto snapshot = [&](const std::string& phase) {
         Check(!GetModuleHandleW(L"coreclr.dll"), "CLR unexpectedly loaded; native comparison invalid");
         hook.Sync(); if (target) target->Sync(); if (raw) raw->Sync();
         auto h = api.Read(); Check(!h.mismatch && !h.counts[7] && h.attached == (hook.Installed() ? 1u : 0u) && (!hook.Installed() || h.thread == hook.ThreadId()), "Hook binding/parse fault");
         auto r = raw ? raw->Read() : RawSnapshot{}; const auto registrations = VerifyRegistrations(reinterpret_cast<HWND>(r.hwnd));
-        if (isB) Check(target->ThreadId() != hook.ThreadId() && target->ThreadId() != r.thread && hook.ThreadId() != r.thread, "Native role threads not separate");
-        else Check(!GetModuleHandleW(L"Rug.Core.dll") && !GetModuleHandleW(L"Rug.NativeRawReceiver.dll"), "C loaded forbidden Core/Raw module");
+        if (target) Check(target->ThreadId() != hook.ThreadId(), "Target and Hook threads not separate");
+        if (raw) Check(hook.ThreadId() != r.thread && (!target || target->ThreadId() != r.thread), "Raw and window threads not separate");
+        if (!isB) Check(!GetModuleHandleW(L"Rug.Core.dll"), "C loaded forbidden Core module");
+        Check(ownsRaw == (GetModuleHandleW(L"Rug.NativeRawReceiver.dll") != nullptr), "Raw module loaded in wrong role");
         std::cout << "NATIVE " << role << ' ' << phase << ": processId=" << GetCurrentProcessId() << " architecture=X64 clrLoaded=" << (GetModuleHandleW(L"coreclr.dll") != nullptr)
-            << " target=" << isB << " rawRegistrations=" << registrations << " rawReadyObservedTicks=" << rawReady << " hookInstalled=" << hook.Installed()
+            << " target=" << isB << " rawRegistrations=" << registrations << " rawOwner=" << rawOwner << " rawReadyObservedTicks=" << rawReady << " hookInstalled=" << hook.Installed()
             << " hookActualBeforeTicks=" << hook.Before() << " hookActualAfterTicks=" << hook.After() << " observedTicks=" << Tick() << " frequency=" << Frequency() << " emitsInput=False\n";
         hook.Print(phase + " HOOK");
         std::cout << phase << " CALLBACK: boundThreadId=" << h.thread << " attached=" << h.attached << " threadMismatch=" << h.mismatch
             << " callbackAddress=" << reinterpret_cast<void*>(api.procedure) << " callbackModule=" << api.owner << " hookInstallHmod=" << api.owner
             << " windowInstance=" << GetModuleHandleW(nullptr) << " hookType=13 hookThreadParameter=0\n";
         PrintHook(phase, h, previous); previous = h;
-        if (raw) { PrintRaw(phase, r); target->Print(phase + " TARGET");
+        if (raw) PrintRaw(phase, r);
+        if (target) { target->Print(phase + " TARGET");
             std::cout << phase << " TARGET KEYS: protocol=" << target->Metric(10) << " F8 down/up=" << target->Metric(6) << '/' << target->Metric(7) << " B down/up=" << target->Metric(8) << '/' << target->Metric(9) << '\n'; }
         std::cout << std::flush;
     };
@@ -311,11 +317,18 @@ void Tests() {
 }
 int wmain(int argc, wchar_t** argv) {
     try {
-        if (argc != 2) { std::cout << "Usage: Rug.NativeRoleProbe.exe --role-b|--role-c|--test\n"; return 1; }
+        if (argc != 2 && argc != 4) { std::cout << "Usage: Rug.NativeRoleProbe.exe --role-b|--role-c [--raw-owner B|C], or --test\n"; return 1; }
         const std::wstring argument = argv[1];
-        if (argument == L"--role-b") return RunRole(true);
-        if (argument == L"--role-c") return RunRole(false);
-        if (argument == L"--test") { Tests(); return 0; }
+        char rawOwner = 'B';
+        // Reject unsupported/mixed roles before DLL, thread, window or registration side effects.
+        if (argc == 4) {
+            const std::wstring option = argv[2], value = argv[3];
+            Check((argument == L"--role-b" || argument == L"--role-c") && option == L"--raw-owner" && (value == L"B" || value == L"C"), "Invalid Raw owner arguments; no startup performed");
+            rawOwner = value == L"B" ? 'B' : 'C';
+        }
+        if (argument == L"--role-b") return RunRole(true, rawOwner);
+        if (argument == L"--role-c") return RunRole(false, rawOwner);
+        if (argument == L"--test" && argc == 2) { Tests(); return 0; }
         std::cout << "Invalid native role; no startup performed\n"; return 1;
     } catch (const std::exception& e) { std::cout << "NATIVE ROLE FAILED: " << e.what() << '\n'; return 1; }
 }

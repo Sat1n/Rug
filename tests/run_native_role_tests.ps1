@@ -1,5 +1,5 @@
 # Diagnostic subprocess contract tests only: no SendInput and no human acceptance.
-param()
+param([ValidateSet('B','C')][string]$RawOwner = 'B')
 $ErrorActionPreference = 'Stop'
 $roleRoot = Split-Path -Parent $PSScriptRoot
 $roleExe = Join-Path $roleRoot 'x64/Debug/Rug.NativeRoleProbe.exe'
@@ -55,7 +55,7 @@ function RawIdentity-Role($child, [string]$phase) {
 function Install-Role($child, [string]$role) { Write-Role $child 'install'; return Until-Role $child "NATIVE $role INSTALLED:" }
 function Cleanup-Role($child, [string]$role) {
     Assert-Role ($child.Lines -match "NATIVE $role CLEANUP: threadExited=1 attached=0 targetHwnd=0 rawRegistrations=0 fault=None") "Incomplete $role cleanup"
-    if ($role -eq 'B') {
+    if ($role -eq $RawOwner) {
         $raw = @($child.Lines | Where-Object { $_.StartsWith('STOPPED RAW:') })[-1]
         Assert-Role ((Field-Role $raw 'input') -eq (Field-Role $raw 'cleanup')) 'WM_INPUT cleanup mismatch'
     }
@@ -65,14 +65,23 @@ foreach ($order in @('B-C','C-B','B-C')) {
     try {
         $a = Start-Role '--managed-target' $senderExe
         $null = Until-Role $a 'MANAGED TARGET:'
-        $b = Start-Role '--role-b'
+        $b = Start-Role "--role-b --raw-owner $RawOwner"
         $bPrepared = Until-Role $b 'NATIVE B PREPARED:'
         $null = Until-Role $b 'NATIVE B COMMANDS:'
-        $rawIdentity = RawIdentity-Role $b 'PREPARED'
-        $c = Start-Role '--role-c'
+        $c = Start-Role "--role-c --raw-owner $RawOwner"
         $cPrepared = Until-Role $c 'NATIVE C PREPARED:'
         $null = Until-Role $c 'NATIVE C COMMANDS:'
-        Assert-Role ($bPrepared -match 'clrLoaded=0 target=1 rawRegistrations=1' -and $cPrepared -match 'clrLoaded=0 target=0 rawRegistrations=0') 'Role isolation/registration incorrect'
+        $rawChild = if ($RawOwner -eq 'B') { $b } else { $c }
+        $rawIdentity = RawIdentity-Role $rawChild 'PREPARED'
+        $bRegistrations = if ($RawOwner -eq 'B') { 1 } else { 0 }
+        $cRegistrations = 1 - $bRegistrations
+        Assert-Role ($bPrepared -match "clrLoaded=0 target=1 rawRegistrations=$bRegistrations rawOwner=$RawOwner" -and $cPrepared -match "clrLoaded=0 target=0 rawRegistrations=$cRegistrations rawOwner=$RawOwner") 'Role isolation/registration incorrect'
+        $rawPrepared = if ($RawOwner -eq 'B') { $bPrepared } else { $cPrepared }
+        Assert-Role ((Field-Role $rawPrepared 'rawReadyObservedTicks') -gt 0) 'Raw ownership did not await readiness'
+        Assert-Role (@($rawChild.Lines | Where-Object { $_ -match '^ROLE MODULE:.*Rug.NativeRawReceiver.dll' }).Count -eq 1) 'Raw owner module evidence missing'
+        $nonRawChild = if ($RawOwner -eq 'B') { $c } else { $b }
+        Assert-Role (-not ($nonRawChild.Lines -match '^ROLE MODULE:.*Rug.NativeRawReceiver.dll')) 'Nonowner loaded Raw module'
+        Assert-Role (@($b.Lines | Where-Object { $_ -match '^ROLE MODULE:.*Rug.Core.dll' }).Count -eq 1 -and -not ($c.Lines -match '^ROLE MODULE:.*Rug.Core.dll|^NATIVE TARGET:')) 'Core/target moved away from B'
         Assert-Role ((Field-Role $bPrepared 'hookInstalled') -eq 0 -and (Field-Role $cPrepared 'hookInstalled') -eq 0) 'Hook installed before preparation'
         Write-Role $b 'baseline'; $null = Until-Role $b 'NATIVE NOT READY:'
         Write-Role $c 'snapshot'; $null = Until-Role $c 'NATIVE NOT READY:'
@@ -86,7 +95,8 @@ foreach ($order in @('B-C','C-B','B-C')) {
         $bRepeat = Install-Role $b 'B'; $cRepeat = Install-Role $c 'C'
         Assert-Role ((Field-Role $bRepeat 'hookActualBeforeTicks') -eq $bStart -and (Field-Role $bRepeat 'hookActualAfterTicks') -eq $bEnd -and (Field-Role $cRepeat 'hookActualBeforeTicks') -eq $cStart -and (Field-Role $cRepeat 'hookActualAfterTicks') -eq $cEnd) 'Duplicate command reinstalled Hook'
         Write-Role $b 'snapshot'; $null = Until-Role $b 'snapshot TARGET KEYS:'
-        Assert-Role ((RawIdentity-Role $b 'snapshot') -eq $rawIdentity) 'Hook installation changed Raw thread/window'
+        if ($RawOwner -eq 'C') { Write-Role $c 'snapshot'; $null = Until-Role $c 'snapshot RAW:' }
+        Assert-Role ((RawIdentity-Role $rawChild 'snapshot') -eq $rawIdentity) 'Hook installation changed Raw thread/window'
         # Bind the UNCHANGED A safety/metric protocol without ever issuing next/AUTO.
         $target = @($b.Lines | Where-Object { $_.StartsWith('NATIVE TARGET:') })[0]
         $targetMatch = [regex]::Match($target, 'hwnd=(0x[0-9a-fA-F]+) processId=(\d+)')
@@ -99,14 +109,14 @@ foreach ($order in @('B-C','C-B','B-C')) {
         End-Role $b; End-Role $c
         Assert-Role ($b.Process.ExitCode -eq 0 -and $c.Process.ExitCode -eq 0) 'Native roles failed'
         Cleanup-Role $b 'B'; Cleanup-Role $c 'C'
-        Write-Output "Native pair $order PASS: both prepared, exact one-shot order, Raw preserved, unchanged A bound without AUTO, clean teardown"
+        Write-Output "Native pair $order RawOwner=$RawOwner PASS: both prepared, exact one-shot order, Raw preserved, Core/target retained in B, unchanged A bound without AUTO, clean teardown"
     } finally { Dispose-Role $a; Dispose-Role $b; Dispose-Role $c }
 }
 foreach ($role in @('B','C')) {
     foreach ($case in @('done-uninstalled','eof-uninstalled','eof-installed')) {
         $child = $null
         try {
-            $child = Start-Role "--role-$($role.ToLowerInvariant())"
+            $child = Start-Role "--role-$($role.ToLowerInvariant()) --raw-owner $RawOwner"
             $null = Until-Role $child "NATIVE $role COMMANDS:"
             if ($case -eq 'eof-installed') { $null = Install-Role $child $role }
             End-Role $child -Eof:($case.StartsWith('eof'))
@@ -115,7 +125,7 @@ foreach ($role in @('B','C')) {
         } finally { Dispose-Role $child }
     }
 }
-foreach ($arguments in @('','--invalid','--role-b --role-c','--role-b extra')) {
+foreach ($arguments in @('','--invalid','--role-b --role-c','--role-b extra', '--test --raw-owner C', '--role-b --raw-owner Z', '--role-c --raw-owner', '--role-b --wrong C', '--role-b --raw-owner C extra')) {
     $child = $null
     try {
         $child = Start-Role $arguments
@@ -123,4 +133,4 @@ foreach ($arguments in @('','--invalid','--role-b --role-c','--role-b extra')) {
         Assert-Role ($child.Process.ExitCode -eq 1 -and -not ($child.Lines -match '^ROLE MODULE:|^NATIVE TARGET:')) 'Invalid CLI entered startup'
     } finally { Dispose-Role $child }
 }
-Write-Output 'Native subprocess contract PASS: three A/B/C order pairs, six incomplete-session cleanups, four pre-start rejections; physical SendInput/HUMAN NOT RUN'
+Write-Output "Native subprocess contract RawOwner=$RawOwner PASS: three A/B/C order pairs, six incomplete-session cleanups, nine pre-start rejections; physical SendInput/HUMAN NOT RUN"

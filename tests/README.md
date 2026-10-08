@@ -44,7 +44,11 @@ The user's nine-log order reversal recovered/missed/recovered all observers.
 The next [native B/C hosts](NativeInputProbe/NativeRolesControl.md) preserve A's
 sender and existing callback/receiver DLLs. Build with `-Mode Build`, then run
 `tests/run_native_role_tests.ps1` for actual no-AUTO A/B/C contract checks.
-Manual structural comparison remains pending and automatic takeover stays closed.
+Original integrated acceptance remains open and automatic takeover stays closed.
+That native user run also recovered/missed/recovered without CLR. The next
+[Raw owner control](NativeInputProbe/RawOwnerControl.md) fixes Hook order and
+compares owner B/C/B while B retains the target/Core. Subprocess tests accept
+`-RawOwner B|C`; new manual ownership acceptance is pending, takeover stays closed.
 
 ## Layout
 
