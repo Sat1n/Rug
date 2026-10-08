@@ -20,6 +20,7 @@ internal static class RawInputTests
         NativeKeyboardHookTests.ParseAndOwnership();
         await HookRawStartupTests.RunAsync();
         await ExternalHookObserverTests.RunAsync();
+        await ManualHookInstallTests.RunAsync();
         await ProbeLifecycleAsync();
         await SplitProbeLifecycleAsync();
         await UnregisteredPumpLifecycleAsync();

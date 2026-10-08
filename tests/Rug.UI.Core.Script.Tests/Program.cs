@@ -34,12 +34,20 @@ if (args.Contains("--hook-isolation-stage"))
         int index = Array.IndexOf(args, "--hook-isolation-stage");
         int moduleIndex = Array.IndexOf(args, "--hook-module");
         int orderIndex = Array.IndexOf(args, "--startup-order");
+        if (args.Count(a => a == "--manual-hook-install") > 1) throw new ArgumentException("Specify --manual-hook-install once");
         await RawInputDiagnostics.RunIsolationAsync(index + 1 < args.Length ? args[index + 1] : "",
             moduleIndex < 0 ? "callback" : moduleIndex + 1 < args.Length ? args[moduleIndex + 1] : "",
-            orderIndex < 0 ? null : orderIndex + 1 < args.Length ? args[orderIndex + 1] : "");
+            orderIndex < 0 ? null : orderIndex + 1 < args.Length ? args[orderIndex + 1] : "",
+            args.Contains("--manual-hook-install"));
     }
     catch (Exception error) { Console.WriteLine($"ISOLATION FAILED: {error.Message}"); Environment.ExitCode = 1; }
     return;
+}
+
+if (args.Contains("--manual-hook-install"))
+{
+    Console.WriteLine("ISOLATION FAILED: --manual-hook-install requires --hook-isolation-stage keyboard-native-callback");
+    Environment.ExitCode = 1; return;
 }
 
 if (args.Contains("--raw-input-self-test") || args.Contains("--raw-input-diagnostic"))
@@ -51,6 +59,7 @@ if (args.Contains("--raw-input-self-test") || args.Contains("--raw-input-diagnos
 
 if (args.Contains("--raw-input-tests")) { await RawInputTests.RunAsync(); return; }
 if (args.Contains("--observer-tests")) { await ExternalHookObserverTests.RunAsync(); return; }
+if (args.Contains("--manual-hook-tests")) { await ManualHookInstallTests.RunAsync(); return; }
 
 string path = Path.Combine(AppContext.BaseDirectory, "bridge_test.lua");
 await File.WriteAllTextAsync(path, "function on_tick() rug.sleep(200); local frame = rug.capture(); assert(frame.width == 1 and frame.height == 1); rug.log('done') end");

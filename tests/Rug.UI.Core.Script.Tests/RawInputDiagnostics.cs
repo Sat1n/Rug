@@ -107,11 +107,11 @@ internal static class RawInputDiagnostics
         if (module is not ("callback" or "original") || module == "original" && stage != "keyboard-native-callback")
             throw new ArgumentException("--hook-module callback|original; original is only valid with keyboard-native-callback");
     }
-    internal static async Task RunIsolationAsync(string stage, string module = "callback", string? startupOrder = null)
+    internal static async Task RunIsolationAsync(string stage, string module = "callback", string? startupOrder = null, bool manualHookInstall = false)
     {
         var selection = IsolationStage(stage); // Validate before DLL/window side effects.
         ValidateHookModule(stage, module);
-        HookRawStartup.Validate(stage, module, startupOrder);
+        HookRawStartup.Validate(stage, module, startupOrder, manualHookInstall);
         if (!LoadNative()) { Environment.ExitCode = 2; return; }
         bool split = UsesSplitProbe(stage);
         using var window = selection.Target ? new RawInputDiagnosticWindow(selection.Keyboard && !split, selection.Mouse && !split) : null;
@@ -119,7 +119,7 @@ internal static class RawInputDiagnostics
         // Ordered controls prepare target/Hook windows first; native Raw window/thread start inside its phase.
         using var separateProbe = split ? new RawInputDiagnosticWindow(selection.Keyboard, selection.Mouse, messageOnly: true,
             nativeKeyboardPath: nativeCallback ? NativeKeyboardHookTests.LibraryPath : null, originalHookModule: module == "original",
-            deferKeyboardHook: startupOrder is not null) : null;
+            deferKeyboardHook: startupOrder is not null || manualHookInstall) : null;
         var probe = separateProbe ?? window;
         await using var source = UsesRawInput(stage) ? new RawInputEventSource() : null;
         bool direct = stage == "keyboard-direct";
@@ -141,6 +141,7 @@ internal static class RawInputDiagnostics
         var aggregate = new RawAggregate();
         var previousRaw = aggregate.Read();
         EventHandler<InputSourceEvent> onInput = (_, e) => aggregate.Observe(e);
+        long rawReadyObservedTicks = 0;
         try
         {
             if (window is not null) await window.Ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -185,6 +186,7 @@ internal static class RawInputDiagnostics
             if (receiverPump is not null)
             {
                 if (startupOrder is null) await receiverPump.StartAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                if (manualHookInstall) rawReadyObservedTicks = System.Diagnostics.Stopwatch.GetTimestamp();
                 if (mouseOnly) Console.WriteLine("RAW REGISTRATION SELECTION: mouse=True keyboard=False; only keyboard device registration omitted from keyboard-messages. Same sender/target/Hook threads and count-only handling; no raw software/candidate classification collected.");
                 if (keyboardOnly && !nativeMessages) Console.WriteLine("RAW REGISTRATION SELECTION: mouse=False keyboard=True; only mouse device registration omitted from keyboard-messages. Same sender/target/Hook threads and count-only handling; no raw software/candidate classification collected.");
                 if (nativeMessages)
@@ -255,10 +257,18 @@ internal static class RawInputDiagnostics
                 await window.SynchronizeAsync();
                 if (separateProbe is not null) { await separateProbe.SynchronizeAsync(); PrintProbe(window, label + " TARGET"); }
                 PrintProbe(probe!, label);
-                if (nativeCallback && (probe!.NativeKeyboard!.Status is not { Attached: 1, ThreadMismatch: 0 }
-                    || probe.NativeKeyboard.Status.ThreadId != probe.Status.InstallThreadId
-                    || probe.Status is not { KeyboardInstalled: true, MouseInstalled: false, Failure: null, ThreadExited: false }))
-                    throw new InvalidOperationException("INCONCLUSIVE: native callback binding/Hook/thread failure");
+                if (nativeCallback)
+                {
+                    var p = probe!.Status; var n = probe.NativeKeyboard!.Status;
+                    bool awaitingInstall = manualHookInstall && !p.KeyboardInstalled;
+                    if (n.Attached != (awaitingInstall ? 0ul : 1ul) || n.ThreadMismatch != 0
+                        || !awaitingInstall && (!p.KeyboardInstalled || n.ThreadId != p.InstallThreadId
+                            || probe.HookInstallModule != probe.NativeKeyboard.ProcedureModule && module == "callback")
+                        || p.MouseInstalled || p.Failure is not null || p.ThreadExited)
+                        throw new InvalidOperationException("INCONCLUSIVE: native callback binding/Hook/thread failure");
+                    if (manualHookInstall)
+                        Console.WriteLine($"MANUAL HOOK {label}: processId={Environment.ProcessId} targetReady=True hookWindowReady=True rawReady=True hookInstalled={p.KeyboardInstalled} rawReadyObservedTicks={rawReadyObservedTicks} hookActualBeforeTicks={probe.KeyboardInstallStartedTicks} hookActualAfterTicks={probe.KeyboardInstallCompletedTicks} observedTicks={System.Diagnostics.Stopwatch.GetTimestamp()} frequency={System.Diagnostics.Stopwatch.Frequency}; no reinstall, no input; readiness alone is not Hook observation evidence.");
+                }
                 if (stage == "target-native-messages")
                 {
                     var idle = probe!.Status; var idleCounts = probe.Counts;
@@ -273,7 +283,9 @@ internal static class RawInputDiagnostics
                 Console.WriteLine($"{label} target tested-key SNAPSHOT: protocol={window.QueryTargetMetricForTest(10)} F8 down/up={window.QueryTargetMetricForTest(6)}/{window.QueryTargetMetricForTest(7)} B down/up={window.QueryTargetMetricForTest(8)}/{window.QueryTargetMetricForTest(9)}");
                 previous = now;
             }
-            await Snapshot("READY");
+            await Snapshot(manualHookInstall ? "PREPARED" : "READY");
+            if (manualHookInstall)
+                Console.WriteLine("MANUAL HOOK COMMANDS: target/Raw/Hook window READY, Hook NOT INSTALLED. Start C and wait for its PREPARED. Then install B/C once in requested order; await each INSTALLED before the next command. Use install, baseline, snapshot, done. No raw-registration restart or Hook replacement.");
             Console.WriteLine("Keep the selected A target foreground for its AUTO (native Human: native window; ManagedTarget: this managed window). Here use baseline/snapshot/done; this process sends no input. Fresh processes for each stage.");
             while (true)
             {
@@ -281,10 +293,24 @@ internal static class RawInputDiagnostics
                 if (command == "done" || command is null)
                 {
                     if (command is null) { Console.WriteLine("NOT RUN: isolation session ended without done"); Environment.ExitCode = 2; }
+                    if (manualHookInstall && !probe!.Status.KeyboardInstalled) { Console.WriteLine("NOT RUN: B Hook never installed"); Environment.ExitCode = 2; }
                     break;
                 }
-                if (command is "baseline" or "snapshot") await Snapshot(command);
-                else Console.WriteLine("Use baseline, snapshot or done.");
+                if (manualHookInstall && command == "install")
+                {
+                    // Snapshot verifies live Raw ownership BEFORE posting the one-shot installation.
+                    await Snapshot("INSTALL ADMISSION");
+                    await probe!.InstallDeferredKeyboardHookAsync();
+                    if (probe.KeyboardInstallStartedTicks <= rawReadyObservedTicks)
+                        throw new InvalidOperationException("INCONCLUSIVE: Hook did not install after Raw readiness");
+                    await Snapshot("INSTALLED");
+                }
+                else if (command is "baseline" or "snapshot")
+                {
+                    if (manualHookInstall && !probe!.Status.KeyboardInstalled) Console.WriteLine("MANUAL HOOK NOT READY: type install before baseline/snapshot.");
+                    else await Snapshot(command);
+                }
+                else Console.WriteLine(manualHookInstall ? "Use install, baseline, snapshot or done." : "Use baseline, snapshot or done.");
             }
             await Snapshot("END");
         }

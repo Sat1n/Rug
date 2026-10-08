@@ -113,6 +113,14 @@ lifecycles check role/registration isolation, parent target preservation, module
 binding and cleanup (`--observer-tests`, also included in the normal Raw suite).
 See [three-process steps and branches](../NativeInputProbe/ExternalObserverControl.md);
 this structural control is not original integrated or human acceptance.
+`--manual-hook-install` in corrected keyboard-native-callback (no --startup-order)
+prepares B target/Hook windows and native Raw registration without installing its
+Hook. Start C prepared too, then issue install in B/C or C/B order; duplicate
+commands do not reinstall. Pre-install baseline/snapshot are refused, missing
+install/EOF remains NOT RUN, faults stay visible. [Manual order guide](../NativeInputProbe/ManualHookOrderControl.md)
+defines nine-log steps and evidence. ManualHookInstallTests checks three real
+paired subprocess lifecycles, three incomplete B cleanups and four fail-before-load
+CLI cases (--manual-hook-tests, also in Raw/full suites). Physical AUTO is not inferred.
 Native parser tests and three real lifecycles check classification, thread binding,
 attachment conflicts, unsafe-unload rejection, receiver ownership and fault cleanup.
 Paired HUMAN/AUTO is NOT RUN by the agent; this control is not original acceptance.

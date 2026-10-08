@@ -119,6 +119,12 @@ ignore window, Hook removal/reinstallation or software-send changes are introduc
 
 ## Automated boundary
 
+Subsequent user controls restored A/B/C even with B's Hook retained, but C
+PREPARED without installing its Hook did not restore A/B. Thus co-location alone
+is insufficient to explain the gap, and C's installed Hook matters more directly
+than its idle process. See [reviewed evidence and manual B/C order control](ManualHookOrderControl.md)
+for fixed shared preparation, individual install gates and predeclared branches.
+
 [ExternalHookObserverTests](../Rug.UI.Core.Script.Tests/ExternalHookObserverTests.cs#class:ExternalHookObserverTests)
 runs five real child-process lifecycles while parent B owns its actual target,
 idle thread and native Raw registration. It checks role exclusivity, no Core/Raw

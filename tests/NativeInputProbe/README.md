@@ -17,6 +17,8 @@ and compares two B initialization phases in fresh paired sessions.
 All three ordered pairs retained the gap. The next [external observer control](ExternalObserverControl.md)
 moves the same callback to process C while B retains its target/native Raw receiver;
 it adds no software input, native binary changes or automatic takeover.
+The next [manual B/C installation order](ManualHookOrderControl.md) prepares both
+observers and B Raw registration before either Hook, changing only install order.
 `-Mode ManagedTarget` binds only B's validated diagnostic HWND/PID and keeps the
 native Rug.Core sender; see the controlled guide for startup/focus/counter rules.
 

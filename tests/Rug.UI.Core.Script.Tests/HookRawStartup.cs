@@ -7,8 +7,14 @@ internal sealed class HookRawStartup
     private readonly List<Step> _steps = [];
     private int _started;
     internal Step[] Snapshot => _steps.ToArray();
-    internal static void Validate(string stage, string module, string? order)
+    internal static void Validate(string stage, string module, string? order, bool manualInstall = false)
     {
+        if (manualInstall)
+        {
+            if (stage != "keyboard-native-callback" || module != "callback" || order is not null)
+                throw new ArgumentException("--manual-hook-install requires keyboard-native-callback, --hook-module callback and no --startup-order");
+            return;
+        }
         if (order is null) return; // Existing diagnostic paths retain immediate Hook installation.
         if (stage != "keyboard-native-callback" || module != "callback" || order is not ("hook-first" or "raw-first"))
             throw new ArgumentException("--startup-order hook-first|raw-first requires keyboard-native-callback and --hook-module callback");

@@ -37,6 +37,9 @@ All three ordered pairs reproduced the observation gap. The next
 [separate observer process C](NativeInputProbe/ExternalObserverControl.md) retains
 A's Core sender and B's target/native count receiver. Real child-process lifecycle
 tests preserve parent registrations; manual three-process acceptance remains pending.
+The next [manual B/C Hook order](NativeInputProbe/ManualHookOrderControl.md) holds
+process/Raw preparation fixed before the one-shot install commands; real paired
+subprocess tests verify clocks, unchanged ownership and clean disposal without AUTO.
 
 ## Layout
 
