@@ -40,6 +40,11 @@ tests preserve parent registrations; manual three-process acceptance remains pen
 The next [manual B/C Hook order](NativeInputProbe/ManualHookOrderControl.md) holds
 process/Raw preparation fixed before the one-shot install commands; real paired
 subprocess tests verify clocks, unchanged ownership and clean disposal without AUTO.
+The user's nine-log order reversal recovered/missed/recovered all observers.
+The next [native B/C hosts](NativeInputProbe/NativeRolesControl.md) preserve A's
+sender and existing callback/receiver DLLs. Build with `-Mode Build`, then run
+`tests/run_native_role_tests.ps1` for actual no-AUTO A/B/C contract checks.
+Manual structural comparison remains pending and automatic takeover stays closed.
 
 ## Layout
 

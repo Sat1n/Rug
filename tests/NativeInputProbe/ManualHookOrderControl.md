@@ -36,6 +36,11 @@ chain cause. Raw attribution remains NOT COLLECTED; original acceptance is open.
 Core/Raw/Hook SHA-256 stay those in [the startup guide](StartupOrderControl.md).
 No native rebuild, production behavior/C-ABI changes or automatic takeover here.
 
+The user's nine-log B-C/C-B/B-C run recovered/missed/recovered software keyboard
+observations in all A/B/C, with complete sends/targets and clean disposal. Both
+observers were prepared before installation. The next [native B/C host control](NativeRolesControl.md)
+records the exact clocks and tests whether that correlation requires managed hosts.
+
 ## Manual gate contract
 
 `--manual-hook-install` is accepted ONLY with keyboard-native-callback and
@@ -146,5 +151,5 @@ clean up; four invalid CLI combinations reject before loading Core.
 
 Run --manual-hook-tests or --raw-input-tests/full Lua suite. These checks emit
 no physical input and do not replace HUMAN/AUTO or demonstrate software Hook
-recovery. The new manual-order input comparison is **NOT RUN by the development
-agent; pending user execution**.
+recovery. Manual-order input is **NOT RUN by the development agent**; the user's
+nine-log comparison is recorded above and does not close original acceptance.

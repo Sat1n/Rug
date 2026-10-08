@@ -1,4 +1,4 @@
-param([ValidateSet('Human','Observe','Test','SelfTest','Build','ManagedTarget')][string]$Mode = 'Human', [switch]$BuildCore)
+param([ValidateSet('Human','Observe','Test','SelfTest','Build','ManagedTarget','NativeB','NativeC','RoleTest')][string]$Mode = 'Human', [switch]$BuildCore)
 $ErrorActionPreference = 'Stop'
 $probeRoot = Split-Path -Parent $PSScriptRoot
 $probeProject = Join-Path $PSScriptRoot 'NativeInputProbe/NativeInputProbe.vcxproj'
@@ -31,6 +31,10 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $probeHookProject = Join-Path $PSScriptRoot 'NativeInputProbe/NativeKeyboardHook.vcxproj'
 & $probeMsbuild $probeHookProject /p:Configuration=Debug /p:Platform=x64 /v:minimal /nologo
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if ($Mode -in @('NativeB', 'NativeC', 'RoleTest', 'Build')) {
+    & $probeMsbuild (Join-Path $PSScriptRoot 'NativeInputProbe/NativeRoleProbe.vcxproj') /p:Configuration=Debug /p:Platform=x64 /v:minimal /nologo
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
 if ($Mode -eq 'Build') { exit 0 }
 if ($Mode -in @('Human', 'SelfTest', 'ManagedTarget')) {
     $probeCore = Join-Path $probeRoot 'x64/Debug/Rug.Core.dll'
@@ -39,11 +43,15 @@ if ($Mode -in @('Human', 'SelfTest', 'ManagedTarget')) {
     }
 }
 $probeExecutable = Join-Path $probeRoot 'x64/Debug/Rug.NativeInputProbe.exe'
+if ($Mode -in @('NativeB', 'NativeC', 'RoleTest')) { $probeExecutable = Join-Path $probeRoot 'x64/Debug/Rug.NativeRoleProbe.exe' }
 [string[]]$probeArgs = @(switch ($Mode) {
     'Observe' { '--observe' }
     'Test' { '--test' }
     'SelfTest' { '--self-test' }
     'ManagedTarget' { '--managed-target' }
+    'NativeB' { '--role-b' }
+    'NativeC' { '--role-c' }
+    'RoleTest' { '--test' }
     default { @() }
 })
 & $probeExecutable @probeArgs

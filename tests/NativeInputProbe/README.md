@@ -19,6 +19,9 @@ moves the same callback to process C while B retains its target/native Raw recei
 it adds no software input, native binary changes or automatic takeover.
 The next [manual B/C installation order](ManualHookOrderControl.md) prepares both
 observers and B Raw registration before either Hook, changing only install order.
+That B-C/C-B/B-C user run recovered/missed/recovered all three observers. The next
+[native B/C host comparison](NativeRolesControl.md) retains A and both diagnostic
+DLLs while replacing B/C hosting; it is a structural comparison, not a CLR diagnosis.
 `-Mode ManagedTarget` binds only B's validated diagnostic HWND/PID and keeps the
 native Rug.Core sender; see the controlled guide for startup/focus/counter rules.
 
@@ -84,6 +87,13 @@ guide for deployment and fixed-binary comparisons.
 | Human (default) | HUMAN BEFORE -> AUTO F8/B in both modes -> HUMAN AFTER |
 | SelfTest | Same native software rounds without human acceptance; denied foreground is NOT RUN |
 | Observe | Passive independent native Hook observer, no synthetic input or DLL needed |
+| NativeB / NativeC | New Rug.NativeRoleProbe.exe hosts target/Raw/deferred Hook (B), or only deferred Hook (C); explicit install command, no emission |
+| RoleTest | Native role layout/target/registration/conflict/one-shot install/fault/cleanup tests; no physical input |
+
+`-Mode Build` also builds NativeRoleProbe.vcxproj, a separate x64 native executable.
+Run `tests/run_native_role_tests.ps1` after building for real A/B/C subprocess gate,
+protocol binding, order/duplicate/EOF/cleanup checks without AUTO. Core, sender EXE,
+Raw and callback DLLs remain unchanged; no production or solution reference is added.
 
 ### First run alone
 
