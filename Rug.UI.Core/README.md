@@ -287,7 +287,7 @@ tags and untagged zero-device input remain candidates. This spoofable observatio
 hint grants no authority. See [diagnostics](RawInputEvents.md) for the 5-second
 countdown, separate callback/classification/phase counters and observable
 post-start probe thread faults and independent F8/B AUTO rounds. Manual
-keyboard-probe diagnosis remains pending; [module/send control](../tests/NativeInputProbe/InputEvidenceControl.md) repairs callback hmod association, retains window/thread/receiver behavior and separates send, tested-key target and Hook evidence. Raw counters in this count-only control are NOT COLLECTED.
+keyboard-probe diagnosis remains pending; [startup-order control](../tests/NativeInputProbe/StartupOrderControl.md) compares corrected Hook installation and native Raw startup/registration phases. It separates send, tested-key target and Hook evidence; count-only Raw classification is NOT COLLECTED.
 
 ## Native Interop & Memory Safety (CRITICAL)
 

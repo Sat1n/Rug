@@ -110,6 +110,10 @@ a specific supporting hypothesis. No unmarked input is certified human input.
 
 ## Verification boundary
 
+User paired original/callback/original results retained both Hook gaps with
+complete sends/specific targets. Next: [controlled initialization phases](StartupOrderControl.md),
+including the limits of the unchanged Raw receiver's combined startup/registration.
+
 Strict x64 native/managed/WinUI builds and deterministic native tests pass.
 Tests cover complete/partial/failed/wrong-key/backend/overlap evidence, bounded
 overflow, detached rounds, foreign mapping identity, specific target normal/system

@@ -107,17 +107,19 @@ internal static class RawInputDiagnostics
         if (module is not ("callback" or "original") || module == "original" && stage != "keyboard-native-callback")
             throw new ArgumentException("--hook-module callback|original; original is only valid with keyboard-native-callback");
     }
-    internal static async Task RunIsolationAsync(string stage, string module = "callback")
+    internal static async Task RunIsolationAsync(string stage, string module = "callback", string? startupOrder = null)
     {
         var selection = IsolationStage(stage); // Validate before DLL/window side effects.
         ValidateHookModule(stage, module);
+        HookRawStartup.Validate(stage, module, startupOrder);
         if (!LoadNative()) { Environment.ExitCode = 2; return; }
         bool split = UsesSplitProbe(stage);
         using var window = selection.Target ? new RawInputDiagnosticWindow(selection.Keyboard && !split, selection.Mouse && !split) : null;
         bool nativeCallback = stage == "keyboard-native-callback";
-        // Only this opt-in mode replaces the callback pointer; original install parameters/thread remain.
+        // Ordered controls prepare target/Hook windows first; native Raw window/thread start inside its phase.
         using var separateProbe = split ? new RawInputDiagnosticWindow(selection.Keyboard, selection.Mouse, messageOnly: true,
-            nativeKeyboardPath: nativeCallback ? NativeKeyboardHookTests.LibraryPath : null, originalHookModule: module == "original") : null;
+            nativeKeyboardPath: nativeCallback ? NativeKeyboardHookTests.LibraryPath : null, originalHookModule: module == "original",
+            deferKeyboardHook: startupOrder is not null) : null;
         var probe = separateProbe ?? window;
         await using var source = UsesRawInput(stage) ? new RawInputEventSource() : null;
         bool direct = stage == "keyboard-direct";
@@ -143,6 +145,16 @@ internal static class RawInputDiagnostics
         {
             if (window is not null) await window.Ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
             if (separateProbe is not null) await separateProbe.Ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            if (startupOrder is not null)
+            {
+                var startup = new HookRawStartup();
+                try
+                {
+                    await startup.StartAsync(startupOrder, separateProbe!.InstallDeferredKeyboardHookAsync, () => receiverPump!.StartAsync());
+                }
+                finally { startup.Print(startupOrder); } // Never print between the two initialization actions.
+                Console.WriteLine($"STARTUP COMPLETE: order={startupOrder} targetReady=True hookInstalled={separateProbe!.Status.KeyboardInstalled} rawReady={receiverPump!.Status.PumpReady} hookActualBeforeTicks={separateProbe.KeyboardInstallStartedTicks} hookActualAfterTicks={separateProbe.KeyboardInstallCompletedTicks} rawPhaseIncludesThreadWindowStartup=True; new matched baseline uses one posted installation on original Hook thread; no Hook replacement or event filtering.");
+            }
             if (source is not null || split)
                 Console.WriteLine($"MANAGED TARGET: hwnd=0x{(nuint)window!.Ready.Task.Result:X} processId={Environment.ProcessId} (diagnostic window only)");
             if (split)
@@ -172,7 +184,7 @@ internal static class RawInputDiagnostics
             }
             if (receiverPump is not null)
             {
-                await receiverPump.StartAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                if (startupOrder is null) await receiverPump.StartAsync().WaitAsync(TimeSpan.FromSeconds(5));
                 if (mouseOnly) Console.WriteLine("RAW REGISTRATION SELECTION: mouse=True keyboard=False; only keyboard device registration omitted from keyboard-messages. Same sender/target/Hook threads and count-only handling; no raw software/candidate classification collected.");
                 if (keyboardOnly && !nativeMessages) Console.WriteLine("RAW REGISTRATION SELECTION: mouse=False keyboard=True; only mouse device registration omitted from keyboard-messages. Same sender/target/Hook threads and count-only handling; no raw software/candidate classification collected.");
                 if (nativeMessages)

@@ -30,6 +30,9 @@ B's thread/receiver while selecting a separate callback DLL. The next
 [module/send evidence repair](NativeInputProbe/InputEvidenceControl.md) verifies its
 owning hmod, native send returns and specific F8/B target down/up before new
 order/role controls. Original integrated acceptance remains open.
+The next [startup-order control](NativeInputProbe/StartupOrderControl.md) fixes
+A-first process order and compares awaited Hook installation against native
+receiver startup/registration readiness, without modifying the native binaries.
 
 ## Layout
 

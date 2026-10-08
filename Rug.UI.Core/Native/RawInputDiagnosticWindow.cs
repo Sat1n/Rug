@@ -80,6 +80,12 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
     internal nint HookInstallModule { get; private set; }
     internal nint WindowInstanceModule { get; private set; }
     internal bool OriginalHookModule { get; }
+    private readonly bool _deferKeyboardHook;
+    private readonly TaskCompletionSource _keyboardHookReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _keyboardHookRequested, _failDeferredHook;
+    private long _keyboardInstallStartedTicks, _keyboardInstallCompletedTicks;
+    internal long KeyboardInstallStartedTicks => Interlocked.Read(ref _keyboardInstallStartedTicks);
+    internal long KeyboardInstallCompletedTicks => Interlocked.Read(ref _keyboardInstallCompletedTicks);
     private long _targetF8Down, _targetF8Up, _targetBDown, _targetBUp;
     public readonly TaskCompletionSource<nint> Ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Thread _thread;
@@ -91,11 +97,14 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
     private long _move, _down, _up, _keyDown, _keyUp;
     public Counters Counts => new(Interlocked.Read(ref _move), Interlocked.Read(ref _down), Interlocked.Read(ref _up),
         Interlocked.Read(ref _keyDown), Interlocked.Read(ref _keyUp), _nativeKeyboard?.Status.Counts ?? _keyCounts.Snapshot, _mouseCounts.Snapshot);
-    public RawInputDiagnosticWindow(bool installKeyboard = true, bool installMouse = true, bool messageOnly = false, string? nativeKeyboardPath = null, bool originalHookModule = false)
+    public RawInputDiagnosticWindow(bool installKeyboard = true, bool installMouse = true, bool messageOnly = false, string? nativeKeyboardPath = null, bool originalHookModule = false, bool deferKeyboardHook = false)
     {
         if (nativeKeyboardPath is not null && (!installKeyboard || installMouse || !messageOnly))
             throw new ArgumentException("Native callback comparison requires the separate keyboard-only Hook probe.");
         if (originalHookModule && nativeKeyboardPath is null) throw new ArgumentException("Original-module control requires the native callback mode.");
+        if (deferKeyboardHook && (nativeKeyboardPath is null || originalHookModule))
+            throw new ArgumentException("Deferred installation requires the corrected native keyboard callback mode.");
+        _deferKeyboardHook = deferKeyboardHook;
         OriginalHookModule = originalHookModule;
         _nativeKeyboard = nativeKeyboardPath is null ? null : new NativeKeyboardHookDiagnostic(nativeKeyboardPath);
         _installKeyboard = installKeyboard; _installMouse = installMouse; _messageOnly = messageOnly;
@@ -133,6 +142,21 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
         if (Status.ThreadExited) throw new InvalidOperationException("Diagnostic message thread exited");
     }
     internal void InjectThreadFailureForTest() => PostMessageW(_hwnd, 0x8002, 0, 0);
+    internal void FailDeferredHookForTest() => Volatile.Write(ref _failDeferredHook, 1);
+    // @shape One posted installation command on the existing message thread; no Hook replacement.
+    // @source NativeKeyboardHookDiagnostic.cs#class:NativeKeyboardHookDiagnostic
+    internal async Task InstallDeferredKeyboardHookAsync()
+    {
+        if (!_deferKeyboardHook) throw new InvalidOperationException("Hook installation was not deferred");
+        await Ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposeRequested) != 0, this);
+        ThrowIfThreadUnavailable();
+        if (Interlocked.CompareExchange(ref _keyboardHookRequested, 1, 0) == 0
+            && !PostMessageW(_hwnd, 0x8003, 0, 0))
+            _keyboardHookReady.TrySetException(new InvalidOperationException("Deferred Hook command could not be posted"));
+        await _keyboardHookReady.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        ThrowIfThreadUnavailable();
+    }
     // Diagnostic-only cross-process counters; no pointers, key contents or C-ABI changes.
     internal const uint TargetMetricMessage = 0x8010;
     internal const int TargetMetricMagic = 0x52554744;
@@ -171,15 +195,7 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
             _hwnd = CreateWindowExW(0, name, "Rug Raw Input diagnostics - isolated input target", _messageOnly ? 0u : 0x00cf0000u,
                 300, 200, 440, 300, _messageOnly ? (nint)(-3) : 0, 0, instance, 0);
             if (_hwnd == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError(), "Diagnostic window creation failed");
-            if (_installKeyboard)
-            {
-                _nativeKeyboard?.Attach();
-                _keyHook = _nativeKeyboard is null ? SetWindowsHookExW(13, _keyboard, instance, 0)
-                    : SetWindowsHookPointer(13, _nativeKeyboard.Procedure, HookInstallModule, 0);
-                _keyboardInstallError = _keyHook == 0 ? Marshal.GetLastPInvokeError() : 0;
-                CheckHookInstallation(_keyHook, _keyboardInstallError, "Keyboard hook");
-                Volatile.Write(ref _keyboardInstalled, 1);
-            }
+            if (_installKeyboard && !_deferKeyboardHook) InstallKeyboardHook();
             if (_installMouse)
             {
                 _mouseHook = SetWindowsHookExW(14, _mouse, instance, 0);
@@ -190,11 +206,26 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
             if (!_messageOnly) ShowWindow(_hwnd, 5);
             Ready.SetResult(_hwnd);
             int status;
-            while ((status = GetMessageW(out var m, 0, 0, 0)) > 0) { if (m.Id == 0x8002) throw new InvalidOperationException("Controlled diagnostic thread failure"); TranslateMessage(ref m); DispatchMessageW(ref m); }
+            while ((status = GetMessageW(out var m, 0, 0, 0)) > 0)
+            {
+                if (m.Id == 0x8002) throw new InvalidOperationException("Controlled diagnostic thread failure");
+                if (m.Id == 0x8003 && m.Hwnd == _hwnd && _deferKeyboardHook && Volatile.Read(ref _keyboardHookRequested) != 0)
+                {
+                    ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposeRequested) != 0, this);
+                    if (Volatile.Read(ref _failDeferredHook) != 0) throw new InvalidOperationException("Controlled deferred Hook installation failure");
+                    if (_keyHook == 0) InstallKeyboardHook();
+                    _keyboardHookReady.TrySetResult(); continue;
+                }
+                TranslateMessage(ref m); DispatchMessageW(ref m);
+            }
             if (status < 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError(), "Diagnostic message pump failed");
             _exitReason = "WM_QUIT";
         }
-        catch (Exception error) { _failure = error.GetType().Name + ": " + error.Message; _exitReason = "Fault"; Ready.TrySetException(error); }
+        catch (Exception error)
+        {
+            _failure = error.GetType().Name + ": " + error.Message; _exitReason = "Fault"; Ready.TrySetException(error);
+            if (Volatile.Read(ref _keyboardHookRequested) != 0) _keyboardHookReady.TrySetException(error);
+        }
         finally
         {
             bool keyboardRemoved = RemoveHook(_keyHook, "Keyboard hook"); RemoveHook(_mouseHook, "Mouse hook");
@@ -205,8 +236,22 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
             }
             if (_hwnd != 0) DestroyWindow(_hwnd); if (registered) UnregisterClassW(name, instance);
             while (_barriers.TryDequeue(out var b)) b.TrySetException(new InvalidOperationException(_failure ?? "Diagnostic thread exited"));
+            if (Volatile.Read(ref _keyboardHookRequested) != 0) _keyboardHookReady.TrySetException(new InvalidOperationException(_failure ?? "Diagnostic thread exited before Hook installation"));
             Volatile.Write(ref _exited, 1); Completion.TrySetResult(Status);
         }
+    }
+    // @shape Installation-thread-only handle + monotonic interval; immediate error capture before timing.
+    // @source NativeKeyboardHookDiagnostic.cs#class:NativeKeyboardHookDiagnostic
+    private void InstallKeyboardHook()
+    {
+        Interlocked.Exchange(ref _keyboardInstallStartedTicks, System.Diagnostics.Stopwatch.GetTimestamp());
+        _nativeKeyboard?.Attach();
+        _keyHook = _nativeKeyboard is null ? SetWindowsHookExW(13, _keyboard, WindowInstanceModule, 0)
+            : SetWindowsHookPointer(13, _nativeKeyboard.Procedure, HookInstallModule, 0);
+        _keyboardInstallError = _keyHook == 0 ? Marshal.GetLastPInvokeError() : 0;
+        CheckHookInstallation(_keyHook, _keyboardInstallError, "Keyboard hook");
+        Interlocked.Exchange(ref _keyboardInstallCompletedTicks, System.Diagnostics.Stopwatch.GetTimestamp());
+        Volatile.Write(ref _keyboardInstalled, 1);
     }
     private bool RemoveHook(nint handle, string name)
     {

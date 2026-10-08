@@ -22,8 +22,10 @@ if (args.Contains("--hook-isolation-stage"))
     {
         int index = Array.IndexOf(args, "--hook-isolation-stage");
         int moduleIndex = Array.IndexOf(args, "--hook-module");
+        int orderIndex = Array.IndexOf(args, "--startup-order");
         await RawInputDiagnostics.RunIsolationAsync(index + 1 < args.Length ? args[index + 1] : "",
-            moduleIndex < 0 ? "callback" : moduleIndex + 1 < args.Length ? args[moduleIndex + 1] : "");
+            moduleIndex < 0 ? "callback" : moduleIndex + 1 < args.Length ? args[moduleIndex + 1] : "",
+            orderIndex < 0 ? null : orderIndex + 1 < args.Length ? args[orderIndex + 1] : "");
     }
     catch (Exception error) { Console.WriteLine($"ISOLATION FAILED: {error.Message}"); Environment.ExitCode = 1; }
     return;

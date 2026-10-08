@@ -97,6 +97,14 @@ only in this stage; unsupported combinations fail before loading Core or creatin
 windows. [Module/send evidence control](../NativeInputProbe/InputEvidenceControl.md)
 defines fresh original/callback/original runs. Automated tests cover three real
 lifecycles per selection and v2 F8/B target down/up including system messages.
+`--startup-order hook-first|raw-first` additionally requires this stage and
+corrected callback hmod. Both conditions prepare target/Hook windows first and
+post one installation command; the unchanged Raw phase includes receiver thread/
+window startup and registration. [Phase contract and paired steps](../NativeInputProbe/StartupOrderControl.md)
+define the matched baseline. HookRawStartupTests runs six real success and four
+failure lifecycles, including registration conflicts, timestamps, duplicate
+installation, foreign registration preservation and complete cleanup. No AUTO
+is inferred from those tests; older modes retain immediate installation.
 Native parser tests and three real lifecycles check classification, thread binding,
 attachment conflicts, unsafe-unload rejection, receiver ownership and fault cleanup.
 Paired HUMAN/AUTO is NOT RUN by the agent; this control is not original acceptance.

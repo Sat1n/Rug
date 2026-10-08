@@ -12,6 +12,8 @@ tags: [diagnostics, input, hooks, native]
 fixed while adding DLL load, target window and individual Hook registrations.
 The next [module/send evidence control](InputEvidenceControl.md) separates native
 send returns, specific F8/B target delivery and the unresolved Hook discrepancy.
+The next [startup-order comparison](StartupOrderControl.md) retains those binaries
+and compares two B initialization phases in fresh paired sessions.
 `-Mode ManagedTarget` binds only B's validated diagnostic HWND/PID and keeps the
 native Rug.Core sender; see the controlled guide for startup/focus/counter rules.
 
