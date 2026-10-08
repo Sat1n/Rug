@@ -13,9 +13,9 @@ internal static class RawInputDiagnostics
             CandidateMouse - before.CandidateMouse, SoftwareKeyboard - before.SoftwareKeyboard,
             SoftwareMouse - before.SoftwareMouse, SoftwareKeyDown - before.SoftwareKeyDown, SoftwareKeyUp - before.SoftwareKeyUp);
     }
-    private static void PrintHook(string label, RawInputDiagnosticWindow.HookCounts c)
+    internal static void PrintHook(string label, RawInputDiagnosticWindow.HookCounts c)
         => Console.WriteLine($"{label}: callbackTotal={c.CallbackTotal} actionableTotal={c.ActionableTotal} injected={c.Injected} unflagged={c.Unflagged} taggedTotal={c.TaggedTotal} taggedInjected={c.TaggedInjected} taggedUnflagged={c.TaggedUnflagged} parseErrors={c.ParseErrors} ownTicks={c.OwnTicks} ownMaxTicks={c.OwnMaxTicks} chainTicks={c.ChainTicks} chainMaxTicks={c.ChainMaxTicks}");
-    private static void PrintProbe(RawInputDiagnosticWindow window, string label)
+    internal static void PrintProbe(RawInputDiagnosticWindow window, string label)
     {
         var p = window.Status;
         Console.WriteLine($"{label}: probeGeneration={p.Generation} installThreadId={p.InstallThreadId} architecture={p.Architecture} keyboardInstalled={p.KeyboardInstalled} keyboardError={p.KeyboardInstallError} mouseInstalled={p.MouseInstalled} mouseError={p.MouseInstallError} threadExited={p.ThreadExited} failure={p.Failure ?? "None"} exitReason={p.ExitReason ?? "None"} stopwatchFrequency={System.Diagnostics.Stopwatch.Frequency}");

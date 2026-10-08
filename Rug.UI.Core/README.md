@@ -288,6 +288,11 @@ hint grants no authority. See [diagnostics](RawInputEvents.md) for the 5-second
 countdown, separate callback/classification/phase counters and observable
 post-start probe thread faults and independent F8/B AUTO rounds. Manual
 keyboard-probe diagnosis remains pending; [startup-order control](../tests/NativeInputProbe/StartupOrderControl.md) compares corrected Hook installation and native Raw startup/registration phases. It separates send, tested-key target and Hook evidence; count-only Raw classification is NOT COLLECTED.
+The ordered pairs all retained the gap. The next [external observer control](../tests/NativeInputProbe/ExternalObserverControl.md)
+reuses the existing native keyboard diagnostic in a separate process C without
+Core/Raw registration or input; B retains target/native receiver. Five real child
+lifecycles check isolation and cleanup; manual AUTO/HUMAN and production-source
+acceptance remain pending. Production input/event-source behavior is unchanged.
 
 ## Native Interop & Memory Safety (CRITICAL)
 

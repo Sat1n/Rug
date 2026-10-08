@@ -33,6 +33,10 @@ order/role controls. Original integrated acceptance remains open.
 The next [startup-order control](NativeInputProbe/StartupOrderControl.md) fixes
 A-first process order and compares awaited Hook installation against native
 receiver startup/registration readiness, without modifying the native binaries.
+All three ordered pairs reproduced the observation gap. The next
+[separate observer process C](NativeInputProbe/ExternalObserverControl.md) retains
+A's Core sender and B's target/native count receiver. Real child-process lifecycle
+tests preserve parent registrations; manual three-process acceptance remains pending.
 
 ## Layout
 

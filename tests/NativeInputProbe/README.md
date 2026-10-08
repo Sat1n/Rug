@@ -14,6 +14,9 @@ The next [module/send evidence control](InputEvidenceControl.md) separates nativ
 send returns, specific F8/B target delivery and the unresolved Hook discrepancy.
 The next [startup-order comparison](StartupOrderControl.md) retains those binaries
 and compares two B initialization phases in fresh paired sessions.
+All three ordered pairs retained the gap. The next [external observer control](ExternalObserverControl.md)
+moves the same callback to process C while B retains its target/native Raw receiver;
+it adds no software input, native binary changes or automatic takeover.
 `-Mode ManagedTarget` binds only B's validated diagnostic HWND/PID and keeps the
 native Rug.Core sender; see the controlled guide for startup/focus/counter rules.
 

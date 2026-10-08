@@ -105,6 +105,14 @@ define the matched baseline. HookRawStartupTests runs six real success and four
 failure lifecycles, including registration conflicts, timestamps, duplicate
 installation, foreign registration preservation and complete cleanup. No AUTO
 is inferred from those tests; older modes retain immediate installation.
+`--hook-observer` runs process C alone, with the same native keyboard callback
+and corrected module on a message-only thread, no target/Core/Raw load or input.
+Use `install` after B Raw readiness, then baseline/snapshot/done. Duplicate install
+does not rehook; missing installation or EOF is NOT RUN. Five real separate-process
+lifecycles check role/registration isolation, parent target preservation, module
+binding and cleanup (`--observer-tests`, also included in the normal Raw suite).
+See [three-process steps and branches](../NativeInputProbe/ExternalObserverControl.md);
+this structural control is not original integrated or human acceptance.
 Native parser tests and three real lifecycles check classification, thread binding,
 attachment conflicts, unsafe-unload rejection, receiver ownership and fault cleanup.
 Paired HUMAN/AUTO is NOT RUN by the agent; this control is not original acceptance.

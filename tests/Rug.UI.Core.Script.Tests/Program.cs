@@ -16,6 +16,17 @@ using Rug.UI.Core.Security;
 using Rug.UI.Core.Schema;
 using RugTaskScheduler = Rug.UI.Core.Services.TaskScheduler;
 
+if (args.Contains("--hook-observer"))
+{
+    try
+    {
+        ExternalHookObserver.ValidateArguments(args);
+        await ExternalHookObserver.RunAsync();
+    }
+    catch (Exception error) { Console.WriteLine($"OBSERVER FAILED: {error.Message}"); Environment.ExitCode = 1; }
+    return;
+}
+
 if (args.Contains("--hook-isolation-stage"))
 {
     try
@@ -39,6 +50,7 @@ if (args.Contains("--raw-input-self-test") || args.Contains("--raw-input-diagnos
 }
 
 if (args.Contains("--raw-input-tests")) { await RawInputTests.RunAsync(); return; }
+if (args.Contains("--observer-tests")) { await ExternalHookObserverTests.RunAsync(); return; }
 
 string path = Path.Combine(AppContext.BaseDirectory, "bridge_test.lua");
 await File.WriteAllTextAsync(path, "function on_tick() rug.sleep(200); local frame = rug.capture(); assert(frame.width == 1 and frame.height == 1); rug.log('done') end");

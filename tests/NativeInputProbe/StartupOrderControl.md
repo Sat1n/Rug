@@ -110,6 +110,11 @@ Moving the observer into C, then a pure C++ role comparison if necessary, are
 structural controls, not strict single-variable experiments. Message-loop
 replacement needs a supporting hypothesis. Automatic takeover remains deferred.
 
+The user's three ordered pairs now all reproduce the gap with complete native
+send/target evidence and clean registrations. Phase clocks confirm the requested
+order; no recovery occurred. See the next [external observer control](ExternalObserverControl.md)
+for the reviewed counts, process-role contract, three-console steps and result branches.
+
 ## Automated boundary
 
 Six real success lifecycles verify both orders, one installation, correct module
