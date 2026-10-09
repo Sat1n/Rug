@@ -240,13 +240,14 @@ void PrintRaw(const std::string& label, const RawSnapshot& raw) {
         << " timer=" << raw.timer << " input=" << raw.input << " deviceChanges=" << raw.device << " cleanup=" << raw.cleanup << " fault=" << raw.fault
         << " error=" << raw.error << " cleanupError=" << raw.cleanupError << " packetReading=False\n";
 }
-// @shape B always owns Core; independent B/C owners select target and unchanged Raw DLL/thread/registration.
+// @shape optional Core load in B only; independent B/C owners select target and unchanged Raw DLL/thread/registration.
 // @source RawReceiver.cpp#class:Receiver; KeyboardHook.cpp#function:callback
-int RunRole(bool isB, char rawOwner = 'B', char targetOwner = 'B') {
+int RunRole(bool isB, char rawOwner = 'B', char targetOwner = 'B', bool loadCore = true) {
     const std::string role = isB ? "B" : "C";
     const bool ownsRaw = (isB ? 'B' : 'C') == rawOwner;
     const bool ownsTarget = (isB ? 'B' : 'C') == targetOwner;
-    std::unique_ptr<Module> core; if (isB) core = std::make_unique<Module>(L"Rug.Core.dll");
+    Check(!GetModuleHandleW(L"Rug.Core.dll"), "Core already loaded before role startup");
+    std::unique_ptr<Module> core; if (isB && loadCore) core = std::make_unique<Module>(L"Rug.Core.dll");
     std::unique_ptr<RoleWindow> target; if (ownsTarget) target = std::make_unique<RoleWindow>();
     HookApi api; RoleWindow hook(&api);
     std::unique_ptr<RawHost> raw; if (ownsRaw) raw = std::make_unique<RawHost>();
@@ -259,12 +260,14 @@ int RunRole(bool isB, char rawOwner = 'B', char targetOwner = 'B') {
         auto r = raw ? raw->Read() : RawSnapshot{}; const auto registrations = VerifyRegistrations(reinterpret_cast<HWND>(r.hwnd));
         if (target) Check(target->ThreadId() != hook.ThreadId(), "Target and Hook threads not separate");
         if (raw) Check(hook.ThreadId() != r.thread && (!target || target->ThreadId() != r.thread), "Raw and window threads not separate");
-        Check(isB == (GetModuleHandleW(L"Rug.Core.dll") != nullptr), "Core module loaded in wrong role");
+        const bool coreLoaded = GetModuleHandleW(L"Rug.Core.dll") != nullptr;
+        Check((isB && loadCore) == coreLoaded, "Core module presence differs from selected role/load mode");
         Check(ownsTarget == (target && IsWindow(target->Hwnd())), "Target missing or created in wrong role");
         Check(ownsRaw == (GetModuleHandleW(L"Rug.NativeRawReceiver.dll") != nullptr), "Raw module loaded in wrong role");
         std::cout << "NATIVE " << role << ' ' << phase << ": processId=" << GetCurrentProcessId() << " architecture=X64 clrLoaded=" << (GetModuleHandleW(L"coreclr.dll") != nullptr)
             << " target=" << ownsTarget << " rawRegistrations=" << registrations << " rawOwner=" << rawOwner << " rawReadyObservedTicks=" << rawReady << " hookInstalled=" << hook.Installed()
-            << " hookActualBeforeTicks=" << hook.Before() << " hookActualAfterTicks=" << hook.After() << " observedTicks=" << Tick() << " frequency=" << Frequency() << " emitsInput=False targetOwner=" << targetOwner << '\n';
+            << " hookActualBeforeTicks=" << hook.Before() << " hookActualAfterTicks=" << hook.After() << " observedTicks=" << Tick() << " frequency=" << Frequency() << " emitsInput=False targetOwner=" << targetOwner
+            << " coreLoad=" << (loadCore ? "on" : "off") << " coreLoaded=" << coreLoaded << '\n';
         hook.Print(phase + " HOOK");
         std::cout << phase << " CALLBACK: boundThreadId=" << h.thread << " attached=" << h.attached << " threadMismatch=" << h.mismatch
             << " callbackAddress=" << reinterpret_cast<void*>(api.procedure) << " callbackModule=" << api.owner << " hookInstallHmod=" << api.owner
@@ -319,21 +322,26 @@ void Tests() {
 }
 int wmain(int argc, wchar_t** argv) {
     try {
-        if (argc != 2 && argc != 4 && argc != 6) { std::cout << "Usage: Rug.NativeRoleProbe.exe --role-b|--role-c [--raw-owner B|C] [--target-owner B|C], or --test\n"; return 1; }
+        if (argc != 2 && argc != 4 && argc != 6 && argc != 8) { std::cout << "Usage: Rug.NativeRoleProbe.exe --role-b|--role-c [--raw-owner B|C] [--target-owner B|C] [--core-load on|off], or --test\n"; return 1; }
         const std::wstring argument = argv[1];
-        char rawOwner = 'B', targetOwner = 'B'; bool rawSpecified{}, targetSpecified{};
+        char rawOwner = 'B', targetOwner = 'B'; bool rawSpecified{}, targetSpecified{}, coreSpecified{}, loadCore = true;
         // Reject unsupported/mixed roles before DLL, thread, window or registration side effects.
         for (int i = 2; i < argc; i += 2) {
             const std::wstring option = argv[i], value = argv[i + 1];
-            Check((argument == L"--role-b" || argument == L"--role-c") && (value == L"B" || value == L"C"), "Invalid owner arguments; no startup performed");
+            Check(argument == L"--role-b" || argument == L"--role-c", "Invalid role options; no startup performed");
             if (option == L"--raw-owner") {
+                Check(value == L"B" || value == L"C", "Invalid Raw owner; no startup performed");
                 Check(!rawSpecified, "Duplicate Raw owner; no startup performed"); rawSpecified = true; rawOwner = value == L"B" ? 'B' : 'C';
             } else if (option == L"--target-owner") {
+                Check(value == L"B" || value == L"C", "Invalid target owner; no startup performed");
                 Check(!targetSpecified, "Duplicate target owner; no startup performed"); targetSpecified = true; targetOwner = value == L"B" ? 'B' : 'C';
+            } else if (option == L"--core-load") {
+                Check(value == L"on" || value == L"off", "Invalid Core load mode; no startup performed");
+                Check(!coreSpecified, "Duplicate Core load mode; no startup performed"); coreSpecified = true; loadCore = value == L"on";
             } else { throw std::runtime_error("Invalid owner option; no startup performed"); }
         }
-        if (argument == L"--role-b") return RunRole(true, rawOwner, targetOwner);
-        if (argument == L"--role-c") return RunRole(false, rawOwner, targetOwner);
+        if (argument == L"--role-b") return RunRole(true, rawOwner, targetOwner, loadCore);
+        if (argument == L"--role-c") return RunRole(false, rawOwner, targetOwner, loadCore);
         if (argument == L"--test" && argc == 2) { Tests(); return 0; }
         std::cout << "Invalid native role; no startup performed\n"; return 1;
     } catch (const std::exception& e) { std::cout << "NATIVE ROLE FAILED: " << e.what() << '\n'; return 1; }

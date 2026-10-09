@@ -37,7 +37,9 @@ Original integrated failure remains open, automatic takeover disabled.
 ## Contract and experiment boundary
 
 [RunRole](NativeRoles.cpp#function:RunRole) now accepts independent --raw-owner
-and --target-owner B|C; both default B. Core ALWAYS stays in B. ONLY the selected
+and --target-owner B|C; both default B. With the default --core-load on, Core
+stays in B. The separate [Core load control](CoreLoadControl.md) can omit B's
+diagnostic load; C always excludes Core. ONLY the selected
 target owner creates/shows the same [RoleWindow](NativeRoles.cpp#class:RoleWindow)
 with unchanged class prefix/title, procedure, dedicated thread and metric v2
 protocol. Target, Hook and Raw threads remain separate when co-located. Both
@@ -71,7 +73,7 @@ Build once BEFORE starting the sessions, no -BuildCore:
 ```
 
 Each variant covers three actual A/B/C install-order pairs, six incomplete-session
-cleanups, sixteen invalid CLI cases and five default/optional/reversed CLI checks.
+cleanups, twenty-two invalid CLI cases and eight default/optional/reversed CLI checks.
 Assertions check actual target/Raw/module ownership, separate thread identities,
 prepared-before-install QPC, preserved target HWND/thread/generation and Raw
 HWND/thread, one-shot installs and cleanup. UNCHANGED A binds the selected target,
@@ -80,7 +82,9 @@ role self-tests check target-specific messages/layouts, Raw conflicts and faults
 
 Core/Raw/Hook hashes must retain [the baseline](StartupOrderControl.md); A EXE
 stays E323A5F1F2FD784D2BDEEE35E03CF5D50944A37DAC2775D907182AF1EAF27A06.
-Only the role EXE changes. New manual target comparison is NOT RUN / pending user.
+Only the role EXE changes. The user's target comparison reproduced
+missing/complete/missing; [reviewed clocks and next Core load control](CoreLoadControl.md)
+record the evidence. New manual Core control is NOT RUN / pending user.
 
 ## Three fresh manual sessions
 

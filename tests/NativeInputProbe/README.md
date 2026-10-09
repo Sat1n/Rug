@@ -28,7 +28,10 @@ B, relocates the unchanged receiver to C, then restores owner B in fresh session
 The user's nine B-C logs were complete in all three owners. The same guide now
 records fixed C-B/owner B-C-B missing/complete/missing. The next
 [target owner control](TargetOwnerControl.md) fixes Core/Raw B and C-B Hook order,
-moving target B/C/B with --target-owner B|C. This manual target run is pending.
+moving target B/C/B with --target-owner B|C; the user reproduced
+missing/complete/missing. The next [B diagnostic Core load control](CoreLoadControl.md)
+keeps target/Raw B, Hook C-B, and A's emission unchanged while comparing B's
+--core-load on/off/on. This manual load run is pending.
 `-Mode ManagedTarget` binds the selected owner's validated diagnostic HWND/PID and keeps the
 native Rug.Core sender; see the controlled guide for startup/focus/counter rules.
 
@@ -108,6 +111,9 @@ Independent --target-owner B|C defaults B. Subprocess tests also accept
 -TargetOwner B|C; all four owner combinations verify Core remains B, real A
 binding to the selected target, preserved target identity and complete cleanup.
 Old NativeB/NativeC runner modes retain both default owners B.
+--core-load on|off defaults on and affects only B's diagnostic module load; C
+always excludes Core and A's sender is unchanged. Contract tests accept
+-CoreLoad on|off and verify observed module presence for all eight combinations.
 
 ### First run alone
 

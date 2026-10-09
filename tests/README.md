@@ -52,7 +52,10 @@ compares owner B/C/B while B retains the target/Core. Subprocess tests accept
 sessions; fixed C-B/owner B-C-B reproduced missing/complete/missing. The next
 [target owner control](NativeInputProbe/TargetOwnerControl.md) fixes Core/Raw B,
 Hook C-B and moves target B/C/B. Subprocess tests additionally accept
--TargetOwner B|C. Manual target control is pending; count-only Raw attribution
+-TargetOwner B|C. The user reproduced missing/complete/missing with target B/C/B.
+The next [B Core load control](NativeInputProbe/CoreLoadControl.md) fixes target/
+Raw B and Hook C-B, comparing --core-load on/off/on without altering A's sender.
+Tests accept -CoreLoad on|off. Manual Core control is pending; Raw attribution
 is NOT COLLECTED and takeover stays closed.
 
 ## Layout

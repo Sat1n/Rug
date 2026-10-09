@@ -46,7 +46,8 @@ not a strict one-variable experiment and not a production event-source replaceme
 B loads the SAME Rug.Core.dll without creating an input controller or sending.
 The topology below describes the original/default roles. Independent Raw and
 [target ownership options](TargetOwnerControl.md) now allow relocation while Core
-remains B; defaults preserve this comparison.
+remains B; defaults preserve this comparison. The subsequent [Core load control](CoreLoadControl.md)
+can omit B's diagnostic module load only; C still never loads Core.
 Its native target exposes the same title, diagnostic class prefix and v2 metric
 protocol consumed by A's existing HWND/PID checks. Three distinct threads own
 target, deferred keyboard Hook window, and Raw receiver. The
@@ -93,8 +94,8 @@ The strict native build and tests cover DLL layouts, target protocol/specific ke
 one-shot installation, thread binding, Raw ownership/conflict, post-ready fault and
 repeated cleanup. Subprocess tests run actual A/B/C in B-C/C-B/B-C order, verify
 both preparation timestamps precede installations, unchanged Raw HWND/thread,
-duplicate install, pre-install refusal, six incomplete-session cleanups, sixteen
-invalid CLI rejections before module loading and five optional/default CLI checks
+duplicate install, pre-install refusal, six incomplete-session cleanups, twenty-two
+invalid CLI rejections before module loading and eight optional/default CLI checks
 per owner combination. A binds the real selected native target
 using its unchanged validation, then EOF BEFORE next; no AUTO is emitted.
 These tests do not replace physical input/HUMAN acceptance.
@@ -151,5 +152,6 @@ Raw classification stays NOT COLLECTED and cannot be spliced from an older round
 
 Manual input is **NOT RUN by the development agent**; the user's native comparison
 is recorded above. Both Raw owner comparisons are recorded in the owner guide;
-the new target owner comparison remains pending user execution.
+the target owner comparison also reproduced missing/complete/missing. The new
+Core load comparison remains pending user execution.
 Automatic takeover remains disabled; no reduced pass closes the original failure.
