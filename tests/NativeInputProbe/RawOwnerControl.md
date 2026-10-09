@@ -70,12 +70,17 @@ below before AUTO. A wrong pair is inconclusive, not a valid negative result.
 ```
 
 Strict x64 build and both test runs cover six real A/B/C order pairs, twelve
-incomplete-session cleanups and eighteen pre-start CLI rejection cases. They
+incomplete-session cleanups; the current runner has 27 pre-start rejections and
+ten default/optional CLI checks per variant. They
 assert actual owner/nonowner module/registration counts, Core/target retained B,
 awaited Raw readiness, preserved Raw HWND/thread, prepared-before-install QPC,
 one-shot/duplicate install, unchanged A binding and final cleanup. No next/AUTO
 or physical SendInput; software/HUMAN acceptance is not inferred. Existing native
 lifecycle/fault/registration-conflict tests remain.
+The later [registration control](RawRegistrationControl.md) adds -RawRegistration
+on|off (default on), preserving the selected receiver infrastructure in off mode.
+Historical hashes below belong to the ownership experiment; the rebuilt test
+receiver must use one matching hash across the new registration on/off/on series.
 
 Core/Raw/Hook hashes must match [the baseline](StartupOrderControl.md). A EXE
 remains `E323A5F1F2FD784D2BDEEE35E03CF5D50944A37DAC2775D907182AF1EAF27A06`.

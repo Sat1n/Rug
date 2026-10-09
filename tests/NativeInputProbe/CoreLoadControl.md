@@ -74,7 +74,11 @@ Automated checks emit no physical SendInput and cannot replace manual acceptance
 Native self-tests retain specific target metrics, background Core messages, fault,
 layout and ownership checks. Only role EXE changes; [baseline DLL hashes](StartupOrderControl.md)
 and A hash E323A5F1F2FD784D2BDEEE35E03CF5D50944A37DAC2775D907182AF1EAF27A06
-stay unchanged. Manual on/off/on input is NOT RUN / pending user.
+stay unchanged during that experiment. The user completed on/off/on with
+missing/missing/missing; B's load is not necessary in that native topology.
+Detailed evidence and next [registration control](RawRegistrationControl.md)
+retain original acceptance as unresolved; no production Raw attribution was
+collected. Current subprocess checks have 27 invalid and ten optional CLI cases.
 
 ## Three fresh manual sessions
 

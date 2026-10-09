@@ -48,12 +48,16 @@ The topology below describes the original/default roles. Independent Raw and
 [target ownership options](TargetOwnerControl.md) now allow relocation while Core
 remains B; defaults preserve this comparison. The subsequent [Core load control](CoreLoadControl.md)
 can omit B's diagnostic module load only; C still never loads Core.
+The later [registration control](RawRegistrationControl.md) retains receiver
+infrastructure while omitting only keyboard registration; default remains on.
 Its native target exposes the same title, diagnostic class prefix and v2 metric
 protocol consumed by A's existing HWND/PID checks. Three distinct threads own
 target, deferred keyboard Hook window, and Raw receiver. The
-[RawHost](NativeRoles.cpp#class:RawHost) calls unchanged Rug.NativeRawReceiver.dll
+[RawHost](NativeRoles.cpp#class:RawHost) calls Rug.NativeRawReceiver.dll
 on its own std::thread, keyboard-only flags INPUTSINK|DEVNOTIFY, 250ms timer and
 WM_INPUT count/DefWindowProc cleanup. No GetRawInputData or candidate attribution.
+The receiver's legacy registered constructor and 96-byte layout remain; its new
+optional unregistered constructor is used only by the later native-role control.
 
 C has only one deferred message-only keyboard Hook thread, no target, no Core,
 no receiver and no Raw registration. Both use the SAME Rug.NativeKeyboardHook.dll
@@ -94,8 +98,8 @@ The strict native build and tests cover DLL layouts, target protocol/specific ke
 one-shot installation, thread binding, Raw ownership/conflict, post-ready fault and
 repeated cleanup. Subprocess tests run actual A/B/C in B-C/C-B/B-C order, verify
 both preparation timestamps precede installations, unchanged Raw HWND/thread,
-duplicate install, pre-install refusal, six incomplete-session cleanups, twenty-two
-invalid CLI rejections before module loading and eight optional/default CLI checks
+duplicate install, pre-install refusal, six incomplete-session cleanups, 27
+invalid CLI rejections before module loading and ten optional/default CLI checks
 per owner combination. A binds the real selected native target
 using its unchanged validation, then EOF BEFORE next; no AUTO is emitted.
 These tests do not replace physical input/HUMAN acceptance.
@@ -153,5 +157,6 @@ Raw classification stays NOT COLLECTED and cannot be spliced from an older round
 Manual input is **NOT RUN by the development agent**; the user's native comparison
 is recorded above. Both Raw owner comparisons are recorded in the owner guide;
 the target owner comparison also reproduced missing/complete/missing. The new
-Core load comparison remains pending user execution.
+Core on/off/on also missed in all three sessions. The next
+[registration comparison](RawRegistrationControl.md) remains pending user execution.
 Automatic takeover remains disabled; no reduced pass closes the original failure.

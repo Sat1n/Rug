@@ -110,19 +110,20 @@ unsigned VerifyRegistrations(HWND raw = nullptr) {
 // @source RawReceiver.cpp#class:Receiver
 class RawHost {
     Module _module{L"Rug.NativeRawReceiver.dll"}; void* _receiver{}; std::thread _thread;
+    const bool _registerKeyboard;
     using Action = void(__cdecl*)(void*); using ReadFn = void(__cdecl*)(void*, RawSnapshot*);
     Action _run = _module.Export<Action>("Probe_Run"), _stop = _module.Export<Action>("Probe_Stop"), _destroy = _module.Export<Action>("Probe_Destroy");
     ReadFn _read = _module.Export<ReadFn>("Probe_Read");
     auto BarrierFunction() { return _module.Export<uint64_t(__cdecl*)(void*)>("Probe_Barrier"); }
 public:
-    RawHost() {
-        _receiver = _module.Export<void*(__cdecl*)()>("Probe_Create")(); Check(_receiver != nullptr, "Raw receiver allocation failed");
+    explicit RawHost(bool registerKeyboard = true) : _registerKeyboard(registerKeyboard) {
+        _receiver = _module.Export<void*(__cdecl*)()>(registerKeyboard ? "Probe_Create" : "Probe_CreateUnregistered")(); Check(_receiver != nullptr, "Raw receiver allocation failed");
         try {
             _thread = std::thread([this] { _run(_receiver); });
             const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(5);
             while (true) {
                 auto s = Read(); Check(!s.fault && !s.cleanupError && !s.exited, "Raw start failed");
-                if (s.ready) { VerifyRegistrations(reinterpret_cast<HWND>(s.hwnd)); break; }
+                if (s.ready) { VerifyRegistrations(_registerKeyboard ? reinterpret_cast<HWND>(s.hwnd) : nullptr); break; }
                 Check(std::chrono::steady_clock::now() < until, "Raw start timed out"); std::this_thread::sleep_for(std::chrono::milliseconds(10));
             }
         } catch (...) { Stop(); _destroy(_receiver); _receiver = nullptr; throw; }
@@ -135,7 +136,7 @@ public:
         const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(3);
         while (true) { auto s = Read(); Check(s.ready && !s.fault && !s.exited && !s.cleanupError, "Raw receiver fault");
             if (s.barrier >= barrier) break; Check(std::chrono::steady_clock::now() < until, "Raw barrier timed out"); std::this_thread::sleep_for(std::chrono::milliseconds(1)); }
-        VerifyRegistrations(reinterpret_cast<HWND>(Read().hwnd));
+        VerifyRegistrations(_registerKeyboard ? reinterpret_cast<HWND>(Read().hwnd) : nullptr);
     }
 };
 std::atomic_uint64_t WindowGeneration{};
@@ -240,9 +241,9 @@ void PrintRaw(const std::string& label, const RawSnapshot& raw) {
         << " timer=" << raw.timer << " input=" << raw.input << " deviceChanges=" << raw.device << " cleanup=" << raw.cleanup << " fault=" << raw.fault
         << " error=" << raw.error << " cleanupError=" << raw.cleanupError << " packetReading=False\n";
 }
-// @shape optional Core load in B only; independent B/C owners select target and unchanged Raw DLL/thread/registration.
+// @shape independent owners; optional B Core load and Raw registration, same receiver/window/thread/timer in both modes.
 // @source RawReceiver.cpp#class:Receiver; KeyboardHook.cpp#function:callback
-int RunRole(bool isB, char rawOwner = 'B', char targetOwner = 'B', bool loadCore = true) {
+int RunRole(bool isB, char rawOwner = 'B', char targetOwner = 'B', bool loadCore = true, bool rawRegistration = true) {
     const std::string role = isB ? "B" : "C";
     const bool ownsRaw = (isB ? 'B' : 'C') == rawOwner;
     const bool ownsTarget = (isB ? 'B' : 'C') == targetOwner;
@@ -250,14 +251,15 @@ int RunRole(bool isB, char rawOwner = 'B', char targetOwner = 'B', bool loadCore
     std::unique_ptr<Module> core; if (isB && loadCore) core = std::make_unique<Module>(L"Rug.Core.dll");
     std::unique_ptr<RoleWindow> target; if (ownsTarget) target = std::make_unique<RoleWindow>();
     HookApi api; RoleWindow hook(&api);
-    std::unique_ptr<RawHost> raw; if (ownsRaw) raw = std::make_unique<RawHost>();
+    std::unique_ptr<RawHost> raw; if (ownsRaw) raw = std::make_unique<RawHost>(rawRegistration);
     const auto rawReady = ownsRaw ? Tick() : 0; HookSnapshot previous{};
     if (target) { ShowWindow(target->Hwnd(), SW_SHOW); std::cout << "NATIVE TARGET: hwnd=0x" << std::hex << reinterpret_cast<uintptr_t>(target->Hwnd()) << std::dec << " processId=" << GetCurrentProcessId() << '\n'; }
     auto snapshot = [&](const std::string& phase) {
         Check(!GetModuleHandleW(L"coreclr.dll"), "CLR unexpectedly loaded; native comparison invalid");
         hook.Sync(); if (target) target->Sync(); if (raw) raw->Sync();
         auto h = api.Read(); Check(!h.mismatch && !h.counts[7] && h.attached == (hook.Installed() ? 1u : 0u) && (!hook.Installed() || h.thread == hook.ThreadId()), "Hook binding/parse fault");
-        auto r = raw ? raw->Read() : RawSnapshot{}; const auto registrations = VerifyRegistrations(reinterpret_cast<HWND>(r.hwnd));
+        auto r = raw ? raw->Read() : RawSnapshot{}; const auto registrations = VerifyRegistrations(rawRegistration ? reinterpret_cast<HWND>(r.hwnd) : nullptr);
+        if (raw) Check(r.ready && r.hwnd && r.thread && !r.fault && (rawRegistration || (!r.input && !r.device)), "Raw infrastructure/registration contract failed");
         if (target) Check(target->ThreadId() != hook.ThreadId(), "Target and Hook threads not separate");
         if (raw) Check(hook.ThreadId() != r.thread && (!target || target->ThreadId() != r.thread), "Raw and window threads not separate");
         const bool coreLoaded = GetModuleHandleW(L"Rug.Core.dll") != nullptr;
@@ -267,7 +269,8 @@ int RunRole(bool isB, char rawOwner = 'B', char targetOwner = 'B', bool loadCore
         std::cout << "NATIVE " << role << ' ' << phase << ": processId=" << GetCurrentProcessId() << " architecture=X64 clrLoaded=" << (GetModuleHandleW(L"coreclr.dll") != nullptr)
             << " target=" << ownsTarget << " rawRegistrations=" << registrations << " rawOwner=" << rawOwner << " rawReadyObservedTicks=" << rawReady << " hookInstalled=" << hook.Installed()
             << " hookActualBeforeTicks=" << hook.Before() << " hookActualAfterTicks=" << hook.After() << " observedTicks=" << Tick() << " frequency=" << Frequency() << " emitsInput=False targetOwner=" << targetOwner
-            << " coreLoad=" << (loadCore ? "on" : "off") << " coreLoaded=" << coreLoaded << '\n';
+            << " coreLoad=" << (loadCore ? "on" : "off") << " coreLoaded=" << coreLoaded
+            << " rawRegistration=" << (rawRegistration ? "on" : "off") << " receiverReady=" << r.ready << '\n';
         hook.Print(phase + " HOOK");
         std::cout << phase << " CALLBACK: boundThreadId=" << h.thread << " attached=" << h.attached << " threadMismatch=" << h.mismatch
             << " callbackAddress=" << reinterpret_cast<void*>(api.procedure) << " callbackModule=" << api.owner << " hookInstallHmod=" << api.owner
@@ -312,19 +315,42 @@ void Tests() {
         // Second receiver must fail without stealing the first registration.
         bool rejected{}; try { RawHost conflict; } catch (const std::exception&) { rejected = true; }
         Check(rejected, "Conflicting Raw receiver accepted"); raw.Sync(); Check(raw.Read().hwnd == original.hwnd, "Raw conflict stole ownership");
+        rejected = false; try { RawHost conflict(false); } catch (const std::exception&) { rejected = true; }
+        Check(rejected, "Unregistered receiver ignored preexisting registration"); raw.Sync();
         raw.Stop(); hook.Stop(); target.Stop(); auto r = raw.Read();
         Check(r.exited && !r.fault && r.input == r.cleanup && api.Read().attached == 0 && hook.Failure().empty() && target.Failure().empty(), "Native repeated cleanup failed"); VerifyRegistrations();
     }
+    for (int i = 0; i < 3; ++i) {
+        RawHost raw(false); const auto original = raw.Read();
+        const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+        while (!raw.Read().timer) { Check(std::chrono::steady_clock::now() < until, "Off receiver timer missing"); std::this_thread::yield(); }
+        raw.Sync(); auto r = raw.Read();
+        Check(r.ready && r.timer && r.hwnd == original.hwnd && r.thread == original.thread && !r.input && !r.device, "Off receiver infrastructure not preserved");
+        VerifyRegistrations(); raw.Stop(); raw.Stop(); r = raw.Read();
+        Check(r.exited && !r.ready && !r.hwnd && !r.fault && !r.cleanupError && !r.input && !r.cleanup, "Off receiver repeated cleanup failed"); VerifyRegistrations();
+    }
+    {
+        // Off mode observes foreign registration as a fault, but must never remove it.
+        RoleWindow foreign; RawHost raw(false);
+        RAWINPUTDEVICE device{1, 6, RIDEV_INPUTSINK | RIDEV_DEVNOTIFY, foreign.Hwnd()};
+        Check(RegisterRawInputDevices(&device, 1, sizeof(device)) != 0, "Controlled foreign registration failed");
+        try {
+            const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+            while (!raw.Read().exited) { Check(std::chrono::steady_clock::now() < until, "Off ownership fault not observed"); std::this_thread::yield(); }
+            raw.Stop(); Check(raw.Read().fault == 2 && !raw.Read().cleanupError, "Off ownership fault hidden"); VerifyRegistrations(foreign.Hwnd());
+        } catch (...) { RAWINPUTDEVICE remove{1, 6, RIDEV_REMOVE, nullptr}; RegisterRawInputDevices(&remove, 1, sizeof(remove)); throw; }
+        RAWINPUTDEVICE remove{1, 6, RIDEV_REMOVE, nullptr}; Check(RegisterRawInputDevices(&remove, 1, sizeof(remove)) != 0, "Controlled foreign cleanup failed"); VerifyRegistrations();
+    }
     { HookApi api; RoleWindow hook(&api); hook.FailForTest(); hook.Stop(); Check(hook.Exited() && !hook.Failure().empty() && api.Read().attached == 0, "Post-ready native fault hidden"); }
     Check(!GetModuleHandleW(L"coreclr.dll"), "CLR unexpectedly loaded");
-    std::cout << "Native roles layout/target/one-shot install/Raw conflict/identity/fault/repeated cleanup PASS; physical SendInput and human acceptance NOT RUN\n";
+    std::cout << "Native roles layout/target/one-shot install/Raw on-off timer/identity/conflict/foreign preservation/fault/repeated cleanup PASS; physical SendInput and human acceptance NOT RUN\n";
 }
 }
 int wmain(int argc, wchar_t** argv) {
     try {
-        if (argc != 2 && argc != 4 && argc != 6 && argc != 8) { std::cout << "Usage: Rug.NativeRoleProbe.exe --role-b|--role-c [--raw-owner B|C] [--target-owner B|C] [--core-load on|off], or --test\n"; return 1; }
+        if (argc != 2 && argc != 4 && argc != 6 && argc != 8 && argc != 10) { std::cout << "Usage: Rug.NativeRoleProbe.exe --role-b|--role-c [--raw-owner B|C] [--target-owner B|C] [--core-load on|off] [--raw-registration on|off], or --test\n"; return 1; }
         const std::wstring argument = argv[1];
-        char rawOwner = 'B', targetOwner = 'B'; bool rawSpecified{}, targetSpecified{}, coreSpecified{}, loadCore = true;
+        char rawOwner = 'B', targetOwner = 'B'; bool rawSpecified{}, targetSpecified{}, coreSpecified{}, loadCore = true, registrationSpecified{}, rawRegistration = true;
         // Reject unsupported/mixed roles before DLL, thread, window or registration side effects.
         for (int i = 2; i < argc; i += 2) {
             const std::wstring option = argv[i], value = argv[i + 1];
@@ -338,10 +364,13 @@ int wmain(int argc, wchar_t** argv) {
             } else if (option == L"--core-load") {
                 Check(value == L"on" || value == L"off", "Invalid Core load mode; no startup performed");
                 Check(!coreSpecified, "Duplicate Core load mode; no startup performed"); coreSpecified = true; loadCore = value == L"on";
+            } else if (option == L"--raw-registration") {
+                Check(value == L"on" || value == L"off", "Invalid Raw registration mode; no startup performed");
+                Check(!registrationSpecified, "Duplicate Raw registration mode; no startup performed"); registrationSpecified = true; rawRegistration = value == L"on";
             } else { throw std::runtime_error("Invalid owner option; no startup performed"); }
         }
-        if (argument == L"--role-b") return RunRole(true, rawOwner, targetOwner, loadCore);
-        if (argument == L"--role-c") return RunRole(false, rawOwner, targetOwner, loadCore);
+        if (argument == L"--role-b") return RunRole(true, rawOwner, targetOwner, loadCore, rawRegistration);
+        if (argument == L"--role-c") return RunRole(false, rawOwner, targetOwner, loadCore, rawRegistration);
         if (argument == L"--test" && argc == 2) { Tests(); return 0; }
         std::cout << "Invalid native role; no startup performed\n"; return 1;
     } catch (const std::exception& e) { std::cout << "NATIVE ROLE FAILED: " << e.what() << '\n'; return 1; }

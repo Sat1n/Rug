@@ -55,8 +55,13 @@ Hook C-B and moves target B/C/B. Subprocess tests additionally accept
 -TargetOwner B|C. The user reproduced missing/complete/missing with target B/C/B.
 The next [B Core load control](NativeInputProbe/CoreLoadControl.md) fixes target/
 Raw B and Hook C-B, comparing --core-load on/off/on without altering A's sender.
-Tests accept -CoreLoad on|off. Manual Core control is pending; Raw attribution
-is NOT COLLECTED and takeover stays closed.
+Tests accept -CoreLoad on|off. The user reproduced missing/missing/missing with
+Core on/off/on; B's diagnostic load is not necessary. The next
+[registration control](NativeInputProbe/RawRegistrationControl.md) fixes B Core
+off and compares only keyboard registration on/off/on, preserving the receiver
+DLL/thread/window/timer. Tests additionally accept -RawRegistration on|off.
+Manual registration control is pending; Raw attribution is NOT COLLECTED and
+takeover stays closed.
 
 ## Layout
 

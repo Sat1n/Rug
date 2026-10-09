@@ -31,7 +31,11 @@ records fixed C-B/owner B-C-B missing/complete/missing. The next
 moving target B/C/B with --target-owner B|C; the user reproduced
 missing/complete/missing. The next [B diagnostic Core load control](CoreLoadControl.md)
 keeps target/Raw B, Hook C-B, and A's emission unchanged while comparing B's
---core-load on/off/on. This manual load run is pending.
+--core-load on/off/on. The user's load reversal missed in all three sessions;
+B's diagnostic Core load is not necessary. The next
+[registration on/off/on control](RawRegistrationControl.md) keeps B Core off,
+target/receiver B and C-B Hook order, retaining the receiver infrastructure.
+This new manual registration run is pending.
 `-Mode ManagedTarget` binds the selected owner's validated diagnostic HWND/PID and keeps the
 native Rug.Core sender; see the controlled guide for startup/focus/counter rules.
 
@@ -103,17 +107,23 @@ guide for deployment and fixed-binary comparisons.
 `-Mode Build` also builds NativeRoleProbe.vcxproj, a separate x64 native executable.
 Run `tests/run_native_role_tests.ps1` after building for real A/B/C subprocess gate,
 protocol binding, order/duplicate/EOF/cleanup checks without AUTO. Core, sender EXE,
-Raw and callback DLLs remain unchanged; no production or solution reference is added.
+Callback DLL, Core and A sender remain unchanged; the test Raw DLL gains an
+optional unregistered constructor. No production or solution reference is added.
 Role EXE's `--raw-owner B|C` selects the receiver host, default B. Run that script
 with `-RawOwner B` and `-RawOwner C` for both contract variants; direct EXE
 commands in the owner guide keep both roles' selected owner consistent.
 Independent --target-owner B|C defaults B. Subprocess tests also accept
--TargetOwner B|C; all four owner combinations verify Core remains B, real A
+-TargetOwner B|C; all four owner combinations verify the selected Core mode, real A
 binding to the selected target, preserved target identity and complete cleanup.
 Old NativeB/NativeC runner modes retain both default owners B.
 --core-load on|off defaults on and affects only B's diagnostic module load; C
 always excludes Core and A's sender is unchanged. Contract tests accept
 -CoreLoad on|off and verify observed module presence for all eight combinations.
+--raw-registration on|off defaults on; only the selected receiver's keyboard
+registration changes. Off retains its DLL/window/thread/timer, verifies zero
+registrations and reports infrastructure readiness, not device readiness.
+Contract tests additionally accept -RawRegistration on|off for all sixteen
+combinations, 27 pre-start rejections and ten legacy/optional CLI checks.
 
 ### First run alone
 

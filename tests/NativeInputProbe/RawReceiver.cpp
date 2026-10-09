@@ -13,7 +13,7 @@ struct Snapshot {
 static_assert(sizeof(Snapshot) == 96 && sizeof(RAWINPUTDEVICE) == 16);
 struct Failure { uint64_t fault; DWORD error; };
 
-// @shape detached 96-byte scalar snapshot, usage 6 only, flags 0x2100; no raw handles escape.
+// @shape detached 96-byte snapshot; default usage 6/flags 0x2100, optional test-only no-registration mode.
 // @source managed comparison: Rug.UI.Core/Native/WindowsRawInputReceiver.cs#class:WindowsRawInputReceiver
 class Receiver {
     static constexpr UINT StopMessage = WM_APP + 1, BarrierMessage = WM_APP + 2;
@@ -23,6 +23,7 @@ class Receiver {
     Snapshot _snapshot;
     std::atomic_bool _stop{};
     std::atomic_uint64_t _nextBarrier{};
+    const bool _registerKeyboard;
     static bool Relevant(const RAWINPUTDEVICE& d) { return d.usUsagePage == 1 && (d.usUsage == 0 || d.usUsage == 2 || d.usUsage == 6); }
     static std::vector<RAWINPUTDEVICE> Registrations() {
         UINT count = 0;
@@ -35,15 +36,16 @@ class Receiver {
         if (result > devices.size()) throw Failure{3, ERROR_INVALID_DATA};
         devices.resize(result); return devices;
     }
-    static void Verify(HWND hwnd) {
+    static void Verify(HWND hwnd, bool enabled) {
         bool own = false;
         for (auto& d : Registrations()) {
             if (!Relevant(d)) continue;
+            if (!enabled) throw Failure{2, ERROR_INVALID_DATA};
             if (d.usUsage != 6 || d.hwndTarget != hwnd || (d.dwFlags & ~RIDEV_DEVNOTIFY) != RIDEV_INPUTSINK)
                 throw Failure{2, ERROR_INVALID_DATA};
             own = true;
         }
-        if (!own) throw Failure{2, ERROR_INVALID_DATA};
+        if (enabled && !own) throw Failure{2, ERROR_INVALID_DATA};
     }
     void Fault(Failure f) noexcept {
         std::lock_guard lock(_gate);
@@ -76,7 +78,7 @@ class Receiver {
                     if (message == WM_INPUT) ++_snapshot.input;
                     if (message == WM_INPUT_DEVICE_CHANGE) ++_snapshot.device;
                 }
-                std::lock_guard registrationLock(RegistrationGate); Verify(hwnd);
+                std::lock_guard registrationLock(RegistrationGate); Verify(hwnd, _registerKeyboard);
             }
         } catch (Failure f) { Fault(f); PostQuitMessage(0); }
         catch (...) { Fault({5, ERROR_UNHANDLED_EXCEPTION}); PostQuitMessage(0); }
@@ -88,8 +90,9 @@ class Receiver {
         return DefWindowProcW(hwnd, message, w, l);
     }
 public:
+    explicit Receiver(bool registerKeyboard = true) : _registerKeyboard(registerKeyboard) {}
     Snapshot Read() { std::lock_guard lock(_gate); return _snapshot; }
-    // @shape blocking on host-owned thread; readiness only after window/registration/timer, faults survive cleanup.
+    // @shape host-owned thread; ready after window/timer and selected registration contract (off is NOT device readiness).
     // @source counterpart: Rug.UI.Core/Native/WindowsRawInputReceiver.cs#class:WindowsRawInputReceiver
     void Run() noexcept {
         const auto instance = GetModuleHandleW(nullptr);
@@ -108,9 +111,11 @@ public:
             if (!_stop) {
                 std::lock_guard registrationLock(RegistrationGate);
                 for (auto& d : Registrations()) if (Relevant(d)) throw Failure{1, ERROR_ALREADY_EXISTS};
-                RAWINPUTDEVICE device{1, 6, RIDEV_INPUTSINK | RIDEV_DEVNOTIFY, hwnd};
-                if (!RegisterRawInputDevices(&device, 1, sizeof(device))) throw Failure{1, GetLastError()};
-                Verify(hwnd);
+                if (_registerKeyboard) {
+                    RAWINPUTDEVICE device{1, 6, RIDEV_INPUTSINK | RIDEV_DEVNOTIFY, hwnd};
+                    if (!RegisterRawInputDevices(&device, 1, sizeof(device))) throw Failure{1, GetLastError()};
+                }
+                Verify(hwnd, _registerKeyboard);
             }
             if (!_stop) {
                 if (!SetTimer(hwnd, 1, 250, nullptr)) throw Failure{3, GetLastError()};
@@ -127,7 +132,7 @@ public:
             try {
                 std::lock_guard registrationLock(RegistrationGate);
                 for (auto& d : Registrations()) {
-                    if (d.usUsagePage == 1 && d.usUsage == 6 && d.hwndTarget == hwnd) {
+                    if (_registerKeyboard && d.usUsagePage == 1 && d.usUsage == 6 && d.hwndTarget == hwnd) {
                         RAWINPUTDEVICE remove{1, 6, RIDEV_REMOVE, nullptr};
                         if (!RegisterRawInputDevices(&remove, 1, sizeof(remove))) throw Failure{4, GetLastError()};
                     }
@@ -161,6 +166,8 @@ public:
 
 // Test ABI only; not Rug.Core C-ABI. Host creates once, joins Run before destroying/unloading.
 extern "C" __declspec(dllexport) void* __cdecl Probe_Create() noexcept { try { return new Receiver(); } catch (...) { return nullptr; } }
+// Optional test export; legacy Probe_Create and 96-byte snapshot layout are unchanged.
+extern "C" __declspec(dllexport) void* __cdecl Probe_CreateUnregistered() noexcept { try { return new Receiver(false); } catch (...) { return nullptr; } }
 extern "C" __declspec(dllexport) void __cdecl Probe_Run(Receiver* p) noexcept { p->Run(); }
 extern "C" __declspec(dllexport) void __cdecl Probe_Read(Receiver* p, Snapshot* result) noexcept { *result = p->Read(); }
 extern "C" __declspec(dllexport) void __cdecl Probe_Stop(Receiver* p) noexcept { p->Stop(); }

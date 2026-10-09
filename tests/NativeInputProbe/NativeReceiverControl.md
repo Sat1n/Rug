@@ -54,12 +54,20 @@ No Hook filtering/reinstallation, delay-ignore window, takeover or input changes
 
 The test DLL has no DllMain registration or Rug.Core/solution reference. It loads
 only through [NativeRawInputDiagnosticReceiver](../../Rug.UI.Core/Native/NativeRawInputDiagnosticReceiver.cs#class:NativeRawInputDiagnosticReceiver)
-in Native/, with a separate TEST ABI (not Rug.Core C-ABI). Six exports manage an
+in Native/, with a separate TEST ABI (not Rug.Core C-ABI). Six legacy exports manage an
 opaque receiver, blocking Run, copied fixed 96-byte snapshots, stop, sequence
 barriers and destruction. No managed callback executes on the message path.
 Native locks protect scalar snapshots; barriers/readiness poll asynchronously
 outside the receiver thread. Implementation replacement includes native callback
 and readiness handoff timing: a difference narrows investigation, not to one API.
+
+The later native-role [registration control](RawRegistrationControl.md) adds
+Probe_CreateUnregistered, an optional seventh test export. Probe_Create retains
+the registered default and the same 96-byte layout. Off retains the DLL/window/
+thread/timer but requires absence of relevant registrations and removes none;
+infrastructure readiness is not registered-device readiness. The rebuilt receiver
+must have one matching hash across a new on/off/on series. Existing managed
+native-receiver lifecycle tests continue calling the unchanged default export.
 
 Faults survive readiness (registration=1, ownership=2, native=3, cleanup=4,
 callback=5, unexpected quit=6; Win32/cleanup errors retained). Stop posts quit,
