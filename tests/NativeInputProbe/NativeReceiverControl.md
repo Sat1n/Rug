@@ -62,7 +62,11 @@ outside the receiver thread. Implementation replacement includes native callback
 and readiness handoff timing: a difference narrows investigation, not to one API.
 
 The later native-role [registration control](RawRegistrationControl.md) adds
-Probe_CreateUnregistered, an optional seventh test export. Probe_Create retains
+Probe_CreateUnregistered, the seventh test export. The subsequent
+[notification control](DeviceNotifyControl.md) adds Probe_CreateConfigured and
+Probe_ReadRegistration (nine exports total). Its independent 56-byte detached
+record captures actual registration flags, call clocks, result/error and receiver
+thread/HWND; legacy snapshots remain 96 bytes. Probe_Create retains
 the registered default and the same 96-byte layout. Off retains the DLL/window/
 thread/timer but requires absence of relevant registrations and removes none;
 infrastructure readiness is not registered-device readiness. The rebuilt receiver

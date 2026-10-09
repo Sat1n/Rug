@@ -8,6 +8,16 @@ tags: [diagnostics, raw-input, registration, control]
 
 # Native keyboard registration on / off / on
 
+## Reviewed registration result (2026-10-09)
+
+The user's nine fresh logs completed this series: all A/B/C observers missed /
+recovered / missed with eight successful sends and complete F8/B target down/up
+in every session. Off retained the live receiver infrastructure. Exact counts,
+identities and the next [DEVNOTIFY-only control](DeviceNotifyControl.md) are
+recorded there. Keyboard registration participates in this fixed topology;
+production Raw classification is NOT COLLECTED and the original failure remains
+open. The new flag control has a rebuilt DLL and needs its own fresh ON baseline.
+
 ## Reviewed Core-load result (2026-10-09)
 
 Nine fresh A/B/C logs completed B Core on/off/on, target/Raw B and Hook C-B.
@@ -39,7 +49,7 @@ and must survive cleanup. The other role does not load the receiver in either mo
 construction; no in-session toggles. Rug.Core C-ABI and production event source,
 input emitter, Hook forwarding and takeover are unchanged. The receiver DLL was
 rebuilt, so a new on baseline is mandatory. Its hash must match ALL three rounds,
-not the preceding Core-load experiment. Current SHA256:
+not the preceding Core-load experiment. SHA256 used in the reviewed registration series:
 8E269D953C32791B6B0CA5D2F8C5D06E207AB8E88D2A9520D8ED66F9D593C4CB.
 Core, A sender and Hook DLL hashes retain [preceding values](CoreLoadControl.md).
 
@@ -66,11 +76,12 @@ Build ONCE before manual sessions; no -BuildCore and no rebuild between rounds:
 & F:/Cardinal/Rug/Rug/tests/run_native_role_tests.ps1 -RawOwner B -TargetOwner B -CoreLoad off -RawRegistration off
 ```
 
-The runner supports sixteen owner/load/registration combinations. Each checks
+The registration-era runner supported sixteen owner/load/registration combinations. Each checks
 three actual A/B/C order pairs, unchanged A target binding before EOF (no AUTO),
 actual registration/module state in each phase, preserved receiver/target identity,
-six incomplete session cleanups, 27 pre-start CLI rejections and ten optional/
-default/reordered cases. Native tests verify both modes, off timer/barriers,
+six incomplete session cleanups. The current notification-capable runner has
+32 combinations, 32 pre-start CLI rejections and 12 optional/default/reordered
+cases; see the next control. Native tests verify both modes, off timer/barriers,
 preexisting registration conflicts, post-ready foreign registration faults and
 preservation, repeated disposal and on's existing target/Hook/lifecycle contracts.
 Managed native receiver regressions continue using default Probe_Create.

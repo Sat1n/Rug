@@ -35,7 +35,10 @@ keeps target/Raw B, Hook C-B, and A's emission unchanged while comparing B's
 B's diagnostic Core load is not necessary. The next
 [registration on/off/on control](RawRegistrationControl.md) keeps B Core off,
 target/receiver B and C-B Hook order, retaining the receiver infrastructure.
-This new manual registration run is pending.
+The user's registration reversal missed/recovered/missed across all three
+observers with complete specific targets. The next
+[DEVNOTIFY control](DeviceNotifyControl.md) keeps keyboard registration and
+INPUTSINK, comparing only device-notify on/off/on; this manual run is pending.
 `-Mode ManagedTarget` binds the selected owner's validated diagnostic HWND/PID and keeps the
 native Rug.Core sender; see the controlled guide for startup/focus/counter rules.
 
@@ -107,8 +110,9 @@ guide for deployment and fixed-binary comparisons.
 `-Mode Build` also builds NativeRoleProbe.vcxproj, a separate x64 native executable.
 Run `tests/run_native_role_tests.ps1` after building for real A/B/C subprocess gate,
 protocol binding, order/duplicate/EOF/cleanup checks without AUTO. Core, sender EXE,
-Callback DLL, Core and A sender remain unchanged; the test Raw DLL gains an
-optional unregistered constructor. No production or solution reference is added.
+Callback DLL, Core and A sender remain unchanged; the test Raw DLL gains
+optional registration/notification constructors and actual registration-call
+evidence. Legacy exports/snapshots remain compatible. No production or solution reference is added.
 Role EXE's `--raw-owner B|C` selects the receiver host, default B. Run that script
 with `-RawOwner B` and `-RawOwner C` for both contract variants; direct EXE
 commands in the owner guide keep both roles' selected owner consistent.
@@ -122,8 +126,11 @@ always excludes Core and A's sender is unchanged. Contract tests accept
 --raw-registration on|off defaults on; only the selected receiver's keyboard
 registration changes. Off retains its DLL/window/thread/timer, verifies zero
 registrations and reports infrastructure readiness, not device readiness.
-Contract tests additionally accept -RawRegistration on|off for all sixteen
-combinations, 27 pre-start rejections and ten legacy/optional CLI checks.
+--device-notify on|off defaults on and changes only DEVNOTIFY. Registered mode
+retains INPUTSINK; RAW_REGISTER_CALL reports actual requested flags, return/error,
+QPC timestamps and receiver identity separately from queriedFlags (which may omit
+DEVNOTIFY). Contract tests accept -RawRegistration and -DeviceNotify on|off for
+all 32 combinations, 32 pre-start rejections and 12 legacy/optional CLI checks.
 
 ### First run alone
 

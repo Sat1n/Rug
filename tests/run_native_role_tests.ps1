@@ -1,5 +1,5 @@
 # Diagnostic subprocess contract tests only: no SendInput and no human acceptance.
-param([ValidateSet('B','C')][string]$RawOwner = 'B', [ValidateSet('B','C')][string]$TargetOwner = 'B', [ValidateSet('on','off')][string]$CoreLoad = 'on', [ValidateSet('on','off')][string]$RawRegistration = 'on')
+param([ValidateSet('B','C')][string]$RawOwner = 'B', [ValidateSet('B','C')][string]$TargetOwner = 'B', [ValidateSet('on','off')][string]$CoreLoad = 'on', [ValidateSet('on','off')][string]$RawRegistration = 'on', [ValidateSet('on','off')][string]$DeviceNotify = 'on')
 $ErrorActionPreference = 'Stop'
 $roleRoot = Split-Path -Parent $PSScriptRoot
 $roleExe = Join-Path $roleRoot 'x64/Debug/Rug.NativeRoleProbe.exe'
@@ -53,6 +53,18 @@ function RawIdentity-Role($child, [string]$phase) {
     Assert-Role $match.Success 'Missing Raw identity'; return $match.Value
 }
 function Install-Role($child, [string]$role) { Write-Role $child 'install'; return Until-Role $child "NATIVE $role INSTALLED:" }
+function RegistrationEvidence-Role($child, [string]$phase, [string]$registration, [string]$notify) {
+    $line = @($child.Lines | Where-Object { $_.StartsWith("$phase RAW_REGISTER_CALL:") })[-1]
+    $raw = @($child.Lines | Where-Object { $_.StartsWith("$phase RAW:") })[-1]
+    if ($registration -eq 'on') {
+        $flags = 256 + $(if ($notify -eq 'on') { 8192 } else { 0 })
+        Assert-Role ((Field-Role $line 'requestedFlags') -eq $flags -and (Field-Role $line 'succeeded') -eq 1 -and (Field-Role $line 'error') -eq 0 -and (Field-Role $line 'beforeTicks') -gt 0 -and (Field-Role $line 'afterTicks') -ge (Field-Role $line 'beforeTicks')) 'Actual registration call flags/results invalid'
+        Assert-Role ((Field-Role $line 'threadId') -eq (Field-Role $raw 'threadId') -and [regex]::Match($line,'hwnd=(0x[0-9a-fA-F]+)').Value -eq [regex]::Match($raw,'hwnd=(0x[0-9a-fA-F]+)').Value -and ((Field-Role $line 'queriedFlags') -band (-bnot 8192)) -eq 256) 'Registration call target/thread or queried INPUTSINK invalid'
+    } else {
+        foreach ($field in @('requestedFlags','beforeTicks','afterTicks','succeeded','error','threadId','queriedFlags')) { Assert-Role ((Field-Role $line $field) -eq 0) 'Off receiver called registration' }
+    }
+    return $line
+}
 function TargetIdentity-Role($child, [string]$phase) {
     $line = @($child.Lines | Where-Object { $_.StartsWith("$phase TARGET threadId=") })[-1]
     $match = [regex]::Match($line, 'threadId=(\d+) hwnd=(0x[0-9a-fA-F]+) generation=(\d+)')
@@ -70,10 +82,10 @@ foreach ($order in @('B-C','C-B','B-C')) {
     try {
         $a = Start-Role '--managed-target' $senderExe
         $null = Until-Role $a 'MANAGED TARGET:'
-        $b = Start-Role "--role-b --raw-owner $RawOwner --target-owner $TargetOwner --core-load $CoreLoad --raw-registration $RawRegistration"
+        $b = Start-Role "--role-b --raw-owner $RawOwner --target-owner $TargetOwner --core-load $CoreLoad --raw-registration $RawRegistration --device-notify $DeviceNotify"
         $bPrepared = Until-Role $b 'NATIVE B PREPARED:'
         $null = Until-Role $b 'NATIVE B COMMANDS:'
-        $c = Start-Role "--role-c --raw-owner $RawOwner --target-owner $TargetOwner --core-load $CoreLoad --raw-registration $RawRegistration"
+        $c = Start-Role "--role-c --raw-owner $RawOwner --target-owner $TargetOwner --core-load $CoreLoad --raw-registration $RawRegistration --device-notify $DeviceNotify"
         $cPrepared = Until-Role $c 'NATIVE C PREPARED:'
         $null = Until-Role $c 'NATIVE C COMMANDS:'
         $rawChild = if ($RawOwner -eq 'B') { $b } else { $c }
@@ -81,6 +93,7 @@ foreach ($order in @('B-C','C-B','B-C')) {
         $nonTargetChild = if ($TargetOwner -eq 'B') { $c } else { $b }
         $targetIdentity = TargetIdentity-Role $targetChild 'PREPARED'
         $rawIdentity = RawIdentity-Role $rawChild 'PREPARED'
+        $registrationCall = RegistrationEvidence-Role $rawChild 'PREPARED' $RawRegistration $DeviceNotify
         $bRegistrations = [int]($RawOwner -eq 'B' -and $RawRegistration -eq 'on')
         $cRegistrations = [int]($RawOwner -eq 'C' -and $RawRegistration -eq 'on')
         $bTarget = if ($TargetOwner -eq 'B') { 1 } else { 0 }
@@ -107,12 +120,14 @@ foreach ($order in @('B-C','C-B','B-C')) {
         $bRepeat = Install-Role $b 'B'; $cRepeat = Install-Role $c 'C'
         Assert-Role ((Field-Role $bRepeat 'hookActualBeforeTicks') -eq $bStart -and (Field-Role $bRepeat 'hookActualAfterTicks') -eq $bEnd -and (Field-Role $cRepeat 'hookActualBeforeTicks') -eq $cStart -and (Field-Role $cRepeat 'hookActualAfterTicks') -eq $cEnd) 'Duplicate command reinstalled Hook'
         Write-Role $b 'snapshot'; $null = Until-Role $b 'NATIVE B snapshot:'
-        if ($RawOwner -eq 'B') { $null = Until-Role $b 'snapshot RAW:' }
+        if ($RawOwner -eq 'B') { $null = Until-Role $b 'snapshot RAW_REGISTER_CALL:' }
         if ($TargetOwner -eq 'B') { $null = Until-Role $b 'snapshot TARGET KEYS:' }
         Write-Role $c 'snapshot'; $null = Until-Role $c 'NATIVE C snapshot:'
-        if ($RawOwner -eq 'C') { $null = Until-Role $c 'snapshot RAW:' }
+        if ($RawOwner -eq 'C') { $null = Until-Role $c 'snapshot RAW_REGISTER_CALL:' }
         if ($TargetOwner -eq 'C') { $null = Until-Role $c 'snapshot TARGET KEYS:' }
         Assert-Role ((RawIdentity-Role $rawChild 'snapshot') -eq $rawIdentity) 'Hook installation changed Raw thread/window'
+        $snapshotCall = RegistrationEvidence-Role $rawChild 'snapshot' $RawRegistration $DeviceNotify
+        Assert-Role ((Field-Role $registrationCall 'beforeTicks') -eq (Field-Role $snapshotCall 'beforeTicks') -and (Field-Role $registrationCall 'afterTicks') -eq (Field-Role $snapshotCall 'afterTicks')) 'Hook/commands re-registered Raw device'
         $rawLine = @($rawChild.Lines | Where-Object { $_.StartsWith('snapshot RAW:') })[-1]
         Assert-Role ((Field-Role $rawLine 'ready') -eq 1 -and (Field-Role $rawLine 'threadId') -gt 0 -and (Field-Role $rawLine 'fault') -eq 0) 'Raw infrastructure missing/faulted'
         if ($RawRegistration -eq 'off') { Assert-Role ((Field-Role $rawLine 'input') -eq 0 -and (Field-Role $rawLine 'deviceChanges') -eq 0) 'Off receiver collected Raw messages' }
@@ -125,6 +140,7 @@ foreach ($order in @('B-C','C-B','B-C')) {
             foreach ($phaseLine in $phaseLines) {
                 Assert-Role ((Field-Role $phaseLine 'coreLoaded') -eq $expected -and $phaseLine -match "coreLoad=$CoreLoad") 'Core mode changed after preparation'
                 Assert-Role ((Field-Role $phaseLine 'rawRegistrations') -eq $expectedRaw -and (Field-Role $phaseLine 'receiverReady') -eq $expectedReady -and $phaseLine -match "rawRegistration=$RawRegistration") 'Raw mode/actual registration changed after preparation'
+                Assert-Role ($phaseLine -match "deviceNotify=$DeviceNotify") 'Notification mode changed after preparation'
             }
         }
         # Bind the UNCHANGED A safety/metric protocol without ever issuing next/AUTO.
@@ -139,14 +155,14 @@ foreach ($order in @('B-C','C-B','B-C')) {
         End-Role $b; End-Role $c
         Assert-Role ($b.Process.ExitCode -eq 0 -and $c.Process.ExitCode -eq 0) 'Native roles failed'
         Cleanup-Role $b 'B'; Cleanup-Role $c 'C'
-        Write-Output "Native pair $order RawOwner=$RawOwner TargetOwner=$TargetOwner CoreLoad=$CoreLoad RawRegistration=$RawRegistration PASS: both prepared, exact one-shot order, Raw/target identities preserved, actual Core/registration verified, unchanged A bound to selected target without AUTO, clean teardown"
+        Write-Output "Native pair $order RawOwner=$RawOwner TargetOwner=$TargetOwner CoreLoad=$CoreLoad RawRegistration=$RawRegistration DeviceNotify=$DeviceNotify PASS: exact one-shot order, Raw/target identities and actual registration flags/results preserved, unchanged A bound without AUTO, clean teardown"
     } finally { Dispose-Role $a; Dispose-Role $b; Dispose-Role $c }
 }
 foreach ($role in @('B','C')) {
     foreach ($case in @('done-uninstalled','eof-uninstalled','eof-installed')) {
         $child = $null
         try {
-            $child = Start-Role "--role-$($role.ToLowerInvariant()) --raw-owner $RawOwner --target-owner $TargetOwner --core-load $CoreLoad --raw-registration $RawRegistration"
+            $child = Start-Role "--role-$($role.ToLowerInvariant()) --raw-owner $RawOwner --target-owner $TargetOwner --core-load $CoreLoad --raw-registration $RawRegistration --device-notify $DeviceNotify"
             $null = Until-Role $child "NATIVE $role COMMANDS:"
             if ($case -eq 'eof-installed') { $null = Install-Role $child $role }
             End-Role $child -Eof:($case.StartsWith('eof'))
@@ -157,6 +173,7 @@ foreach ($role in @('B','C')) {
 }
 $invalidArguments = @('','--invalid','--role-b --role-c','--role-b extra', '--test --raw-owner C', '--role-b --raw-owner Z', '--role-c --raw-owner', '--role-b --wrong C', '--role-b --raw-owner C extra', '--test --target-owner C', '--role-b --target-owner Z', '--role-c --target-owner', '--role-b --target-owner B --target-owner C', '--role-c --raw-owner B --raw-owner C', '--role-b --raw-owner B --target-owner Z', '--role-b --target-owner C --wrong B', '--role-b --core-load bad', '--role-c --core-load', '--test --core-load off', '--role-b --core-load on --core-load off', '--role-b --raw-owner B --target-owner B --wrong off', '--role-c --raw-owner B --core-load off extra')
 $invalidArguments += @('--role-b --raw-registration bad', '--role-c --raw-registration', '--test --raw-registration off', '--role-b --raw-registration on --raw-registration off', '--role-b --raw-registration off --core-load off --raw-owner B --wrong B')
+$invalidArguments += @('--role-b --device-notify bad', '--role-c --device-notify', '--test --device-notify off', '--role-b --device-notify on --device-notify off', '--role-b --raw-registration on --core-load off --raw-owner B --target-owner B --wrong off')
 foreach ($arguments in $invalidArguments) {
     $child = $null
     try {
@@ -175,7 +192,9 @@ $validArguments = @(
     @{ Args='--role-c --core-load on'; Role='C'; Raw='B'; Target='B'; Core='on' },
     @{ Args='--role-b --core-load off --target-owner C --raw-owner B'; Role='B'; Raw='B'; Target='C'; Core='off' },
     @{ Args='--role-b --raw-registration off'; Role='B'; Raw='B'; Target='B'; Core='on'; Registration='off' },
-    @{ Args='--role-c --raw-registration off --core-load off --target-owner C --raw-owner C'; Role='C'; Raw='C'; Target='C'; Core='off'; Registration='off' }
+    @{ Args='--role-c --raw-registration off --core-load off --target-owner C --raw-owner C'; Role='C'; Raw='C'; Target='C'; Core='off'; Registration='off' },
+    @{ Args='--role-b --device-notify off'; Role='B'; Raw='B'; Target='B'; Core='on'; Notify='off' },
+    @{ Args='--role-c --device-notify off --raw-registration on --core-load off --target-owner C --raw-owner C'; Role='C'; Raw='C'; Target='C'; Core='off'; Notify='off' }
 )
 foreach ($case in $validArguments) {
     $child = $null
@@ -184,6 +203,9 @@ foreach ($case in $validArguments) {
         $prepared = Until-Role $child "NATIVE $($case.Role) PREPARED:"
         $null = Until-Role $child "NATIVE $($case.Role) COMMANDS:"
         $registration = if ($case.ContainsKey('Registration')) { $case.Registration } else { 'on' }
+        $notify = if ($case.ContainsKey('Notify')) { $case.Notify } else { 'on' }
+        Assert-Role ($prepared -match "deviceNotify=$notify") 'Default/optional notification mode incorrect'
+        if ($case.Role -eq $case.Raw) { $null = RegistrationEvidence-Role $child 'PREPARED' $registration $notify }
         Assert-Role ($prepared -match "rawOwner=$($case.Raw)" -and $prepared -match "targetOwner=$($case.Target)" -and (Field-Role $prepared 'target') -eq [int]($case.Role -eq $case.Target) -and (Field-Role $prepared 'rawRegistrations') -eq [int]($case.Role -eq $case.Raw -and $registration -eq 'on') -and $prepared -match "rawRegistration=$registration" -and (Field-Role $prepared 'receiverReady') -eq [int]($case.Role -eq $case.Raw)) 'Default/optional flags changed ownership/registration/infrastructure'
         $expected = [int]($case.Core -eq 'on' -and $case.Role -eq 'B')
         Assert-Role ($prepared -match "coreLoad=$($case.Core)" -and (Field-Role $prepared 'coreLoaded') -eq $expected -and @($child.Lines | Where-Object { $_ -match '^ROLE MODULE:.*Rug.Core.dll' }).Count -eq $expected) 'Default/optional Core flag changed actual module presence'
@@ -191,4 +213,4 @@ foreach ($case in $validArguments) {
         Assert-Role ($child.Process.ExitCode -eq 2 -and $child.Lines -match '^NOT RUN:' -and $child.Lines -match "NATIVE $($case.Role) CLEANUP: threadExited=1 attached=0 targetHwnd=0 rawRegistrations=0 fault=None") 'Legacy/optional CLI did not clean up incomplete session'
     } finally { Dispose-Role $child }
 }
-Write-Output "Native subprocess contract RawOwner=$RawOwner TargetOwner=$TargetOwner CoreLoad=$CoreLoad RawRegistration=$RawRegistration PASS: three A/B/C order pairs, six incomplete-session cleanups, $($invalidArguments.Count) pre-start rejections, $($validArguments.Count) default/optional CLI checks; physical SendInput/HUMAN NOT RUN"
+Write-Output "Native subprocess contract RawOwner=$RawOwner TargetOwner=$TargetOwner CoreLoad=$CoreLoad RawRegistration=$RawRegistration DeviceNotify=$DeviceNotify PASS: three A/B/C pairs, six incomplete cleanups, $($invalidArguments.Count) pre-start rejections, $($validArguments.Count) default/optional CLI checks; physical SendInput/HUMAN NOT RUN"

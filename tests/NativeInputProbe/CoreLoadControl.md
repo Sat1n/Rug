@@ -78,7 +78,7 @@ stay unchanged during that experiment. The user completed on/off/on with
 missing/missing/missing; B's load is not necessary in that native topology.
 Detailed evidence and next [registration control](RawRegistrationControl.md)
 retain original acceptance as unresolved; no production Raw attribution was
-collected. Current subprocess checks have 27 invalid and ten optional CLI cases.
+collected. Current subprocess checks have 32 invalid and 12 optional CLI cases.
 
 ## Three fresh manual sessions
 

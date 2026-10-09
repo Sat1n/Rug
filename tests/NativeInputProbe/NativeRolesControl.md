@@ -98,8 +98,8 @@ The strict native build and tests cover DLL layouts, target protocol/specific ke
 one-shot installation, thread binding, Raw ownership/conflict, post-ready fault and
 repeated cleanup. Subprocess tests run actual A/B/C in B-C/C-B/B-C order, verify
 both preparation timestamps precede installations, unchanged Raw HWND/thread,
-duplicate install, pre-install refusal, six incomplete-session cleanups, 27
-invalid CLI rejections before module loading and ten optional/default CLI checks
+duplicate install, pre-install refusal, six incomplete-session cleanups, 32
+invalid CLI rejections before module loading and 12 optional/default CLI checks
 per owner combination. A binds the real selected native target
 using its unchanged validation, then EOF BEFORE next; no AUTO is emitted.
 These tests do not replace physical input/HUMAN acceptance.
@@ -158,5 +158,5 @@ Manual input is **NOT RUN by the development agent**; the user's native comparis
 is recorded above. Both Raw owner comparisons are recorded in the owner guide;
 the target owner comparison also reproduced missing/complete/missing. The new
 Core on/off/on also missed in all three sessions. The next
-[registration comparison](RawRegistrationControl.md) remains pending user execution.
+[registration comparison](RawRegistrationControl.md) missed/recovered/missed. The next [notification control](DeviceNotifyControl.md) remains pending user execution.
 Automatic takeover remains disabled; no reduced pass closes the original failure.

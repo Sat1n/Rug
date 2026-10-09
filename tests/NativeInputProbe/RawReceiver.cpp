@@ -11,6 +11,11 @@ struct Snapshot {
     uint64_t threadId{}, hwnd{}, ready{}, exited{}, timer{}, input{}, device{}, cleanup{}, barrier{}, fault{}, error{}, cleanupError{};
 };
 static_assert(sizeof(Snapshot) == 96 && sizeof(RAWINPUTDEVICE) == 16);
+struct RegistrationCall {
+    uint64_t flags{}, beforeTicks{}, afterTicks{}, succeeded{}, error{}, threadId{}, hwnd{};
+};
+static_assert(sizeof(RegistrationCall) == 56);
+uint64_t RegistrationTick() { LARGE_INTEGER t{}; QueryPerformanceCounter(&t); return static_cast<uint64_t>(t.QuadPart); }
 struct Failure { uint64_t fault; DWORD error; };
 
 // @shape detached 96-byte snapshot; default usage 6/flags 0x2100, optional test-only no-registration mode.
@@ -21,9 +26,11 @@ class Receiver {
     static inline std::atomic_uint64_t NextClass{};
     std::mutex _gate;
     Snapshot _snapshot;
+    RegistrationCall _registration;
     std::atomic_bool _stop{};
     std::atomic_uint64_t _nextBarrier{};
     const bool _registerKeyboard;
+    const bool _deviceNotify;
     static bool Relevant(const RAWINPUTDEVICE& d) { return d.usUsagePage == 1 && (d.usUsage == 0 || d.usUsage == 2 || d.usUsage == 6); }
     static std::vector<RAWINPUTDEVICE> Registrations() {
         UINT count = 0;
@@ -90,8 +97,9 @@ class Receiver {
         return DefWindowProcW(hwnd, message, w, l);
     }
 public:
-    explicit Receiver(bool registerKeyboard = true) : _registerKeyboard(registerKeyboard) {}
+    explicit Receiver(bool registerKeyboard = true, bool deviceNotify = true) : _registerKeyboard(registerKeyboard), _deviceNotify(deviceNotify) {}
     Snapshot Read() { std::lock_guard lock(_gate); return _snapshot; }
+    RegistrationCall ReadRegistration() { std::lock_guard lock(_gate); return _registration; }
     // @shape host-owned thread; ready after window/timer and selected registration contract (off is NOT device readiness).
     // @source counterpart: Rug.UI.Core/Native/WindowsRawInputReceiver.cs#class:WindowsRawInputReceiver
     void Run() noexcept {
@@ -112,8 +120,14 @@ public:
                 std::lock_guard registrationLock(RegistrationGate);
                 for (auto& d : Registrations()) if (Relevant(d)) throw Failure{1, ERROR_ALREADY_EXISTS};
                 if (_registerKeyboard) {
-                    RAWINPUTDEVICE device{1, 6, RIDEV_INPUTSINK | RIDEV_DEVNOTIFY, hwnd};
-                    if (!RegisterRawInputDevices(&device, 1, sizeof(device))) throw Failure{1, GetLastError()};
+                    RAWINPUTDEVICE device{1, 6, RIDEV_INPUTSINK | (_deviceNotify ? RIDEV_DEVNOTIFY : 0u), hwnd};
+                    RegistrationCall call{}; call.flags = device.dwFlags; call.threadId = GetCurrentThreadId(); call.hwnd = reinterpret_cast<uint64_t>(hwnd);
+                    call.beforeTicks = RegistrationTick();
+                    const auto success = RegisterRawInputDevices(&device, 1, sizeof(device));
+                    const auto error = success ? ERROR_SUCCESS : GetLastError();
+                    call.afterTicks = RegistrationTick(); call.succeeded = success != 0; call.error = error;
+                    { std::lock_guard lock(_gate); _registration = call; }
+                    if (!success) throw Failure{1, error};
                 }
                 Verify(hwnd, _registerKeyboard);
             }
@@ -168,6 +182,12 @@ public:
 extern "C" __declspec(dllexport) void* __cdecl Probe_Create() noexcept { try { return new Receiver(); } catch (...) { return nullptr; } }
 // Optional test export; legacy Probe_Create and 96-byte snapshot layout are unchanged.
 extern "C" __declspec(dllexport) void* __cdecl Probe_CreateUnregistered() noexcept { try { return new Receiver(false); } catch (...) { return nullptr; } }
+// Additional TEST ABI, no change to legacy constructors or snapshots. Modes fixed for receiver lifetime.
+extern "C" __declspec(dllexport) void* __cdecl Probe_CreateConfigured(uint32_t registration, uint32_t deviceNotify) noexcept {
+    if (registration > 1 || deviceNotify > 1) return nullptr;
+    try { return new Receiver(registration != 0, deviceNotify != 0); } catch (...) { return nullptr; }
+}
+extern "C" __declspec(dllexport) void __cdecl Probe_ReadRegistration(Receiver* p, RegistrationCall* result) noexcept { *result = p->ReadRegistration(); }
 extern "C" __declspec(dllexport) void __cdecl Probe_Run(Receiver* p) noexcept { p->Run(); }
 extern "C" __declspec(dllexport) void __cdecl Probe_Read(Receiver* p, Snapshot* result) noexcept { *result = p->Read(); }
 extern "C" __declspec(dllexport) void __cdecl Probe_Stop(Receiver* p) noexcept { p->Stop(); }
