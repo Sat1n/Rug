@@ -40,7 +40,11 @@ observers with complete specific targets. The next
 [DEVNOTIFY control](DeviceNotifyControl.md) keeps keyboard registration and
 INPUTSINK, comparing only device-notify on/off/on; the user's run missed in all
 three sessions. The next [INPUTSINK control](InputSinkControl.md) keeps keyboard
-registration, DEVNOTIFY off and tests sink on/off/on; that manual run is pending.
+registration, DEVNOTIFY off and tests sink on/off/on; all three user sessions
+retained the gap, including flags zero. The next [A+B reduction](TwoProcessControl.md)
+removes C without rebuilding any binary. `tests/run_native_two_process_tests.ps1`
+checks actual registration, one-shot install, target binding and cleanup without
+AUTO; the manual comparison requests two complete A/B logs.
 `-Mode ManagedTarget` binds the selected owner's validated diagnostic HWND/PID and keeps the
 native Rug.Core sender; see the controlled guide for startup/focus/counter rules.
 

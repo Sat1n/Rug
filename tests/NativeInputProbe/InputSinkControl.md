@@ -94,7 +94,9 @@ the agent; automated lifecycle tests do not supply software classification.
 Debug/x64 strict native build, both native self-tests, all 64 combinations
 (192 pairs) and managed --raw-input-tests passed on 2026-10-09. Core/A/Hook hashes
 were verified unchanged. WinUI/product-wide regressions were not rerun for this
-test-only change. The new manual INPUTSINK reversal remains pending user input.
+test-only change. The manual reversal was subsequently reviewed: all three
+sessions retained the gap, including flags zero with successful registration.
+See [reviewed counts and the A+B reduction](TwoProcessControl.md).
 
 ## Three fresh manual sessions
 

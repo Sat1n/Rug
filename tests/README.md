@@ -67,8 +67,11 @@ missed in all three sessions. The next
 [INPUTSINK control](NativeInputProbe/InputSinkControl.md) keeps registration on
 and DEVNOTIFY off, compares sink on/off/on and preserves previous exports/layouts.
 Tests accept -InputSink on|off; all 64 subprocess configurations passed. Manual
-sink control is pending; Raw attribution is NOT COLLECTED and
-takeover stays closed.
+sink reversal reproduced the gap in all three sessions, including flags zero
+with successful registration. The next [native A+B reduction](NativeInputProbe/TwoProcessControl.md)
+removes C, retains all five binaries and checks the no-AUTO contract with
+`tests/run_native_two_process_tests.ps1`. Manual verification requires two full
+A/B logs; Raw attribution is NOT COLLECTED and takeover stays closed.
 
 ## Layout
 
