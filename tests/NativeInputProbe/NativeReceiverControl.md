@@ -64,7 +64,10 @@ and readiness handoff timing: a difference narrows investigation, not to one API
 The later native-role [registration control](RawRegistrationControl.md) adds
 Probe_CreateUnregistered, the seventh test export. The subsequent
 [notification control](DeviceNotifyControl.md) adds Probe_CreateConfigured and
-Probe_ReadRegistration (nine exports total). Its independent 56-byte detached
+Probe_ReadRegistration (nine exports at that stage). The later
+[INPUTSINK control](InputSinkControl.md) adds Probe_CreateWithFlags (ten total),
+keeping every old constructor/layout. Sink off still registers the keyboard;
+selected flag/ownership checks remain active. Its independent 56-byte detached
 record captures actual registration flags, call clocks, result/error and receiver
 thread/HWND; legacy snapshots remain 96 bytes. Probe_Create retains
 the registered default and the same 96-byte layout. Off retains the DLL/window/

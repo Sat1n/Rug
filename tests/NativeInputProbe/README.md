@@ -38,7 +38,9 @@ target/receiver B and C-B Hook order, retaining the receiver infrastructure.
 The user's registration reversal missed/recovered/missed across all three
 observers with complete specific targets. The next
 [DEVNOTIFY control](DeviceNotifyControl.md) keeps keyboard registration and
-INPUTSINK, comparing only device-notify on/off/on; this manual run is pending.
+INPUTSINK, comparing only device-notify on/off/on; the user's run missed in all
+three sessions. The next [INPUTSINK control](InputSinkControl.md) keeps keyboard
+registration, DEVNOTIFY off and tests sink on/off/on; that manual run is pending.
 `-Mode ManagedTarget` binds the selected owner's validated diagnostic HWND/PID and keeps the
 native Rug.Core sender; see the controlled guide for startup/focus/counter rules.
 
@@ -129,8 +131,14 @@ registrations and reports infrastructure readiness, not device readiness.
 --device-notify on|off defaults on and changes only DEVNOTIFY. Registered mode
 retains INPUTSINK; RAW_REGISTER_CALL reports actual requested flags, return/error,
 QPC timestamps and receiver identity separately from queriedFlags (which may omit
-DEVNOTIFY). Contract tests accept -RawRegistration and -DeviceNotify on|off for
-all 32 combinations, 32 pre-start rejections and 12 legacy/optional CLI checks.
+DEVNOTIFY). Contract tests accept -RawRegistration and -DeviceNotify on|off.
+--input-sink on|off defaults on. Off keeps the keyboard registration and selected
+receiver HWND, using default foreground reception; it is distinct from
+--raw-registration off. Actual flags zero must still have succeeded=1, valid
+call identity/clocks and rawRegistrations=1. Contract tests also accept
+-InputSink on|off: all 64 combinations, 37 pre-start rejections and 14
+legacy/optional CLI checks. Previous test exports/layouts remain compatible;
+Probe_CreateWithFlags is a tenth optional test export. Core/emitter unchanged.
 
 ### First run alone
 

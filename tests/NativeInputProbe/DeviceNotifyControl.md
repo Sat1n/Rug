@@ -8,6 +8,17 @@ tags: [diagnostics, raw-input, device-notify, control]
 
 # Keyboard device-notification flag on / off / on
 
+## Reviewed notification result (2026-10-09)
+
+Nine fresh logs completed this series: actual requested flags were
+8448/256/8448 (0x2100/0x0100/0x2100), all registration calls succeeded, device
+notifications were 9/0/9. All three observers missed tagged software keyboard
+events in every session despite complete specific targets and successful sends.
+DEVNOTIFY is not necessary in this fixed topology. Exact counts/identities and
+the next [INPUTSINK-only control](InputSinkControl.md) are recorded there. The
+new receiver is rebuilt; this guide's DLL hash describes the reviewed series.
+No reduced result closes the original failure or accepts automatic takeover.
+
 ## Reviewed registration reversal (2026-10-09)
 
 Nine fresh A/B/C logs completed registration on/off/on with B Core OFF,
@@ -36,7 +47,7 @@ operation still needs user confirmation; automatic takeover remains closed.
 [RunRole](NativeRoles.cpp#function:RunRole) adds --device-notify on|off (default
 on), independently of existing owner/load/registration selections. This manual
 series ALWAYS registers keyboard usage 6 with INPUTSINK. Only DEVNOTIFY changes:
-on=0x2100 (8576), off=0x0100 (256). Never NOLEGACY. Same receiver DLL, dedicated
+on=0x2100 (8448), off=0x0100 (256). Never NOLEGACY. Same receiver DLL, dedicated
 thread, message-only window, 250ms timer, count-only WM_INPUT cleanup, target,
 sender and Hook installation order. No parsing, filtering, retries, rehooking,
 extra input or takeover. Flags are fixed for the receiver lifetime.
@@ -57,9 +68,9 @@ call evidence and receiver identity. It never registers again for snapshots or
 Hook installation. STOPPED retains the archived call but reports query flags
 zero after removal. Message barriers/timers do not certify Hook delivery.
 
-The receiver has been rebuilt; ALL THREE rounds need the same new DLL SHA256:
+The reviewed DEVNOTIFY series used the following receiver DLL SHA256:
 DDF83DE04B64F57EAD678BA7E9D42CCB37FA5E440F3DF14C7AFF482C60350754.
-Do not reuse the previous registration-series hash as the new baseline. Core,
+Do not reuse this hash as the newer INPUTSINK-series baseline. Core,
 A and Hook DLL keep [preceding fixed hashes](CoreLoadControl.md).
 
 ## Automated verification
@@ -79,8 +90,9 @@ flags/results/clock/identity, unchanged record after installation, lifecycle,
 six incomplete cleanups, 32 invalid CLI cases and 12 default/optional cases.
 Native self-tests cover both notification modes, conflicts, foreign-owner
 preservation, timer/barriers, invalid constructors and repeated disposal.
-Real Core PostMessage self-tests passed; physical AUTO/HUMAN for this new
-notification control are NOT RUN by the agent. No production/UI change.
+Real Core PostMessage self-tests passed; physical AUTO/HUMAN for this
+notification control were NOT RUN by the agent; the user's completed reversal
+is recorded above. Current expanded contracts are in the next control. No production/UI change.
 
 ## Three fresh manual sessions
 
@@ -108,7 +120,7 @@ Session 2 uses fresh B/C with only device-notify changed:
 
 1. Wait BOTH PREPARED. C: install, wait INSTALLED. B: install, wait INSTALLED.
    All rounds B target=1/receiverReady=1/rawRegistrations=1/Core absent. C owns
-   no target/Raw/Core. B RAW_REGISTER_CALL requestedFlags=8576/256/8576 across
+   no target/Raw/Core. B RAW_REGISTER_CALL requestedFlags=8448/256/8448 across
    rounds, succeeded=1/error=0, ordered clocks and matching Raw thread/HWND.
 2. Paste B's target HWND/PID into A. HUMAN BEFORE: target and another app,
    keyboard/mouse and normal shortcut checks. B baseline -> C baseline -> A next.

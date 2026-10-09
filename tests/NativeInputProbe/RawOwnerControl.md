@@ -70,8 +70,8 @@ below before AUTO. A wrong pair is inconclusive, not a valid negative result.
 ```
 
 Strict x64 build and both test runs cover six real A/B/C order pairs, twelve
-incomplete-session cleanups; the current runner has 32 pre-start rejections and
-12 default/optional CLI checks per variant. They
+incomplete-session cleanups; the current runner has 37 pre-start rejections and
+14 default/optional CLI checks per variant; the later [INPUTSINK control](InputSinkControl.md) adds the sink-mode dimension. They
 assert actual owner/nonowner module/registration counts, Core/target retained B,
 awaited Raw readiness, preserved Raw HWND/thread, prepared-before-install QPC,
 one-shot/duplicate install, unchanged A binding and final cleanup. No next/AUTO

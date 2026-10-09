@@ -73,7 +73,7 @@ Build once BEFORE starting the sessions, no -BuildCore:
 ```
 
 Each variant covers three actual A/B/C install-order pairs, six incomplete-session
-cleanups; current runner includes 32 invalid CLI and 12 default/optional checks.
+cleanups; current runner includes 37 invalid CLI and 14 default/optional checks.
 Assertions check actual target/Raw/module ownership, separate thread identities,
 prepared-before-install QPC, preserved target HWND/thread/generation and Raw
 HWND/thread, one-shot installs and cleanup. UNCHANGED A binds the selected target,
@@ -85,7 +85,7 @@ stays E323A5F1F2FD784D2BDEEE35E03CF5D50944A37DAC2775D907182AF1EAF27A06.
 Only the role EXE changes. The user's target comparison reproduced
 missing/complete/missing; [reviewed clocks and next Core load control](CoreLoadControl.md)
 record the evidence. Core on/off/on also missed in all three sessions; the next
-[registration control](RawRegistrationControl.md) missed/recovered/missed. The next [notification control](DeviceNotifyControl.md) is pending. Historical fixed
+[registration control](RawRegistrationControl.md) missed/recovered/missed. The [notification control](DeviceNotifyControl.md) missed in all three sessions; the next [INPUTSINK control](InputSinkControl.md) is pending. Historical fixed
 hashes here apply to the target experiment; the new test receiver is rebuilt and
 must use one matching hash across that new registration series.
 

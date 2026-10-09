@@ -80,8 +80,8 @@ The registration-era runner supported sixteen owner/load/registration combinatio
 three actual A/B/C order pairs, unchanged A target binding before EOF (no AUTO),
 actual registration/module state in each phase, preserved receiver/target identity,
 six incomplete session cleanups. The current notification-capable runner has
-32 combinations, 32 pre-start CLI rejections and 12 optional/default/reordered
-cases; see the next control. Native tests verify both modes, off timer/barriers,
+64 combinations, 37 pre-start CLI rejections and 14 optional/default/reordered
+cases; see the later [INPUTSINK control](InputSinkControl.md). Native tests verify both modes, off timer/barriers,
 preexisting registration conflicts, post-ready foreign registration faults and
 preservation, repeated disposal and on's existing target/Hook/lifecycle contracts.
 Managed native receiver regressions continue using default Probe_Create.

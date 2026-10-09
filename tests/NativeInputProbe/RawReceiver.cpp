@@ -31,6 +31,7 @@ class Receiver {
     std::atomic_uint64_t _nextBarrier{};
     const bool _registerKeyboard;
     const bool _deviceNotify;
+    const bool _inputSink;
     static bool Relevant(const RAWINPUTDEVICE& d) { return d.usUsagePage == 1 && (d.usUsage == 0 || d.usUsage == 2 || d.usUsage == 6); }
     static std::vector<RAWINPUTDEVICE> Registrations() {
         UINT count = 0;
@@ -43,12 +44,12 @@ class Receiver {
         if (result > devices.size()) throw Failure{3, ERROR_INVALID_DATA};
         devices.resize(result); return devices;
     }
-    static void Verify(HWND hwnd, bool enabled) {
+    static void Verify(HWND hwnd, bool enabled, bool inputSink) {
         bool own = false;
         for (auto& d : Registrations()) {
             if (!Relevant(d)) continue;
             if (!enabled) throw Failure{2, ERROR_INVALID_DATA};
-            if (d.usUsage != 6 || d.hwndTarget != hwnd || (d.dwFlags & ~RIDEV_DEVNOTIFY) != RIDEV_INPUTSINK)
+            if (d.usUsage != 6 || d.hwndTarget != hwnd || (d.dwFlags & ~RIDEV_DEVNOTIFY) != (inputSink ? RIDEV_INPUTSINK : 0u))
                 throw Failure{2, ERROR_INVALID_DATA};
             own = true;
         }
@@ -85,7 +86,7 @@ class Receiver {
                     if (message == WM_INPUT) ++_snapshot.input;
                     if (message == WM_INPUT_DEVICE_CHANGE) ++_snapshot.device;
                 }
-                std::lock_guard registrationLock(RegistrationGate); Verify(hwnd, _registerKeyboard);
+                std::lock_guard registrationLock(RegistrationGate); Verify(hwnd, _registerKeyboard, _inputSink);
             }
         } catch (Failure f) { Fault(f); PostQuitMessage(0); }
         catch (...) { Fault({5, ERROR_UNHANDLED_EXCEPTION}); PostQuitMessage(0); }
@@ -97,7 +98,8 @@ class Receiver {
         return DefWindowProcW(hwnd, message, w, l);
     }
 public:
-    explicit Receiver(bool registerKeyboard = true, bool deviceNotify = true) : _registerKeyboard(registerKeyboard), _deviceNotify(deviceNotify) {}
+    explicit Receiver(bool registerKeyboard = true, bool deviceNotify = true, bool inputSink = true)
+        : _registerKeyboard(registerKeyboard), _deviceNotify(deviceNotify), _inputSink(inputSink) {}
     Snapshot Read() { std::lock_guard lock(_gate); return _snapshot; }
     RegistrationCall ReadRegistration() { std::lock_guard lock(_gate); return _registration; }
     // @shape host-owned thread; ready after window/timer and selected registration contract (off is NOT device readiness).
@@ -120,7 +122,7 @@ public:
                 std::lock_guard registrationLock(RegistrationGate);
                 for (auto& d : Registrations()) if (Relevant(d)) throw Failure{1, ERROR_ALREADY_EXISTS};
                 if (_registerKeyboard) {
-                    RAWINPUTDEVICE device{1, 6, RIDEV_INPUTSINK | (_deviceNotify ? RIDEV_DEVNOTIFY : 0u), hwnd};
+                    RAWINPUTDEVICE device{1, 6, (_inputSink ? RIDEV_INPUTSINK : 0u) | (_deviceNotify ? RIDEV_DEVNOTIFY : 0u), hwnd};
                     RegistrationCall call{}; call.flags = device.dwFlags; call.threadId = GetCurrentThreadId(); call.hwnd = reinterpret_cast<uint64_t>(hwnd);
                     call.beforeTicks = RegistrationTick();
                     const auto success = RegisterRawInputDevices(&device, 1, sizeof(device));
@@ -129,7 +131,7 @@ public:
                     { std::lock_guard lock(_gate); _registration = call; }
                     if (!success) throw Failure{1, error};
                 }
-                Verify(hwnd, _registerKeyboard);
+                Verify(hwnd, _registerKeyboard, _inputSink);
             }
             if (!_stop) {
                 if (!SetTimer(hwnd, 1, 250, nullptr)) throw Failure{3, GetLastError()};
@@ -186,6 +188,11 @@ extern "C" __declspec(dllexport) void* __cdecl Probe_CreateUnregistered() noexce
 extern "C" __declspec(dllexport) void* __cdecl Probe_CreateConfigured(uint32_t registration, uint32_t deviceNotify) noexcept {
     if (registration > 1 || deviceNotify > 1) return nullptr;
     try { return new Receiver(registration != 0, deviceNotify != 0); } catch (...) { return nullptr; }
+}
+// Test-only foreground/background flag control; previous exports and fixed snapshots remain unchanged.
+extern "C" __declspec(dllexport) void* __cdecl Probe_CreateWithFlags(uint32_t registration, uint32_t deviceNotify, uint32_t inputSink) noexcept {
+    if (registration > 1 || deviceNotify > 1 || inputSink > 1) return nullptr;
+    try { return new Receiver(registration != 0, deviceNotify != 0, inputSink != 0); } catch (...) { return nullptr; }
 }
 extern "C" __declspec(dllexport) void __cdecl Probe_ReadRegistration(Receiver* p, RegistrationCall* result) noexcept { *result = p->ReadRegistration(); }
 extern "C" __declspec(dllexport) void __cdecl Probe_Run(Receiver* p) noexcept { p->Run(); }

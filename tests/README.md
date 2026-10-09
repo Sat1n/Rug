@@ -60,7 +60,14 @@ Core on/off/on; B's diagnostic load is not necessary. The next
 [registration control](NativeInputProbe/RawRegistrationControl.md) fixes B Core
 off and compares only keyboard registration on/off/on, preserving the receiver
 DLL/thread/window/timer. Tests additionally accept -RawRegistration on|off.
-The user reproduced missing/complete/missing with registration on/off/on. The next [DEVNOTIFY control](NativeInputProbe/DeviceNotifyControl.md) keeps registration and INPUTSINK, adds actual registration-call evidence, and compares device-notify on/off/on. Tests accept -DeviceNotify on|off; 32 subprocess configurations passed. Manual notification control is pending; Raw attribution is NOT COLLECTED and
+The user reproduced missing/complete/missing with registration on/off/on. The
+[DEVNOTIFY control](NativeInputProbe/DeviceNotifyControl.md) kept registration and
+INPUTSINK, adding actual registration-call evidence; notification on/off/on
+missed in all three sessions. The next
+[INPUTSINK control](NativeInputProbe/InputSinkControl.md) keeps registration on
+and DEVNOTIFY off, compares sink on/off/on and preserves previous exports/layouts.
+Tests accept -InputSink on|off; all 64 subprocess configurations passed. Manual
+sink control is pending; Raw attribution is NOT COLLECTED and
 takeover stays closed.
 
 ## Layout
