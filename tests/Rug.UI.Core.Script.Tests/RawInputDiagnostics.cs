@@ -374,11 +374,13 @@ internal static class RawInputDiagnostics
         nint hwnd;
         try { hwnd = await window.Ready.Task.WaitAsync(TimeSpan.FromSeconds(5)); }
         catch { PrintProbe(window, "PROBE START FAILURE"); throw; }
+        var production = new ProductionInputEvidence();
         long keyDown = 0, keyUp = 0, repeats = 0, foreground = 0, background = 0, zeroDevice = 0, tagged = 0, candidateCount = 0, softwareCount = 0;
         long candidateKey = 0, candidateMouse = 0, softwareKey = 0, softwareMouse = 0, softwareDown = 0, softwareUp = 0;
         long movement = 0, buttonsDown = 0, buttonsUp = 0, wheels = 0;
         source.InputReceived += (_, e) =>
         {
+            production.Observe(e); // Consumer thread only; no Raw/Hook message callback work.
             if (e.Observation.IsRugSoftwareInput)
             {
                 if (e.Observation.Kind == InputEventKind.Keyboard)
@@ -416,6 +418,9 @@ internal static class RawInputDiagnostics
             Interlocked.Read(ref softwareKey), Interlocked.Read(ref softwareMouse), Interlocked.Read(ref softwareDown), Interlocked.Read(ref softwareUp));
         var previousProbe = window.Counts;
         var previousRaw = new RawEvidence(0, 0, 0, 0, 0, 0);
+        var previousDetail = production.Read();
+        long sourceGeneration = 0;
+        bool continuity = true;
         async Task Phase(string label)
         {
             try { await source.SynchronizeAsync(); await window.SynchronizeAsync(); }
@@ -427,6 +432,16 @@ internal static class RawInputDiagnostics
             PrintHook(label + " keyboard DELTA", probe.Keyboard.Delta(previousProbe.Keyboard));
             PrintHook(label + " mouse DELTA", probe.Mouse.Delta(previousProbe.Mouse));
             Console.WriteLine($"{label} raw SNAPSHOT: {raw}"); Console.WriteLine($"{label} raw DELTA: {raw.Delta(previousRaw)}");
+            var detail = production.Read();
+            var detailDelta = detail.Delta(previousDetail);
+            Console.WriteLine($"{label} production SNAPSHOT: {detail}");
+            Console.WriteLine($"{label} production DELTA: {detailDelta}");
+            continuity &= ProductionInputEvidence.Continuous(sourceGeneration, source.Snapshot, detail);
+            if (label is "HUMAN BEFORE END" or "HUMAN AFTER END")
+            {
+                Console.WriteLine($"{label} HUMAN_DETECTION={(ProductionInputEvidence.HumanCountsComplete(detailDelta) ? "COUNTS COMPLETE" : "NOT RUN / incomplete foreground-background keyboard-mouse counts")}; normalOperation=NOT COLLECTED / explicit user visual confirmation required");
+                if (!ProductionInputEvidence.HumanCountsComplete(detailDelta)) Environment.ExitCode = 2;
+            }
             if (label == "HUMAN BEFORE END" && probe.Keyboard.ActionableTotal == 0)
                 Console.WriteLine("BRANCH: no actionable keyboard callback during BEFORE; investigate installation/thread/lifetime/hook chain, not injection flags alone.");
             if (previousProbe.Keyboard.ActionableTotal > 0 && probe.Keyboard.ActionableTotal == previousProbe.Keyboard.ActionableTotal
@@ -436,10 +451,15 @@ internal static class RawInputDiagnostics
                 Console.WriteLine("BRANCH: taggedUnflagged keyboard callbacks exist; investigate classification/layout, not callback absence.");
             if (probe.Keyboard.ParseErrors != 0 || probe.Mouse.ParseErrors != 0 || window.Status.Failure is not null || window.Status.ThreadExited)
             { Console.WriteLine("INCONCLUSIVE: phase probe fault; no acceptance"); Environment.ExitCode = 2; }
-            previousProbe = probe; previousRaw = raw;
+            previousProbe = probe; previousRaw = raw; previousDetail = detail;
         }
         PrintProbe(window, "PROBE INSTALLED");
-        await source.StartAsync(); Print(source, "READY"); await Phase("STARTED");
+        await source.StartAsync(); sourceGeneration = source.Snapshot.Generation;
+        Print(source, "READY");
+        Console.WriteLine($"PRODUCTION PATH: InputService -> fixed Rug.Core -> isolated HWND=0x{(nuint)hwnd:X}; RawInputEventSource generation={sourceGeneration}; requestedFlags=0x2100; automaticTakeover=DISABLED");
+        foreach (var device in WindowsRawInputReceiver.Registrations().Where(d => d.Page == 1 && d.Usage is 2 or 6))
+            Console.WriteLine($"PRODUCTION REGISTRATION: page={device.Page} usage={device.Usage} queriedFlags=0x{device.Flags:X} hwnd=0x{(nuint)device.Target:X}; DEVNOTIFY may be omitted by OS query");
+        await Phase("STARTED");
         using var displayStop = new CancellationTokenSource();
         Task display = human ? Task.Run(async () =>
         {
@@ -464,7 +484,7 @@ internal static class RawInputDiagnostics
                 await Task.Delay(5000);
             }
             await Phase("AUTO BEFORE");
-            bool verified = await SelfInputAsync(source, window, hwnd, () => Interlocked.Read(ref candidateCount), () => Interlocked.Read(ref softwareCount), ReadRaw);
+            bool verified = await SelfInputAsync(source, window, hwnd, () => Interlocked.Read(ref candidateCount), () => Interlocked.Read(ref softwareCount), ReadRaw, production);
             await Phase("AUTO AFTER");
             Console.WriteLine($"Raw diagnostic aggregates: zeroDevice={Interlocked.Read(ref zeroDevice)}, nonzeroExtraInfo={Interlocked.Read(ref tagged)}");
             if (!verified) Environment.ExitCode = 2;
@@ -486,25 +506,40 @@ internal static class RawInputDiagnostics
         finally
         {
             displayStop.Cancel(); await display; await source.StopAsync(); Print(source, "STOPPED");
+            var stopped = source.Snapshot;
+            int remaining = WindowsRawInputReceiver.Registrations().Count(d => d.Page == 1 && d.Usage is 2 or 6);
+            bool clean = stopped.Generation == sourceGeneration && stopped.State == InputEventSourceState.Stopped
+                && stopped.Fault == InputEventSourceFault.None && stopped.Overflows == 0 && stopped.ConsumerErrors == 0
+                && stopped.Buffered == 0 && stopped.Subscribers == 0 && remaining == 0;
+            Console.WriteLine($"EVENT_SOURCE_CONTINUITY={(continuity && clean ? "PASS" : "INCOMPLETE / fault or cleanup failure")}: generation={sourceGeneration}->{stopped.Generation} fault={stopped.Fault} overflow={stopped.Overflows} consumerErrors={stopped.ConsumerErrors} foreignGenerations={production.Read().ForeignGenerations} buffered={stopped.Buffered} subscribers={stopped.Subscribers} registrations={remaining}; StopAsync awaited receiver and consumer cleanup");
+            if (!continuity || !clean) Environment.ExitCode = 2;
             window.Dispose(); PrintProbe(window, "PROBE STOPPED");
             if (window.Status.Failure is not null) Environment.ExitCode = 2;
             Console.WriteLine($"Keyboard/mouse registrations remaining in this process: {WindowsRawInputReceiver.Registrations().Count(d => d.Page == 1 && d.Usage is 2 or 6)}");
         }
     }
-    private static async Task<bool> SelfInputAsync(RawInputEventSource source, RawInputDiagnosticWindow window, nint hwnd, Func<long> candidateCount, Func<long> softwareCount, Func<RawEvidence> rawEvidence)
+    private static async Task<bool> SelfInputAsync(RawInputEventSource source, RawInputDiagnosticWindow window, nint hwnd, Func<long> candidateCount, Func<long> softwareCount, Func<RawEvidence> rawEvidence, ProductionInputEvidence production)
     {
         await using var native = new InputService();
         await native.SetHumanizeConfigAsync(new HumanizeConfig { EnableJitter = false, MinClickHoldMs = 10, MaxClickHoldMs = 10, MinKeyHoldMs = 10, MaxKeyHoldMs = 10 });
         bool success = true;
+        long sourceGeneration = source.Snapshot.Generation;
         long? f8Callbacks = null, bCallbacks = null;
         foreach (bool post in new[] { false, true })
         foreach (var key in new[] { (Code: 119, Name: "F8"), (Code: 66, Name: "B") })
         {
-            if (!post && !window.Activate()) { Console.WriteLine($"SendInput/{key.Name} NOT RUN: Windows foreground policy blocked isolated window activation. Activate it manually and rerun."); success = false; continue; }
+            if (!post && !window.Activate())
+            {
+                Console.WriteLine($"SendInput/{key.Name} NOT RUN: Windows foreground policy blocked isolated window activation. Activate it manually and rerun.");
+                Console.WriteLine($"SendInput/{key.Name} TARGET_DELIVERY=NOT RUN SELF_INPUT_ATTRIBUTION=NOT RUN HOOK_OBSERVATION=NOT RUN; no input sent");
+                success = false; continue;
+            }
             await source.SynchronizeAsync(); await window.SynchronizeAsync();
             await RawInputTests.Until(() => candidateCount() + softwareCount() == source.Snapshot.Keyboard + source.Snapshot.Mouse);
             long beforeCandidates = candidateCount(), beforeSoftware = softwareCount();
             var rawBefore = rawEvidence();
+            var detailBefore = production.Read();
+            var targetBefore = window.TargetKeyCounts(key.Code);
             var legacy = window.Counts;
             await native.SetTargetAsync(hwnd, post);
             // Two distinct points ensure an unchanged cursor cannot make legacy move evidence disappear.
@@ -516,7 +551,8 @@ internal static class RawInputDiagnostics
             bool delivered = true;
             try
             {
-                await RawInputTests.Until(() => window.Counts.KeyDown > legacy.KeyDown && window.Counts.KeyUp > legacy.KeyUp
+                await RawInputTests.Until(() => window.TargetKeyCounts(key.Code).Down > targetBefore.Down
+                    && window.TargetKeyCounts(key.Code).Up > targetBefore.Up
                     && window.Counts.MouseDown > legacy.MouseDown && window.Counts.MouseUp > legacy.MouseUp && window.Counts.Move > legacy.Move);
             }
             catch (OperationCanceledException) { delivered = false; }
@@ -527,17 +563,33 @@ internal static class RawInputDiagnostics
             long candidates = candidateCount() - beforeCandidates;
             long software = softwareCount() - beforeSoftware;
             var rawDelta = rawEvidence().Delta(rawBefore);
+            var detailDelta = production.Read().Delta(detailBefore);
+            var targetAfter = window.TargetKeyCounts(key.Code);
+            long targetDown = targetAfter.Down - targetBefore.Down;
+            long targetUp = targetAfter.Up - targetBefore.Up;
+            delivered &= ProductionInputEvidence.TargetComplete(targetDown, targetUp);
             var keyDelta = probe.Keyboard.Delta(legacy.Keyboard); var mouseDelta = probe.Mouse.Delta(legacy.Mouse);
             // Marked-but-unflagged software must not be called human interference.
             long physicalLike = keyDelta.Unflagged - keyDelta.TaggedUnflagged + mouseDelta.Unflagged - mouseDelta.TaggedUnflagged;
             Console.WriteLine($"{mode}: candidates={candidates}, rugSoftware={software}, unflaggedHookActivity={physicalLike}, injectedKeyboard={probe.InjectedKeyboard - legacy.InjectedKeyboard}, injectedMouse={probe.InjectedMouse - legacy.InjectedMouse}, taggedHookKey/Mouse={probe.TaggedKeyboard - legacy.TaggedKeyboard}/{probe.TaggedMouse - legacy.TaggedMouse}, legacyMove={probe.Move - legacy.Move}, mouseDown/Up={probe.MouseDown - legacy.MouseDown}/{probe.MouseUp - legacy.MouseUp}, keyDown/Up={probe.KeyDown - legacy.KeyDown}/{probe.KeyUp - legacy.KeyUp}");
             PrintHook(mode + " keyboard DELTA", keyDelta); PrintHook(mode + " mouse DELTA", mouseDelta);
             Console.WriteLine($"{mode} raw DELTA: {rawDelta}");
+            Console.WriteLine($"{mode} production DELTA: {detailDelta}");
+            Console.WriteLine($"{mode} TARGET_DELIVERY={(delivered ? "PASS" : "INCOMPLETE")}: testedKey={key.Name} down/up={targetDown}/{targetUp} expected=1/1; generic keyboard totals are not substituted");
+            bool rawVerified = ProductionInputEvidence.RawComplete(post, key.Code, rawDelta, detailDelta)
+                && ProductionInputEvidence.Continuous(sourceGeneration, end, production.Read());
+            Console.WriteLine($"{mode} SELF_INPUT_ATTRIBUTION={(physicalLike > 0 ? "NOT RUN / INTERFERED" : rawVerified ? "PASS" : "INCOMPLETE / count or classification mismatch")}: expected softwareKey/Mouse={(post ? "0/0" : "2/5")} keyDown/Up={(post ? "0/0" : "1/1")} move/buttonDown/buttonUp={(post ? "0/0/0" : "2/1/2")}; candidateKey/Mouse={rawDelta.CandidateKeyboard}/{rawDelta.CandidateMouse}; Hook verdict is separate");
+            bool hookVerified = (post ? keyDelta.TaggedTotal == 0 && mouseDelta.TaggedTotal == 0
+                : keyDelta.TaggedInjected >= 2 && mouseDelta.TaggedInjected >= 5)
+                && keyDelta.ParseErrors == 0 && mouseDelta.ParseErrors == 0 && window.Status.Failure is null && !window.Status.ThreadExited;
+            Console.WriteLine($"{mode} HOOK_OBSERVATION={(physicalLike > 0 ? "NOT RUN / INTERFERED" : hookVerified ? "COMPLETE" : "INCOMPLETE / independent probe failure")}: keyboardEntry={keyDelta.CallbackTotal} taggedInjected={keyDelta.TaggedInjected}; not a production classification verdict");
             if (!post && rawDelta.SoftwareKeyDown >= 1 && rawDelta.SoftwareKeyUp >= 1 && keyDelta.ActionableTotal == 0)
                 Console.WriteLine("BRANCH: tagged Raw Input keyboard down/up complete, independent keyboard hook absent; source evidence and probe failure are separate.");
             if (keyDelta.TaggedUnflagged > 0)
                 Console.WriteLine("BRANCH: tagged keyboard callbacks were unflagged; investigate flag/layout classification, not callback absence.");
-            bool roundVerified = delivered;
+            bool roundVerified = delivered && rawVerified && hookVerified;
+            if (!hookVerified) success = false;
+            if (!rawVerified) success = false;
             if (!delivered) { Console.WriteLine("NOT RUN: incomplete actual target-message evidence; round cannot pass."); success = false; }
             if (physicalLike > 0) { Console.WriteLine("INTERFERED: unflagged user-like activity during this round; no self-input verdict. NOT RUN / rerun hands off."); success = false; continue; }
             if (!post && delivered && keyDelta.ParseErrors == 0 && mouseDelta.ParseErrors == 0
@@ -554,7 +606,7 @@ internal static class RawInputDiagnostics
             if (!post && (rawDelta.SoftwareKeyboard < 2 || rawDelta.SoftwareMouse < 5 || rawDelta.SoftwareKeyDown < 1 || rawDelta.SoftwareKeyUp < 1)) { Console.WriteLine("INCONCLUSIVE: native input tag did not survive the complete Raw Input sequence; do not pass candidate exclusion."); success = false; roundVerified = false; }
             if (candidates != 0)
             { Console.WriteLine("FAIL / candidate observations during software round: unattributed Raw Input remains a candidate. No time filtering or listener pause applied."); success = false; }
-            else if (roundVerified) Console.WriteLine($"{mode}: PASS (real Rug.Core input including releases, live Raw Input source)");
+            else if (roundVerified) Console.WriteLine($"{mode} LEGACY_COMBINED_CHECK=PASS (target + Raw + Hook checks; not four-item acceptance)");
         }
         Console.WriteLine("F8/B COMPARISON: " + CompareKeyCallbacks(f8Callbacks, bCallbacks));
         return success;

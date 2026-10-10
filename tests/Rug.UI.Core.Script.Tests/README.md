@@ -245,9 +245,16 @@ interference without calling it a self-input failure. Missing focus/native DLL,
 incomplete evidence or source failure never pass silently.
 `--raw-input-diagnostic` adds an interactive, same-session HUMAN BEFORE -> AUTO ->
 HUMAN AFTER procedure with a 5-second focus-switch countdown and aggregate counts only.
+The [production acceptance procedure](ProductionSourceAcceptance.md) separates
+specified F8/B target down/up, exact software move/button/key counts, per-class
+foreground/background candidate counts and same-generation clean source shutdown.
+ProductionInputEvidenceTests cover count deltas, merged samples, wrong/missing keys,
+safety releases, excess/candidate input, parallel snapshots and continuity failures.
+These synthetic regressions do not substitute for actual input or human acceptance.
 Tag regressions cover x86/x64 keyboard/mouse, unknown tags, zero-device untagged
-input and hook flags/extra-info layouts. A software PASS requires complete tagged
-raw and hook evidence; consumer counts drain before evaluation.
+input and hook flags/extra-info layouts. Raw attribution and Hook verdicts are
+separate; the retained legacy combined check and nonzero Hook-failure exit remain.
+Consumer counts drain before evaluation; no automatic takeover is enabled.
 Probe regressions exercise negative/non-action nCode without pointer reads,
 independent injected/tagged intersections (including taggedUnflagged), null-data
 parse errors, detached snapshots/phase deltas, separate processing/chain timing,

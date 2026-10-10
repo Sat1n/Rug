@@ -17,6 +17,7 @@ internal static class RawInputTests
     {
         Parse();
         ProbeCounters();
+        ProductionInputEvidenceTests.Run();
         NativeKeyboardHookTests.ParseAndOwnership();
         await HookRawStartupTests.RunAsync();
         await ExternalHookObserverTests.RunAsync();

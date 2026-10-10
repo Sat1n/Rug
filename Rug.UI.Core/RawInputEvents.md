@@ -8,6 +8,14 @@ tags: [input, observation, diagnostics]
 
 # Raw Input event source (Task 3.5-05B-01)
 
+The [production four-item acceptance procedure](../tests/Rug.UI.Core.Script.Tests/ProductionSourceAcceptance.md)
+uses the original InputService/Core/isolated-window path and actual default source,
+without changing registration/classification or rebuilding frozen native probes.
+Specific F8/B delivery, Raw software/candidate classification, per-class human
+foreground/background counts and source continuity/cleanup are reported separately.
+Hook gaps remain INCOMPLETE with existing failure checks, not a source-classification
+failure or a hidden PASS. The independent native reversal remains frozen.
+
 The opt-in diagnostic window supports selective keyboard/mouse Hook installation
 for [controlled component stages](../tests/NativeInputProbe/ControlledStages.md).
 Defaults remain both Hooks; this is separate from the event source and takeover.
@@ -131,13 +139,16 @@ AUTO now runs SendInput/F8, SendInput/B, PostMessage/F8 and PostMessage/B
 sequentially in the same live probe/source session. Each round takes fresh hook,
 raw and target baselines and releases its key/button; the user does not manually
 press F8/B during AUTO. No production emitter or key delivery is changed.
-Actual target messages must arrive; a no-op native input path cannot pass.
+Actual specific F8/B down/up must each be exactly 1/1; generic key totals cannot
+substitute. The diagnostic reads existing scalar counters without new native queries.
 Keyboard emission now supplies MapVirtualKey scan metadata alongside the existing
 virtual-key delivery. Hook flags and pointer-sized extra-info offsets have explicit
-layout regression tests. A SendInput PASS requires target delivery, zero candidates,
-at least seven tagged raw samples and tagged injected hook evidence for two keys
-and five mouse packets. Consumer counters drain after native barriers before
-evaluation; incomplete evidence never prints PASS.
+layout regression tests. Each SendInput Raw verdict requires exactly two software
+keys (specified down/up=1/1), five software mouse samples (two moves, one button
+down, two releases) and zero candidates. PostMessage requires zero Raw samples.
+The separate legacy combined check still requires tagged injected Hook evidence;
+its failure does not rewrite the Raw-only verdict. Consumer counters drain after
+native barriers before evaluation; incomplete evidence never prints PASS.
 Independent low-level hook probes exist only in the opt-in Native diagnostic
 window; they forward every event and count injected/unflagged activity, never
 feed the Raw Input source or filter its events. If unflagged user-like activity

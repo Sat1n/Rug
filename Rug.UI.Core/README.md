@@ -282,16 +282,16 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   launch inputs. Hot reload still stops the old run and
   starts a new one without preserving its Lua stack or InstanceState.
 
-Raw Input retains native-tagged software with IsCandidateInput=false; unknown
-tags and untagged zero-device input remain candidates. This spoofable observation
-hint grants no authority. See [diagnostics](RawInputEvents.md) for the 5-second
-countdown, separate callback/classification/phase counters and observable
-post-start probe thread faults and independent F8/B AUTO rounds. Manual
-keyboard-probe diagnosis remains pending; [startup-order control](../tests/NativeInputProbe/StartupOrderControl.md) compares corrected Hook installation and native Raw startup/registration phases. It separates send, tested-key target and Hook evidence; count-only Raw classification is NOT COLLECTED.
-The ordered pairs all retained the gap. The next [external observer control](../tests/NativeInputProbe/ExternalObserverControl.md)
-isolates C; [manual B/C order](../tests/NativeInputProbe/ManualHookOrderControl.md)
-prepares both observers/Raw before either Hook. Child-process tests check clocks,
-one-shot installs and cleanup. Original acceptance remains open; production behavior is unchanged.
+Raw Input retains tagged software with IsCandidateInput=false; unknown tags and
+untagged zero-device input remain candidates. This spoofable hint grants no authority.
+[Diagnostics](RawInputEvents.md) and [production acceptance](../tests/Rug.UI.Core.Script.Tests/ProductionSourceAcceptance.md)
+separate specified F8/B target delivery, software motion/releases, per-class human
+foreground/background counts and continuity. Hook gaps remain separately reported;
+native reversal artifacts stay frozen and automatic takeover remains closed.
+Historical [startup order](../tests/NativeInputProbe/StartupOrderControl.md),
+[external observer](../tests/NativeInputProbe/ExternalObserverControl.md) and
+[manual B/C order](../tests/NativeInputProbe/ManualHookOrderControl.md) controls
+retain their lifecycle checks; count-only Raw classification is NOT COLLECTED.
 
 ## Native Interop & Memory Safety (CRITICAL)
 

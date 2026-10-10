@@ -87,6 +87,13 @@ internal sealed class RawInputDiagnosticWindow : IDisposable
     internal long KeyboardInstallStartedTicks => Interlocked.Read(ref _keyboardInstallStartedTicks);
     internal long KeyboardInstallCompletedTicks => Interlocked.Read(ref _keyboardInstallCompletedTicks);
     private long _targetF8Down, _targetF8Up, _targetBDown, _targetBUp;
+    // Diagnostic-only scalar reads of existing counters; no message-loop or forwarding change.
+    internal (long Down, long Up) TargetKeyCounts(int virtualKey) => virtualKey switch
+    {
+        119 => (Interlocked.Read(ref _targetF8Down), Interlocked.Read(ref _targetF8Up)),
+        66 => (Interlocked.Read(ref _targetBDown), Interlocked.Read(ref _targetBUp)),
+        _ => throw new ArgumentOutOfRangeException(nameof(virtualKey), "Only diagnostic F8/B counters are retained")
+    };
     public readonly TaskCompletionSource<nint> Ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly Thread _thread;
     private readonly bool _installKeyboard, _installMouse, _messageOnly;
