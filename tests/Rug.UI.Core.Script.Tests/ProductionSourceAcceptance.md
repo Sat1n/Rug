@@ -44,7 +44,7 @@ dotnet run --project F:/Cardinal/Rug/Rug/tests/Rug.UI.Core.Script.Tests/Rug.UI.C
 5. 返回从 CORE LOADED 到清理结束的完整输出，并明确说明普通输入、快捷键、
    窗口操作是否正常，以及 AUTO 是否误触键鼠。无需第二观察终端。
 
-用户尚未执行此新输出版本，真人前/后和普通操作验收 **NOT RUN**。
+用户已执行此输出版本，最新同会话证据及人工反馈见下方“用户原托管会话”。
 假事件单元测试只验证计数器/判定，不替代真人或实际 Rug 输入证据。
 
 ## 分项判定规则
@@ -77,7 +77,7 @@ HOOK_OBSERVATION 与完整回调计数继续输出。SendInput 键盘入口为�
 外部输入，不是认证真人。就算生产四项满足，Hook 缺口仍须单独保留。
 本单元不调用 TakeOverAsync、不停止自动化任务或改变交还逻辑。
 
-## 本轮验证记录
+## 开发 agent 验证记录（早于用户会话）
 
 2026-10-10 托管 Debug/x64 构建（warnings-as-errors）0 警告/0 错误。
 正常 Script.Tests 全套通过：Lua/调度器/状态、Gateway/截图缓存、授权、
@@ -99,3 +99,43 @@ HOOK_OBSERVATION 与完整回调计数继续输出。SendInput 键盘入口为�
 诊断非零退出是 SendInput 未运行所致，不改为总 PASS。Debug/x64 WinUI
 构建也为 0 警告/0 错误；UI 真人流程本轮 NOT RUN。原生五份二进制哈希
 核对未变，反转复核包未修改。
+
+## 用户原托管会话（PID 33724）
+
+2026-10-10 复核用户附件 `cc4c73b3-fda3-4ecd-b8a9-fcaba22f8102/Pasted text.txt`，
+SHA256 `249603FF37D187455646242320700209E3262FBD1CEA43C4BCCC13461A2C55A6`。
+运行已有托管诊断二进制（`--no-build -- --raw-input-diagnostic`），不是原生
+ON/OFF/ON 对照。实际路径为 InputService → 固定 Rug.Core → HWND 0xD00C30，
+生产 RawInputEventSource 代次 1，注册请求仍为 0x2100，键鼠接收 HWND
+0xE90CD2，查询 flags 为 0x100。加载 Core 为 2649600 字节，SHA256
+`5E0C9B3F75A49DBA002436B2E438A440E493EEB01B4263E08B787D4FE475A405`。
+
+| 验证项 | 本会话结果及独立证据 |
+|---|---|
+| 目标送达 | PASS：SendInput/F8、SendInput/B、PostMessage/F8、PostMessage/B 的指定键 down/up 均为 1/1 |
+| 自身输入归因 | PASS：每轮 SendInput 软件键盘/鼠标=2/5、键 down/up=1/1、移动/按钮 down/up=2/1/2，指定软件 F8/B 各 1/1；四轮 AUTO 候选键鼠=0/0；PostMessage 软件/候选计数均为零 |
+| 真人检测 | BEFORE/AFTER 计数完整：同一会话各自四类前后台键鼠均大于零。用户复核后反馈“真人检测这里应该没问题”；正常操作采用用户反馈，不由日志推断，也不增加未单独描述的快捷键或窗口动作结论 |
+| 事件源连续性 | PASS：代次 1→1，fault=None，overflow/consumerErrors/foreignGenerations=0；停止后 buffered/subscribers/registrations=0；诊断线程以 WM_QUIT 退出、无异常 |
+
+| 真人阶段 | 前台键盘 | 后台键盘 | 前台鼠标 | 后台鼠标 |
+|---|---|---|---|---|
+| HUMAN BEFORE | 118 | 75 | 3502 | 920 |
+| HUMAN AFTER | 44 | 25 | 1669 | 536 |
+
+AUTO 合计软件键盘/鼠标=4/10、键 down/up=2/2、移动/按钮 down/up=4/2/4，
+软件 F8/B 各 down/up=1/1；没有候选输入或未标记 Hook 活动的轮内干扰。
+倒计时聚焦动作不混入 AUTO。普通应用的真人按键内容或轨迹不入库。
+
+**Hook 观察单独保留为 INCOMPLETE**：同代次键盘 Hook 在 HUMAN BEFORE
+入口 75 次、AUTO 0 次、HUMAN AFTER 25 次。两轮 SendInput 键盘均
+callbackTotal/actionableTotal/taggedInjected=0；鼠标标记每轮 5 次。
+PostMessage 没有软件 Hook 事件符合预期。现有 Hook 失败检查保留，不能将
+非零退出改成总 PASS，也不能用生产分类通过声称 Hook 缺口修复。
+
+此会话的 B 目标送达完整，不证明冻结原生 OFF 轮 B down/up=0/1 的独立
+异常已修复。原生反转包和五份固定二进制未修改、未重建；本次只复核
+附件和文件哈希，没有重跑输入、构建或功能测试。
+
+生产四项证据与人工反馈现已归档，**不等于整个 05B 已无保留验收通过**。
+Hook 缺口继续作为独立未解决项，自动接管仍关闭；是否进入后续集成由
+用户与宿主共同确认。本次不新增人工干预策略，不启用监听或接管。

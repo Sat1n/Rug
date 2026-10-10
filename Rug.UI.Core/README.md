@@ -17,8 +17,8 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 > **Status:** native vision/input/capture interop, Lua/plugins/scheduler,
 > black-box logs, scoped state/commands, schema/hot reload and Gateway are implemented.
 > Process-local explicit grants and shared input arbitration support host manual takeover.
-> Task 3.5-05B-01 adds opt-in Raw Input capture/diagnostics; automatic takeover
-> integration and human-input acceptance remain pending.
+> Task 3.5-05B-01 has production input evidence and user human-input feedback;
+> Hook verification remains incomplete and automatic takeover stays disabled.
 
 ## Internal Topology
 

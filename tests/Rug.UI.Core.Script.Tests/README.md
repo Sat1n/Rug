@@ -251,6 +251,9 @@ foreground/background candidate counts and same-generation clean source shutdown
 ProductionInputEvidenceTests cover count deltas, merged samples, wrong/missing keys,
 safety releases, excess/candidate input, parallel snapshots and continuity failures.
 These synthetic regressions do not substitute for actual input or human acceptance.
+The production acceptance record includes user session PID 33724: complete specific
+target delivery, exact software attribution, human before/after counts and cleanup;
+user feedback reports no human-test issue. Keyboard Hook observation remains incomplete.
 Tag regressions cover x86/x64 keyboard/mouse, unknown tags, zero-device untagged
 input and hook flags/extra-info layouts. Raw attribution and Hook verdicts are
 separate; the retained legacy combined check and nonzero Hook-failure exit remain.
@@ -267,4 +270,4 @@ the user's passing reversed-order session and unresolved order correlation.
 Stage output also
 reports installation identity, error codes and thread exit/failure. Pump/barrier
 success never implies hook health; no input emission changes are made here. Ordinary application
-startup never enables it. See [commands, evidence and pending human acceptance](../../Rug.UI.Core/RawInputEvents.md).
+startup never enables it. See [commands and evidence boundaries](../../Rug.UI.Core/RawInputEvents.md).
