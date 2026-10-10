@@ -6,7 +6,15 @@ outputs: []
 tags: [diagnostics, native, raw-input, reproduction]
 ---
 
-# Native A+B: retained receiver, registration OFF control
+# Native A+B: retained receiver, registration reversal
+
+The three-session ON/OFF/ON review is complete; see the
+[expert review package](RegistrationReversalReview.md) for all six artifact IDs,
+hashes, specific targets, Hook observations and clocks. F8 insertion/target
+delivery is complete in all three; Hook evidence is missing/recovered/missing.
+OFF SendInput/B has complete Hooks but target down/up=0/1, retained as unresolved.
+Do not label the entire OFF suite passed. Next freeze and review the reproduction,
+not another identical run. The instructions below are the completed test protocol.
 
 ## Evidence package (2026-10-10)
 
@@ -86,7 +94,7 @@ the delivery window. The [WM_INPUT contract](https://learn.microsoft.com/en-us/w
 requires foreground DefWindowProc cleanup and zero return. These contracts do
 not predict that adding this registration must suppress Hook observation.
 
-## Next test: ONLY registration OFF, still A+B
+## Completed test protocol: ONLY registration OFF, still A+B
 
 The earlier registration reversal included C. Test this condition in the new
 smallest host topology before changing target/receiver/thread arrangements.
@@ -141,6 +149,7 @@ target identities, one-shot install, real A binding without AUTO and cleanup.
 OFF requires zero registration/call/input/device counts with a live ready receiver.
 Default remains ON; invalid mode rejected before startup. Five file hashes
 unchanged. No native/product source or C-ABI changes, no rebuild. Real OFF AUTO/
-HUMAN is NOT RUN by the agent; WinUI/product-wide regressions not rerun for this
+HUMAN was not performed by the agent; later user logs are separately reviewed in
+the expert package above. WinUI/product-wide regressions were not rerun for this
 script/document-only change. Automatic takeover stays closed; no filters,
 rehooks, sender changes, timing-ignore windows or deleted failing checks.

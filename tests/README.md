@@ -74,8 +74,11 @@ removes C, retains all five binaries and checks the no-AUTO contract with
 A/B logs; the clean user retry reproduced the gap without AUTO interference.
 The next [A+B registration control and thread audit](NativeInputProbe/TwoProcessRegistrationControl.md)
 retains binaries and receiver infrastructure; the runner accepts
--RawRegistration on|off. First return two OFF logs, restore ON if recovery is
-observed. Raw attribution is NOT COLLECTED and takeover stays closed.
+-RawRegistration on|off. The completed A+B ON/OFF/ON reversal recovered Hooks
+only in OFF, with complete F8 targets throughout and an unresolved OFF B target
+down/up=0/1. The [expert review package](NativeInputProbe/RegistrationReversalReview.md)
+records six artifacts, clocks, hashes and next decision gates; no identical rerun
+is requested. Raw attribution is NOT COLLECTED and takeover stays closed.
 
 ## Layout
 
