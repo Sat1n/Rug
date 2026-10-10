@@ -44,7 +44,12 @@ registration, DEVNOTIFY off and tests sink on/off/on; all three user sessions
 retained the gap, including flags zero. The next [A+B reduction](TwoProcessControl.md)
 removes C without rebuilding any binary. `tests/run_native_two_process_tests.ps1`
 checks actual registration, one-shot install, target binding and cleanup without
-AUTO; the manual comparison requests two complete A/B logs.
+AUTO. The clean A+B user retry reproduced both SendInput keyboard gaps with
+complete sends/targets and no observed AUTO interference. See
+[evidence, thread audit and registration OFF control](TwoProcessRegistrationControl.md).
+The existing two-process runner now accepts -RawRegistration on|off; no native
+binary changed. Next manual check needs two OFF A/B logs, followed by fresh ON
+restoration if OFF recovers. Original integrated acceptance remains open.
 `-Mode ManagedTarget` binds the selected owner's validated diagnostic HWND/PID and keeps the
 native Rug.Core sender; see the controlled guide for startup/focus/counter rules.
 

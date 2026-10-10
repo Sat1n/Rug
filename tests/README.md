@@ -71,7 +71,11 @@ sink reversal reproduced the gap in all three sessions, including flags zero
 with successful registration. The next [native A+B reduction](NativeInputProbe/TwoProcessControl.md)
 removes C, retains all five binaries and checks the no-AUTO contract with
 `tests/run_native_two_process_tests.ps1`. Manual verification requires two full
-A/B logs; Raw attribution is NOT COLLECTED and takeover stays closed.
+A/B logs; the clean user retry reproduced the gap without AUTO interference.
+The next [A+B registration control and thread audit](NativeInputProbe/TwoProcessRegistrationControl.md)
+retains binaries and receiver infrastructure; the runner accepts
+-RawRegistration on|off. First return two OFF logs, restore ON if recovery is
+observed. Raw attribution is NOT COLLECTED and takeover stays closed.
 
 ## Layout
 

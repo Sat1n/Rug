@@ -1,4 +1,5 @@
 # No AUTO: verifies the existing two-process diagnostic contract, not Hook health.
+param([ValidateSet('on','off')][string]$RawRegistration = 'on')
 $ErrorActionPreference = 'Stop'
 $probeRoot = Split-Path -Parent $PSScriptRoot
 $senderPath = Join-Path $probeRoot 'x64/Debug/Rug.NativeInputProbe.exe'
@@ -6,7 +7,7 @@ $rolePath = Join-Path $probeRoot 'x64/Debug/Rug.NativeRoleProbe.exe'
 $fixedPaths = @($senderPath, $rolePath) + @('Rug.Core.dll','Rug.NativeKeyboardHook.dll','Rug.NativeRawReceiver.dll' | ForEach-Object { Join-Path $probeRoot "x64/Debug/$_" })
 $beforeHashes = @{}
 foreach ($path in $fixedPaths) { $beforeHashes[$path] = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash }
-$bArguments = '--role-b --raw-owner B --target-owner B --core-load off --raw-registration on --device-notify off --input-sink off'
+$bArguments = "--role-b --raw-owner B --target-owner B --core-load off --raw-registration $RawRegistration --device-notify off --input-sink off"
 function Assert-Probe($condition, [string]$message) { if (-not $condition) { throw $message } }
 function Start-Probe([string]$path, [string]$arguments) {
     $start = [Diagnostics.ProcessStartInfo]::new($path)
@@ -58,13 +59,15 @@ function Line-Probe($child, [string]$prefix) {
 # @source NativeInputProbe/NativeRoles.cpp#function:RunRole
 function Check-Phase($b, [string]$phase, $prepared, $rawIdentity, $targetIdentity, $registration) {
     $summary=Line-Probe $b "NATIVE B ${phase}:"
-    Assert-Probe ($summary -match 'clrLoaded=0 target=1 rawRegistrations=1 rawOwner=B' -and $summary -match 'targetOwner=B' -and $summary -match 'coreLoad=off' -and $summary -match 'rawRegistration=on' -and $summary -match 'deviceNotify=off' -and $summary -match 'inputSink=off') 'Two-process conditions changed'
+    $registeredCount = [int]($RawRegistration -eq 'on')
+    Assert-Probe ($summary -match "clrLoaded=0 target=1 rawRegistrations=$registeredCount rawOwner=B" -and $summary -match 'targetOwner=B' -and $summary -match 'coreLoad=off' -and $summary -match "rawRegistration=$RawRegistration" -and $summary -match 'deviceNotify=off' -and $summary -match 'inputSink=off') 'Two-process conditions changed'
     Assert-Probe ((Field-Probe $summary 'coreLoaded') -eq 0 -and (Field-Probe $summary 'receiverReady') -eq 1) 'Unexpected Core or unready receiver'
     $raw=Line-Probe $b "$phase RAW:"
     $target=Line-Probe $b "$phase TARGET threadId="
     $call=Line-Probe $b "$phase RAW_REGISTER_CALL:"
     Assert-Probe ([regex]::Match($raw,'threadId=(\d+) hwnd=(0x[0-9a-fA-F]+)').Value -eq $rawIdentity -and [regex]::Match($target,'threadId=(\d+) hwnd=(0x[0-9a-fA-F]+) generation=(\d+)').Value -eq $targetIdentity) 'Receiver/target identity changed'
     Assert-Probe ((Field-Probe $raw 'ready') -eq 1 -and (Field-Probe $raw 'fault') -eq 0) 'Receiver fault'
+    if ($RawRegistration -eq 'off') { Assert-Probe ((Field-Probe $raw 'input') -eq 0 -and (Field-Probe $raw 'deviceChanges') -eq 0) 'Unregistered receiver collected Raw messages' }
     Assert-Probe ($call.Substring($call.IndexOf(':')) -eq $registration.Substring($registration.IndexOf(':'))) 'Commands re-registered or changed registration evidence'
     Assert-Probe ((Field-Probe $summary 'rawReadyObservedTicks') -eq (Field-Probe $prepared 'rawReadyObservedTicks')) 'Readiness generation changed'
 }
@@ -72,6 +75,7 @@ function Check-Cleanup($b) {
     Assert-Probe ($b.Lines -match '^NATIVE B CLEANUP: threadExited=1 attached=0 targetHwnd=0 rawRegistrations=0 fault=None') 'Incomplete B cleanup'
     $raw=Line-Probe $b 'STOPPED RAW:'
     Assert-Probe ((Field-Probe $raw 'input') -eq (Field-Probe $raw 'cleanup')) 'WM_INPUT cleanup mismatch'
+    if ($RawRegistration -eq 'off') { Assert-Probe ((Field-Probe $raw 'input') -eq 0 -and (Field-Probe $raw 'deviceChanges') -eq 0) 'Unregistered receiver collected messages before cleanup' }
 }
 # @source NativeInputProbe/NativeRoles.cpp#function:RunRole
 # Only A and B are started here; no C and no next command are issued.
@@ -94,7 +98,12 @@ foreach ($round in 1..3) {
         $targetIdentity=[regex]::Match((Line-Probe $b 'PREPARED TARGET threadId='),'threadId=(\d+) hwnd=(0x[0-9a-fA-F]+) generation=(\d+)').Value
         $registration=Line-Probe $b 'PREPARED RAW_REGISTER_CALL:'
         Assert-Probe ($rawIdentity -ne '' -and $targetIdentity -ne '' -and (Field-Probe $raw 'threadId') -gt 0) 'Missing native identities'
-        Assert-Probe ((Field-Probe $registration 'requestedFlags') -eq 0 -and (Field-Probe $registration 'queriedFlags') -eq 0 -and (Field-Probe $registration 'succeeded') -eq 1 -and (Field-Probe $registration 'error') -eq 0 -and (Field-Probe $registration 'beforeTicks') -gt 0 -and (Field-Probe $registration 'afterTicks') -ge (Field-Probe $registration 'beforeTicks') -and [regex]::Match($registration,'threadId=(\d+) hwnd=(0x[0-9a-fA-F]+)').Value -eq $rawIdentity) 'Flags-zero registration not proven'
+        if ($RawRegistration -eq 'on') {
+            Assert-Probe ((Field-Probe $registration 'requestedFlags') -eq 0 -and (Field-Probe $registration 'queriedFlags') -eq 0 -and (Field-Probe $registration 'succeeded') -eq 1 -and (Field-Probe $registration 'error') -eq 0 -and (Field-Probe $registration 'beforeTicks') -gt 0 -and (Field-Probe $registration 'afterTicks') -ge (Field-Probe $registration 'beforeTicks') -and [regex]::Match($registration,'threadId=(\d+) hwnd=(0x[0-9a-fA-F]+)').Value -eq $rawIdentity) 'Flags-zero registration not proven'
+        } else {
+            foreach ($field in @('requestedFlags','queriedFlags','succeeded','error','beforeTicks','afterTicks','threadId')) { Assert-Probe ((Field-Probe $registration $field) -eq 0) 'Off receiver made a registration call' }
+            Assert-Probe ($registration -match 'hwnd=0x0\b' -and $rawIdentity -notmatch 'hwnd=0x0\b') 'Off call record/window distinction missing'
+        }
         Check-Phase $b 'PREPARED' $prepared $rawIdentity $targetIdentity $registration
         foreach ($command in @('baseline','snapshot')) { Write-Probe $b $command; $null=Until-Probe $b 'NATIVE NOT READY:' }
         Write-Probe $b 'install'; $installed=Until-Probe $b 'NATIVE B INSTALLED:'
@@ -119,7 +128,7 @@ foreach ($round in 1..3) {
         End-Probe $b
         Assert-Probe ($b.Process.ExitCode -eq 0) 'B diagnostic lifecycle failed'
         Check-Cleanup $b
-        Write-Output "A+B round $round PASS: no C created, flags=0 registered, one-shot Hook, stable target/receiver, A bound without AUTO, complete cleanup"
+        Write-Output "A+B round $round RawRegistration=$RawRegistration PASS: no C created, actual registration mode verified, one-shot Hook, stable target/receiver, A bound without AUTO, complete cleanup"
     } finally { Dispose-Probe $a; Dispose-Probe $b }
 }
 foreach ($case in @('done-uninstalled','eof-uninstalled','eof-installed')) {
@@ -133,4 +142,4 @@ foreach ($case in @('done-uninstalled','eof-uninstalled','eof-installed')) {
     } finally { Dispose-Probe $b }
 }
 foreach ($path in $fixedPaths) { Assert-Probe ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -eq $beforeHashes[$path]) "Binary changed: $path" }
-Write-Output 'PASS: three A+B sessions, three incomplete B cleanups, five binaries unchanged. Physical AUTO/HUMAN and Hook observation NOT RUN; Raw classification NOT COLLECTED.'
+Write-Output "RawRegistration=$RawRegistration PASS: three A+B sessions, three incomplete B cleanups, five binaries unchanged. Physical AUTO/HUMAN and Hook observation NOT RUN; Raw classification NOT COLLECTED."

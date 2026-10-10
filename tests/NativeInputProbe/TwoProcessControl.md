@@ -64,7 +64,9 @@ without rebuilding between sessions:
 & F:/Cardinal/Rug/Rug/tests/run_native_two_process_tests.ps1
 ```
 
-The runner starts only A and B, never sends next/AUTO, verifies three fresh
+The runner defaults -RawRegistration on; optional off is described in the
+[next control](TwoProcessRegistrationControl.md). It starts only A and B,
+never sends next/AUTO, verifies three fresh
 sessions: flags-zero successful registration, loaded diagnostic module hashes,
 Core/CLR absence in B, pre-install refusals, one-shot install clocks/module
 association, stable target/receiver identity and registration, real A binding,
@@ -112,6 +114,12 @@ Terminal B:
    Report accidental AUTO input and whether ordinary operation remained normal.
 
 ## Predeclared branches
+
+The user's clean retry (2026-10-10) reproduced both SendInput/F8 and SendInput/B
+Hook absence with eight successful sends, all four exact target deliveries,
+zero observed AUTO interference and clean teardown. C is not necessary in this
+reduced condition. See [evidence, thread audit and registration OFF control](TwoProcessRegistrationControl.md).
+An earlier attempt had an interfered SendInput/B round and is kept separate.
 
 | Valid sends, specific targets, identities/hashes/focus/lifecycle | Interpretation / next step |
 |---|---|
