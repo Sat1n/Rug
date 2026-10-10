@@ -1,3 +1,11 @@
+---
+id: rug_ui_tests
+type: logic_node
+inputs: [rug_ui_core, rug_ui]
+outputs: []
+tags: [ui, tests]
+---
+
 # Rug.UI.Tests
 
 Run `dotnet run --project Rug.UI.Tests/Rug.UI.Tests.csproj -c Debug -p:Platform=x64` to validate the shipped `ui.json`, control-tree parsing, invalid schemas, and CommandBus state round trips. The suite targets `net10.0` under SDK `10.0.401`; the native WinUI renderer is compiled through `Rug.UI/Rug.UI.csproj` and can be viewed on the app's main page.
@@ -32,4 +40,10 @@ Task 3.5-05A: run `dotnet run --no-build --project Rug.UI.Tests/Rug.UI.Tests.csp
 its timer permission in the real host dialog, and invokes Manual takeover /
 Return control three times. It verifies actual state labels, idempotent clicks
 and timer-run preservation, then stops its run and cleans up its own app/files.
-Physical input activity detection is not implemented in this unit.
+Task 3.5-05B-02 additionally checks actual production detector Ready/no-session
+status and the global takeover rule before/after timer startup and each return.
+It does not simulate human acceptance. Real human-triggered WinUI verification
+is pending via the script harness `--intervention-manual`; see
+[isolated target steps](../Rug.UI.Core/InputIntervention.md). The host UI owns
+permission confirmation and target binding; no automatic approval/test bypass
+is added. Existing generic-instance/demo/hot-reload regressions remain enabled.

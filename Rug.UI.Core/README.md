@@ -17,8 +17,8 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 > **Status:** native vision/input/capture interop, Lua/plugins/scheduler,
 > black-box logs, scoped state/commands, schema/hot reload and Gateway are implemented.
 > Process-local explicit grants and shared input arbitration support host manual takeover.
-> Task 3.5-05B-01 has production input evidence and user human-input feedback;
-> Hook verification remains incomplete and automatic takeover stays disabled.
+> Task 3.5-05B-02 connects production candidate-input monitoring to safe takeover;
+> new human UI acceptance is pending; the independent Hook gap remains incomplete.
 
 ## Internal Topology
 
@@ -41,6 +41,7 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 | `Services/InputBridge.cs` | Permission-gated input dispatch, foreground/background selection, focus guard and full-action shared leases |
 | `Abstractions/IInputArbiter.cs` · `Models/InputOwnership.cs` · `Services/InputArbiter.cs` · `Services/InputWindowValidator.cs` · `Services/InputExecutionBoundary.cs` | Host owners, window lifetimes, bounded conflict-FIFO input queue, manual takeover and Gateway focus/input-progress outcome boundary; [contract](InputArbitration.md) |
 | `Abstractions/IInputEventSource.cs` · `Models/InputEvents.cs` · `Services/RawInputEventSource.cs` · `Native/WindowsRawInputReceiver.cs` | Explicit host-owned Raw Input receiver, bounded detached events and diagnostics; [contract and acceptance](RawInputEvents.md) |
+| `Abstractions/IInputInterventionCoordinator.cs` · `Services/InputInterventionCoordinator.cs` | Host input sessions, readiness guards and global candidate takeover; [contract](InputIntervention.md) |
 | `Services/CaptureService.cs` | Async WGC capture (Task.Run / MTA): start/stop a native capturer, copy each frame to managed BGRA8, free the native buffer |
 | `Services/WindowSpyService.cs` | Resolve the window under the cursor or enumerate visible top-level windows → `WindowInfo` (incl. monitor via `MonitorFromWindow`); inspect a given HWND, check foreground state, query client size and pick client points. All physical pixels (PMv2-aware host) |
 | `Abstractions/IScriptRuntime.cs` · `Models/ScriptExecutionResult.cs` | Script lifecycle/state contract |
@@ -282,16 +283,14 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   launch inputs. Hot reload still stops the old run and
   starts a new one without preserving its Lua stack or InstanceState.
 
-Raw Input retains tagged software with IsCandidateInput=false; unknown tags and
-untagged zero-device input remain candidates. This spoofable hint grants no authority.
+The host starts one Raw Input source and [candidate takeover coordinator](InputIntervention.md).
+Input runs register before service creation and stay monitored through waits and cleanup;
+DevTools input sessions share this policy. New candidate downs, wheels or effective
+motion globally request existing takeover; releases, repeats, software tags and device
+changes do not. Failed detection blocks input/return; timer/vision tasks remain.
 [Diagnostics](RawInputEvents.md) and [production acceptance](../tests/Rug.UI.Core.Script.Tests/ProductionSourceAcceptance.md)
-separate specified F8/B target delivery, software motion/releases, per-class human
-foreground/background counts and continuity. Hook gaps remain separately reported;
-native reversal artifacts stay frozen and automatic takeover remains closed.
-Historical [startup order](../tests/NativeInputProbe/StartupOrderControl.md),
-[external observer](../tests/NativeInputProbe/ExternalObserverControl.md) and
-[manual B/C order](../tests/NativeInputProbe/ManualHookOrderControl.md) controls
-retain their lifecycle checks; count-only Raw classification is NOT COLLECTED.
+separate target, Raw and Hook evidence. Tags are spoofable hints, not authority.
+The Hook gap and frozen native artifacts remain; new human UI acceptance is pending.
 
 ## Native Interop & Memory Safety (CRITICAL)
 

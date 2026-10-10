@@ -35,6 +35,7 @@ public sealed class TaskScheduler : ITaskScheduler
     private bool _disposed;
     private readonly IInputArbiter _inputArbiter;
     private readonly IDisposable _inputStopRegistration;
+    private readonly IInputInterventionCoordinator? _intervention;
 
     public TaskScheduler(IPluginManager plugins, string pluginsRoot,
         Func<ICaptureService> captureFactory, Func<IInputService> inputFactory,
@@ -42,7 +43,7 @@ public sealed class TaskScheduler : ITaskScheduler
         ILogger<TaskScheduler> logger, IAnomalyLogger anomalies, TimeSpan? tickInterval = null,
         TimeSpan? watchdogTimeout = null, ICommandBus? commandBus = null,
         IAutomationPermissionChecker? permissionChecker = null, IPluginAuthorization? authorization = null,
-        IInputArbiter? inputArbiter = null)
+        IInputArbiter? inputArbiter = null, IInputInterventionCoordinator? intervention = null)
     {
         _plugins = plugins ?? throw new ArgumentNullException(nameof(plugins));
         _anomalies = anomalies ?? throw new ArgumentNullException(nameof(anomalies));
@@ -56,6 +57,7 @@ public sealed class TaskScheduler : ITaskScheduler
         _tickInterval = tickInterval ?? TimeSpan.FromMilliseconds(50);
         _watchdogTimeout = watchdogTimeout ?? TimeSpan.FromSeconds(1);
         _inputArbiter = inputArbiter ?? InputArbiter.Shared;
+        _intervention = intervention;
         _inputStopRegistration = _inputArbiter.RegisterStopHandler(StopInputRunsAsync);
         if (_tickInterval <= TimeSpan.Zero || _watchdogTimeout <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(tickInterval));
@@ -154,6 +156,7 @@ public sealed class TaskScheduler : ITaskScheduler
         CancellationTokenRegistration authorizationCancellation = default;
         CancellationTokenRegistration inputCancellation = default;
         bool inputStarting = false;
+        IInputSession? inputSession = null;
         try
         {
             PluginManifest source = await GetPluginAsync(pluginId, cancellation.Token).ConfigureAwait(false);
@@ -181,6 +184,13 @@ public sealed class TaskScheduler : ITaskScheduler
             long generation = _generations.AddOrUpdate(source.Id, 1, (_, previous) => checked(previous + 1));
             identity = new RunIdentity(source.Id, id, generation,
                 hwnd == 0 ? null : Guid.NewGuid(), hwnd);
+            if (declaresInput && _intervention is not null)
+            {
+                inputSession = await _intervention.BeginSessionAsync(InputOwner.ForRun(identity), cancellation.Token).ConfigureAwait(false);
+                inputCancellation.Dispose();
+                inputCancellation = inputSession.Token.Register(() => cancellation.Cancel());
+                cancellation.Token.ThrowIfCancellationRequested();
+            }
             PluginManifest manifest = source with { TargetWindow = hwnd };
             var configuration = source.Configuration is null
                 ? new Dictionary<string, object?>(StringComparer.Ordinal)
@@ -208,6 +218,7 @@ public sealed class TaskScheduler : ITaskScheduler
             context.AuthorizationCancellation = authorizationCancellation;
             context.InputCancellation = inputCancellation;
             context.DeclaresInput = declaresInput;
+            context.InputSession = inputSession;
             onReady?.Invoke(identity);
             lock (_lifecycleGate)
             {
@@ -237,6 +248,7 @@ public sealed class TaskScheduler : ITaskScheduler
                 await TryCleanupAsync(() => input.DisposeAsync().AsTask(), "input startup disposal").ConfigureAwait(false);
             authorizationCancellation.Dispose();
             inputCancellation.Dispose();
+            inputSession?.Dispose();
             authorizationLease?.Dispose();
             cancellation.Dispose();
             throw;
@@ -370,6 +382,7 @@ public sealed class TaskScheduler : ITaskScheduler
             _instances.TryRemove(context.InstanceId, out _);
             context.AuthorizationCancellation.Dispose();
             context.InputCancellation.Dispose();
+            context.InputSession?.Dispose();
             context.AuthorizationLease?.Dispose();
             context.Cancellation.Dispose();
             NotifyInstancesChanged();

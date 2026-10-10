@@ -146,6 +146,15 @@ actual work and release finish, even after Gateway returns early. Closed input,
 invalid lifetime or a full input queue returns Rejected/InputUnavailable.
 Authorization, run identity, parameter checks and dedup remain in force.
 
+Task 3.5-05B-02 adds the host [candidate-input coordinator](InputIntervention.md).
+Input runs register whole lifetimes before service construction; Lua and external
+adapter input share the arbiter's live detector guard. Detector failure or candidate
+takeover closes admission and cancels sessions/queues, preserving actual native work
+and cleanup leases after early Gateway return. Pre-input rejection stays certain;
+already-started outcomes retain uncertainty and duplicates never replay the action.
+Return control and session/detector policy remain trusted host operations, not
+request parameters. Timer/vision-only runs do not become input sessions.
+
 ## Verification
 
 The [script suite](../tests/Rug.UI.Core.Script.Tests/README.md) executes real Lua,

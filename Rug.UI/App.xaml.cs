@@ -78,6 +78,8 @@ public partial class App : Application
             services.AddSingleton<IFileService, FileService>();
             services.AddSingleton<StateStore>();
             services.AddSingleton<IInputArbiter>(_ => InputArbiter.Shared);
+            services.AddSingleton<IInputEventSource, RawInputEventSource>();
+            services.AddSingleton<IInputInterventionCoordinator, InputInterventionCoordinator>();
             services.AddSingleton<IPluginAuthorization, PluginAuthorization>();
             services.AddSingleton<PluginPermissionConsent>();
             services.AddSingleton<IPluginManager, PluginManager>();
@@ -104,7 +106,8 @@ public partial class App : Application
                 provider.GetRequiredService<IAnomalyLogger>(),
                 commandBus: provider.GetRequiredService<ICommandBus>(),
                 authorization: provider.GetRequiredService<IPluginAuthorization>(),
-                inputArbiter: provider.GetRequiredService<IInputArbiter>()));
+                inputArbiter: provider.GetRequiredService<IInputArbiter>(),
+                intervention: provider.GetRequiredService<IInputInterventionCoordinator>()));
             services.AddSingleton<IAutomationGateway>(provider => provider.GetRequiredService<ITaskScheduler>().Gateway);
             services.AddSingleton<IHotReloadService>(provider => new HotReloadService(
                 PluginsRoot, provider.GetRequiredService<ITaskScheduler>(),
@@ -150,6 +153,8 @@ public partial class App : Application
         App.GetService<IAppNotificationService>().Show(string.Format("AppNotificationSamplePayload".GetLocalized(), AppContext.BaseDirectory));
 
         SeedDemoPlugin();
+        try { await App.GetService<IInputInterventionCoordinator>().StartAsync(); }
+        catch (Exception error) { App.GetService<ILogger<App>>().LogError(error, "Input detector unavailable; automatic input remains closed"); }
         _ = App.GetService<DemoWorkflowCoordinator>();
         App.GetService<IHotReloadService>().Start();
         await App.GetService<IActivationService>().ActivateAsync(args);

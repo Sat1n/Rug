@@ -16,6 +16,8 @@ using Rug.UI.Core.Security;
 using Rug.UI.Core.Schema;
 using RugTaskScheduler = Rug.UI.Core.Services.TaskScheduler;
 
+if (args.Contains("--intervention-manual")) { await ManualInputIntervention.RunAsync(); return; }
+
 if (args.Contains("--hook-observer"))
 {
     try
@@ -58,6 +60,7 @@ if (args.Contains("--raw-input-self-test") || args.Contains("--raw-input-diagnos
 }
 
 if (args.Contains("--raw-input-tests")) { await RawInputTests.RunAsync(); return; }
+if (args.Contains("--intervention-tests")) { await InputInterventionTests.RunAsync(); return; }
 if (args.Contains("--observer-tests")) { await ExternalHookObserverTests.RunAsync(); return; }
 if (args.Contains("--manual-hook-tests")) { await ManualHookInstallTests.RunAsync(); return; }
 
@@ -1095,6 +1098,7 @@ await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new 
 await GatewayTests.RunAsync();
 await AuthorizationTests.RunAsync();
 await InputArbitrationTests.RunAsync();
+await InputInterventionTests.RunAsync();
 await RawInputTests.RunAsync();
 await NativeInputTakeoverTests.RunAsync();
 Console.WriteLine("Lua bridge, scheduler and state/command bus tests passed");

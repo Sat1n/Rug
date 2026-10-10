@@ -12,6 +12,8 @@ public interface IInputEventSource : IAsyncDisposable
     event EventHandler StateChanged;
     /// <summary>Completes only after receiver and registrations are ready. Caller cancellation stops startup.</summary>
     Task StartAsync(CancellationToken cancellationToken = default);
+    /// <summary>Drains observations captured before the boundary; never call from a source callback.</summary>
+    Task<InputEventBoundary> CaptureBoundaryAsync(CancellationToken cancellationToken = default);
     /// <summary>Stops capture, discards queued events and removes all subscriptions; awaits callbacks already entered.</summary>
     Task StopAsync();
 }

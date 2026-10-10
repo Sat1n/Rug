@@ -25,10 +25,11 @@ Its diagnostic window also exposes bounded scalar message counters for the nativ
 ManagedTarget comparison; no key contents or native-memory pointers are returned.
 
 [IInputEventSource](Abstractions/IInputEventSource.cs#interface:IInputEventSource) is replaceable by a trusted host/test implementation.
-[RawInputEventSource](Services/RawInputEventSource.cs#class:RawInputEventSource) is explicitly created/started by the diagnostic host. It is
-not started by the normal WinUI application, registered as a plugin command, or
-connected to TakeOverAsync. No scheduler, grant, control-return or C-ABI behavior
-changes. The follow-up tags software emissions without changing the C-ABI. Production OS interop remains in Native; UI only consumes services.
+[RawInputEventSource](Services/RawInputEventSource.cs#class:RawInputEventSource) is explicitly started by its host.
+Task 3.5-05B-02 starts one in normal WinUI composition and connects it through the
+[host coordinator](InputIntervention.md) to existing takeover, without changing
+registration flags, tag classification or C-ABI. Plugins cannot start/configure it.
+Independent diagnostic Hooks remain opt-in; OS interop stays in Native.
 
 ## Contract and ownership
 
@@ -113,13 +114,18 @@ A separate consumer worker invokes subscribers, isolating exceptions and
 counting them. Queue capacity defaults to 1,024 (host selectable 2–65,536).
 Only adjacent pure movement from the same device/foreground/flags/extra-info
 may merge: relative deltas sum with overflow checks; absolute movement keeps the
-latest point. The merged item has latest sequence/time and total samples.
+latest point. The merged item retains latest sequence/time, first sequence, total
+samples and the last actual movement sequence/time; net-zero motion retains activity.
+CaptureBoundaryAsync drains captured events through consumers for session admission.
 Transitions, wheels, device changes, attributes changes and intervening devices
 form barriers. Sequence gaps caused by merging are intentional. A full queue
 that cannot merge does not silently drop transitions: it records Overflow,
 faults capture, stops the receiver, and discards discontinuous pending data.
 Overflow/ownership/native/malformed-data/cleanup faults require explicit host
-inspection/restart. No fault invokes takeover or changes input ownership.
+inspection/restart. The standalone source does not change input ownership; the
+host coordinator blocks input and requests existing safe takeover on faults or
+consumer errors. A first consumer exception signals a state reread; later failures
+remain counted without recursive notification of a faulty subscriber.
 
 ## Diagnostic commands and human acceptance
 

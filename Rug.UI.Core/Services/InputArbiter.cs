@@ -16,6 +16,7 @@ public sealed class InputArbiter(IInputWindowValidator? windows = null, int capa
     private readonly List<Pending> _queue = [];
     private readonly HashSet<Lease> _active = [];
     private readonly List<Func<Task>> _stops = [];
+    private readonly List<Action<bool>> _guards = [];
     private CancellationTokenSource _epoch = new();
     private InputControlState _state;
     private long _revision;
@@ -25,9 +26,10 @@ public sealed class InputArbiter(IInputWindowValidator? windows = null, int capa
     public event EventHandler? StateChanged;
     public IReadOnlyList<InputOwner> ActiveOwners { get { lock (_gate) return _active.Select(a => a.Owner).ToArray(); } }
     public int RegisteredStopHandlerCount { get { lock (_gate) return _stops.Count; } }
+    public int RegisteredAdmissionGuardCount { get { lock (_gate) return _guards.Count; } }
     public InputControlSnapshot Snapshot { get { lock (_gate) return new(_state, _revision, _queue.Count, _active.Count, _error); } }
     public CancellationToken AutomationToken
-    { get { lock (_gate) { CheckAvailable(); return _epoch.Token; } } }
+    { get { CheckGuards(); lock (_gate) { CheckAvailable(); return _epoch.Token; } } }
     public InputTarget BindTarget(nint hwnd) => _windows.Bind(hwnd);
 
     private sealed class Pending(InputOwner owner, InputTarget target, bool foreground, CancellationTokenSource cancellation, Action validate)
@@ -45,6 +47,7 @@ public sealed class InputArbiter(IInputWindowValidator? windows = null, int capa
     {
         ArgumentNullException.ThrowIfNull(owner);
         ArgumentNullException.ThrowIfNull(validateAdmission);
+        CheckGuards();
         if (!Enum.IsDefined(mode)) throw new ArgumentOutOfRangeException(nameof(mode));
         if (owner.Run is { } run && run.TargetHwnd != target.Hwnd) throw new InputUnavailableException("Owner target mismatch.");
         validateAdmission();
@@ -69,6 +72,7 @@ public sealed class InputArbiter(IInputWindowValidator? windows = null, int capa
             lease = await pending.Ready.Task.ConfigureAwait(false);
             lease.Token.ThrowIfCancellationRequested();
             validateAdmission();
+            CheckGuards();
             if (!_windows.IsValid(target)) throw new InputUnavailableException("Target invalidated while queued.");
             lock (_gate) CheckAvailable();
             return lease;
@@ -118,6 +122,7 @@ public sealed class InputArbiter(IInputWindowValidator? windows = null, int capa
         public CancellationToken Token => Pending.Cancellation.Token;
         public void Validate()
         {
+            host.CheckGuards();
             Token.ThrowIfCancellationRequested();
             Pending.Validate();
             if (!host._windows.IsValid(Pending.Target)) throw new InputUnavailableException("Input target is no longer valid.");
@@ -150,6 +155,23 @@ public sealed class InputArbiter(IInputWindowValidator? windows = null, int capa
     {
         private int _disposed;
         public void Dispose() { if (Interlocked.Exchange(ref _disposed, 1) == 0) lock (host._gate) host._stops.Remove(stop); }
+    }
+    public IDisposable RegisterAdmissionGuard(Action<bool> guard)
+    {
+        ArgumentNullException.ThrowIfNull(guard);
+        lock (_gate) _guards.Add(guard);
+        return new GuardRegistration(this, guard);
+    }
+    private sealed class GuardRegistration(InputArbiter host, Action<bool> guard) : IDisposable
+    {
+        private int _disposed;
+        public void Dispose() { if (Interlocked.Exchange(ref _disposed, 1) == 0) lock (host._gate) host._guards.Remove(guard); }
+    }
+    private void CheckGuards(bool returning = false)
+    {
+        Action<bool>[] guards;
+        lock (_gate) guards = _guards.ToArray();
+        foreach (var guard in guards) guard(returning);
     }
 
     public Task TakeOverAsync()
@@ -192,6 +214,7 @@ public sealed class InputArbiter(IInputWindowValidator? windows = null, int capa
     }
     public void ReturnControl()
     {
+        CheckGuards(returning: true);
         lock (_gate)
         {
             if (_state == InputControlState.AutomationAvailable) return;

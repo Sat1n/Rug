@@ -28,6 +28,8 @@ public interface IInputArbiter
     Task<IInputLease> AcquireAsync(InputOwner owner, InputTarget target, InputDeliveryMode mode,
         Action validateAdmission, CancellationToken cancellationToken = default, DateTimeOffset? deadline = null);
     IDisposable RegisterStopHandler(Func<Task> stopInputRuns);
+    /// <summary>Host detector guard; true checks return-control readiness only. Invoked outside arbiter locks.</summary>
+    IDisposable RegisterAdmissionGuard(Action<bool> guard);
     Task TakeOverAsync();
     void ReturnControl();
 }

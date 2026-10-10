@@ -114,4 +114,11 @@ window and checks real PostMessage click and cancelled key release when the
 Debug x64 native DLL is available. The UI suite's `--takeover-ui` drives actual
 host controls and verifies repeated state transitions preserve timer-only runs.
 
-Real physical keyboard/mouse activity detection is **not implemented** in 05A.
+05A supplied only active host takeover. Task 3.5-05B-02 adds
+[candidate external input detection](InputIntervention.md): the production host
+registers a detector readiness guard, checked outside arbitration locks before
+queueing, after waiting, before lease steps and on Return control. Source failure
+cannot be bypassed by returning control. Host input sessions span entire input
+runs/DevTools sequences, including gaps, and drain after actual cleanup before
+ManualControl. Candidate external input is not authenticated physical input;
+diagnostic Hook gaps remain separate and new human UI acceptance is pending.

@@ -388,7 +388,7 @@ internal static class InputArbitrationTests
     private sealed class NoAnomaly : IAnomalyLogger
     { public Task<string> LogAnomalyAsync(TaskExecutionContext context, string reason, string detail) => Task.FromResult("unused"); }
 
-    private sealed class ControlledInput : IInputService
+    internal sealed class ControlledInput : IInputService
     {
         public readonly TaskCompletionSource PressEntered = Signal(), PressRelease = Signal(), MoveEntered = Signal(), MoveRelease = Signal(), DownEntered = Signal();
         public bool HoldPress, HoldMove, FailKeyUp, Disposed;

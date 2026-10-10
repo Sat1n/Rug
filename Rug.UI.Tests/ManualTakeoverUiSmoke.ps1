@@ -79,9 +79,12 @@ try {
     if ($null -eq $window) { throw 'Main window was not found.' }
     $null = Await-Name $window 'Timeline Probe'
     $null = Await-Name $window 'Custom timeline test'
+    $null = Await-Name $window '输入检测器就绪 · 无输入会话'
+    $null = Await-Name $window '输入任务运行期间，在其他窗口操作键鼠也会触发全局接管。'
     Invoke-Button $window 'Start A'
     Invoke-Button $window 'Allow permissions'
     $null = Await-Name $window 'Run A step'
+    $null = Await-Name $window '输入检测器就绪 · 无输入会话'
     for ($round = 0; $round -lt 3; $round++) {
         Invoke-Button $window 'Manual takeover'
         $null = Await-Name $window '人工控制已生效'
@@ -90,6 +93,7 @@ try {
         $null = Await-Name $window 'Run A step'
         Invoke-Button $window 'Return control'
         $null = Await-Name $window '自动化可用'
+        $null = Await-Name $window '输入检测器就绪 · 无输入会话'
         Invoke-Button $window 'Return control'
         $null = Await-Name $window 'Run A step'
     }

@@ -257,7 +257,7 @@ user feedback reports no human-test issue. Keyboard Hook observation remains inc
 Tag regressions cover x86/x64 keyboard/mouse, unknown tags, zero-device untagged
 input and hook flags/extra-info layouts. Raw attribution and Hook verdicts are
 separate; the retained legacy combined check and nonzero Hook-failure exit remain.
-Consumer counts drain before evaluation; no automatic takeover is enabled.
+Consumer counts drain before evaluation; these diagnostic modes do not enable takeover.
 Probe regressions exercise negative/non-action nCode without pointer reads,
 independent injected/tagged intersections (including taggedUnflagged), null-data
 parse errors, detached snapshots/phase deltas, separate processing/chain timing,
@@ -270,4 +270,18 @@ the user's passing reversed-order session and unresolved order correlation.
 Stage output also
 reports installation identity, error codes and thread exit/failure. Pump/barrier
 success never implies hook health; no input emission changes are made here. Ordinary application
-startup never enables it. See [commands and evidence boundaries](../../Rug.UI.Core/RawInputEvents.md).
+startup never enables diagnostic Hooks. See [commands and evidence boundaries](../../Rug.UI.Core/RawInputEvents.md).
+
+Task 3.5-05B-02 adds `InputInterventionTests` to the normal suite, or run
+`--intervention-tests`. Controlled source/task barriers assert new action policy,
+software/repeat/release exclusion, held/launch/return boundaries, generations and
+delayed/coalesced events, waiting-period/multi-run/DevTools coverage, failed startup,
+source/consumer fault blocking, queue cancellation, Gateway timeout with live input,
+retained duplicates, cleanup failure and repeated session/handler disposal.
+Actual RawInputEventSource barriers and net-zero merged motion are included.
+`--intervention-manual` creates an isolated target and temporary input/timer/vision
+plugins, launching actual WinUI with its production source. Explicit user grants
+and human operations are required; no synthetic human input or diagnostic Hook is
+installed. See [exact human steps and boundaries](../../Rug.UI.Core/InputIntervention.md).
+New human-triggered WinUI scenarios are NOT RUN by the agent. Existing 05B-01
+acceptance and frozen native/Hook discrepancy evidence remain separate.

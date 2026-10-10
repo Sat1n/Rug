@@ -21,9 +21,14 @@ public sealed record InputObservation(InputEventKind Kind, ulong DeviceId, bool 
 
 /// <summary>Stopwatch ticks, sequence within generation; merged motion uses latest sequence/time.</summary>
 public sealed record InputSourceEvent(long Generation, long Sequence, long MonotonicTicks,
-    InputObservation Observation, long Samples = 1);
+    InputObservation Observation, long Samples = 1, long FirstSequence = 0, bool HasMovement = false,
+    long MovementSequence = 0, long MovementTicks = 0);
+
+/// <summary>Receiver/consumer barrier, not Hook-health evidence.</summary>
+public sealed record InputEventBoundary(long Generation, long Sequence, long MonotonicTicks);
 
 /// <summary>Counts are per session, never contain input text, key sequences or trajectories.</summary>
 public sealed record InputEventSourceSnapshot(InputEventSourceState State, long Generation, long Revision,
     InputEventSourceFault Fault, string? Error, long Keyboard, long Mouse, long DeviceChanges,
-    long Coalesced, long Overflows, long ConsumerErrors, int Buffered, int Subscribers);
+    long Coalesced, long Overflows, long ConsumerErrors, int Buffered, int Subscribers,
+    long LastSequence = 0);

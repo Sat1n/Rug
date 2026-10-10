@@ -31,20 +31,24 @@ public partial class DevToolsViewModel : ObservableObject
     private readonly IOcrService _ocr;
     private readonly IInputService _input;
     private readonly IInputArbiter _arbiter;
+    private readonly IInputInterventionCoordinator _intervention;
     private readonly InputOwner _owner = InputOwner.ForDevTools("host.devtools");
     private InputTarget? _inputTarget;
     private Action? _validateInput;
+    private IInputSession? _inputSession;
 
     private CancellationTokenSource? _previewCts;
 
     public DevToolsViewModel(
-        ICaptureService capture, IWindowSpyService windowSpy, IOcrService ocr, IInputService input, IInputArbiter arbiter)
+        ICaptureService capture, IWindowSpyService windowSpy, IOcrService ocr, IInputService input, IInputArbiter arbiter,
+        IInputInterventionCoordinator intervention)
     {
         _capture = capture;
         _windowSpy = windowSpy;
         _ocr = ocr;
         _input = input;
         _arbiter = arbiter;
+        _intervention = intervention;
 
         try
         {
@@ -436,9 +440,12 @@ public partial class DevToolsViewModel : ObservableObject
         IsBusy = true;
         try
         {
+            using var session = await _intervention.BeginSessionAsync(_owner);
+            _inputSession = session;
+            var sessionToken = session.Token;
             if (!_capture.IsCapturing)
             {
-                await _capture.StartAsync(BoundWindow!.Hwnd);
+                await _capture.StartAsync(BoundWindow!.Hwnd, sessionToken);
             }
 
             Log(LogLevel.Info, "Stress", "开始 100 次全链路压测（WGC 截图 → OCR → 贝塞尔点击）...");
@@ -450,12 +457,13 @@ public partial class DevToolsViewModel : ObservableObject
 
             for (int i = 1; i <= 100; i++)
             {
-                CapturedFrame? frame = await _capture.GrabFrameAsync();
+                sessionToken.ThrowIfCancellationRequested();
+                CapturedFrame? frame = await _capture.GrabFrameAsync(sessionToken);
                 if (frame is not null)
                 {
                     try
                     {
-                        IReadOnlyList<OcrTextBlock> boxes = await _ocr.RecognizeFrameAsync(frame, engine, model);
+                        IReadOnlyList<OcrTextBlock> boxes = await _ocr.RecognizeFrameAsync(frame, engine, model, sessionToken);
 
                         int cx = frame.Width / 2, cy = frame.Height / 2;
                         if (boxes.Count > 0)
@@ -503,6 +511,7 @@ public partial class DevToolsViewModel : ObservableObject
         }
         finally
         {
+            _inputSession = null;
             IsBusy = false;
         }
     }
@@ -554,13 +563,16 @@ public partial class DevToolsViewModel : ObservableObject
 
     private async Task ExecuteInputTestAsync(Func<CancellationToken, Task> action)
     {
+        // Whole test sequences own one session; stress owns it across capture/OCR gaps.
+        using var createdSession = _inputSession is null ? await _intervention.BeginSessionAsync(_owner) : null;
+        var session = _inputSession ?? createdSession!;
         var window = BoundWindow ?? throw new InvalidOperationException("No target window.");
         var target = _inputTarget ??= _arbiter.BindTarget(window.Hwnd);
         bool background = UseBackgroundInput;
         using var lease = await _arbiter.AcquireAsync(_owner, target,
             background ? InputDeliveryMode.Win32PostMessage : InputDeliveryMode.Win32SendInput,
             () => { if (BoundWindow?.Hwnd != target.Hwnd || UseBackgroundInput != background || _inputTarget != target)
-                throw new InputUnavailableException("DevTools target was rebound while queued."); });
+                throw new InputUnavailableException("DevTools target was rebound while queued."); }, session.Token);
         _validateInput = lease.Validate;
         try { await PrepareInputTargetAsync(window.Hwnd, background, lease.Token); await action(lease.Token); }
         catch (InputCleanupException error) { lease.CleanupFailed(error); throw; }

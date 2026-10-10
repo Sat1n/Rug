@@ -18,6 +18,7 @@ public sealed partial class MainWindow : WindowEx
     private DynamicUIHost? _host;
     private ITaskScheduler? _scheduler;
     private IInputArbiter? _inputArbiter;
+    private IInputInterventionCoordinator? _intervention;
     private Services.DemoWorkflowCoordinator? _demo;
     private IDisposable? _startSubscription;
     private IDisposable? _stopSubscription;
@@ -26,6 +27,7 @@ public sealed partial class MainWindow : WindowEx
     private Guid? _selectedInstanceId;
     private bool _updatingInstancePicker;
     private bool _initialized;
+    private bool _closingInput, _inputClosed;
 
     public MainWindow()
     {
@@ -35,10 +37,21 @@ public sealed partial class MainWindow : WindowEx
         _dispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
         _settings = new UISettings();
         _settings.ColorValuesChanged += Settings_ColorValuesChanged;
+        AppWindow.Closing += async (_, args) =>
+        {
+            if (_inputClosed) return;
+            args.Cancel = true;
+            if (_closingInput) return;
+            _closingInput = true;
+            await ShutdownInputAsync();
+            _inputClosed = true;
+            Close();
+        };
         Closed += (_, _) =>
         {
             if (_scheduler is not null) _scheduler.InstancesChanged -= OnInstancesChanged;
             if (_inputArbiter is not null) _inputArbiter.StateChanged -= InputControlChanged;
+            if (_intervention is not null) _intervention.StateChanged -= InputControlChanged;
             if (_demo is not null) _demo.TimelineChanged -= OnDemoTimelineChanged;
             _startSubscription?.Dispose();
             _stopSubscription?.Dispose();
@@ -53,6 +66,8 @@ public sealed partial class MainWindow : WindowEx
         _initialized = true;
         _scheduler = App.GetService<ITaskScheduler>();
         _inputArbiter = App.GetService<IInputArbiter>();
+        _intervention = App.GetService<IInputInterventionCoordinator>();
+        _intervention.StateChanged += InputControlChanged;
         _inputArbiter.StateChanged += InputControlChanged;
         RefreshInputControl();
         _scheduler.InstancesChanged += OnInstancesChanged;
@@ -90,13 +105,22 @@ public sealed partial class MainWindow : WindowEx
     {
         // Reread instead of applying queued snapshots: stale notifications cannot roll state back.
         var snapshot = _inputArbiter?.Snapshot;
+        var detector = _intervention?.Snapshot;
         InputControlStatus.Text = snapshot?.State switch
         {
             InputControlState.TakingOver => "正在接管／等待输入清理",
             InputControlState.ManualControl => "人工控制已生效",
             InputControlState.CleanupFailed => "输入清理失败：" + snapshot.Error,
-            _ => "自动化可用"
+            _ => detector?.DetectorState == InputEventSourceState.Ready && detector.DetectorError is null
+                ? "自动化可用" : "自动输入不可用（检测器未就绪）"
         };
+        InputDetectorStatus.Text = detector is null ? "输入检测器尚未就绪" :
+            detector.DetectorError is not null ? "输入检测器故障：" + detector.DetectorError :
+            detector.DetectorState != InputEventSourceState.Ready ? "输入检测器尚未就绪 · " + detector.DetectorState :
+            detector.Monitoring ? $"输入检测器就绪 · 正在监测 {detector.Sessions} 个输入会话" :
+            detector.Sessions > 0 ? $"输入检测器就绪 · 接管中 {detector.Sessions} 个输入会话" : "输入检测器就绪 · 无输入会话";
+        if (detector?.Reason is not null) InputDetectorStatus.Text += " · " + detector.Reason;
+        if (detector?.CleanupError is not null) InputDetectorStatus.Text += " · 清理失败：" + detector.CleanupError;
     }
     private async void ManualTakeover_Click(object sender, RoutedEventArgs args)
     {
@@ -109,6 +133,19 @@ public sealed partial class MainWindow : WindowEx
         try { _inputArbiter?.ReturnControl(); }
         catch (Exception error) { InputControlStatus.Text = error.Message; }
         RefreshInputControl();
+    }
+    private async Task ShutdownInputAsync()
+    {
+        try
+        {
+            await App.GetService<IHotReloadService>().DisposeAsync();
+            await App.GetService<IInputInterventionCoordinator>().DisposeAsync();
+            await App.GetService<ITaskScheduler>().DisposeAsync();
+        }
+        catch (Exception error)
+        {
+            System.Diagnostics.Debug.WriteLine("Input host shutdown failed: " + error.Message);
+        }
     }
 
     private void RefreshPluginList()
@@ -272,6 +309,20 @@ public sealed partial class MainWindow : WindowEx
 
     private async Task StopSelectedAsync(object? parameter, CancellationToken cancellationToken)
         => await ControlSelectedAsync(AutomationOperation.Stop, cancellationToken);
+
+    private async void StartBoundTask_Click(object sender, RoutedEventArgs args)
+    {
+        try
+        {
+            string plugin = _activePlugin ?? throw new InvalidOperationException("请先选择插件。");
+            var window = App.GetService<ViewModels.DevToolsViewModel>().BoundWindow ??
+                throw new InvalidOperationException("请先在开发工具中用准星绑定目标窗口。");
+            _inputArbiter!.BindTarget(window.Hwnd);
+            await Services.PluginAutomationCommands.ExecuteAsync(_scheduler!, plugin, AutomationOperation.Start, startHwnd: window.Hwnd);
+            RefreshInstancePicker();
+        }
+        catch (Exception error) { ReloadStatus.Text = "启动失败 · " + error.Message; }
+    }
 
     private async Task ControlSelectedAsync(AutomationOperation operation, CancellationToken cancellationToken)
     {

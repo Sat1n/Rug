@@ -67,7 +67,7 @@ no automation pipeline and no native interop itself.
 
 * `Services/UIFactory.cs` maps validated `UISchemaNode` trees to WinUI 3 controls. Settings cards use Windows Community Toolkit `SettingsCard`; navigation uses the native `SelectorBar`. `Controls/TaskSelectorCard` provides selection, ordering, select-all, clear and command dispatch; `Controls/StepFlowView` renders status and optional app-owned thumbnail URIs. `InfoBanner` maps to `InfoBar`.
 * `Views/DynamicUIHost` accepts JSON text or a file plus `ICommandBus`. The host calls `SetActiveInstance(RunIdentity?, displayFallbacks)` for any plugin; the binding survives card rebuilds, and null releases the live instance subscription. Settings controls read/write the selected plugin's `PluginConfig` scope; each `StepFlowView` reads and subscribes to its own schema `stateKey` in the active run's `InstanceState`. Instance changes and card rebuilds reread that scope, with schema steps as defaults. The factory applies exact-scope/key UI notifications on the dispatcher and detaches subscriptions when replaced or unloaded. Command failures surface in the host `InfoBar`.
-* `MainWindow` hosts the plugin navigation, `DynamicUIHost` and active-instance picker. It listens to scheduler instance changes, switches the selected run, clears stopped runs and rebinds after hot reload on the UI dispatcher. `host.start_windowless` starts the selected plugin with optional JSON object launch inputs; `host.stop_selected` stops the selected run. The buttons can be declared in any plugin schema. Window-bound runs still require their existing target-selection path. The older `MainPage` remains a legacy page. A plugin supplies `ui.json` to `DynamicUIHost.LoadFileAsync` without recompiling.
+* `MainWindow` hosts plugin navigation, `DynamicUIHost` and the active-instance picker. It follows scheduler changes, clears stopped runs and rebinds after hot reload. Schema commands `host.start_windowless`/`host.stop_selected` keep their existing Gateway route. The host's **运行绑定窗口任务** button starts the selected plugin against the trusted DevTools crosshair binding, with explicit consent; schema parameters cannot supply HWNDs. The older `MainPage` remains a legacy page.
 * `Services/PluginAutomationCommands` binds verified plugin UI callers and routes
   start/stop/pause/resume through the scheduler's Automation Gateway. Schema
   parameters remain launch data, never identity/permission grants or HWNDs.
@@ -114,8 +114,20 @@ no automation pipeline and no native interop itself.
   revision/state on the dispatcher, and handlers detach on window close.
 * See [input arbitration](../Rug.UI.Core/InputArbitration.md) for window lifetime,
   mutual exclusion, conflict FIFO, noncooperative native calls and fault behavior.
-  Real physical input activity detection is not part of 05A. Verify real UI state
-  transitions with the UI suite `--takeover-ui`.
+  Verify real UI state transitions with the UI suite `--takeover-ui`.
+* Task 3.5-05B-02 starts one production `IInputEventSource` and
+  `IInputInterventionCoordinator` before app activation. Input runs and DevTools
+  tests register whole input sessions; timer/vision/trajectory-only work does not.
+  Candidate external downs, wheel or effective movement request existing global
+  takeover, including between input actions and in other windows. Software tags,
+  repeat/held keys, trailing releases and old observations do not trigger it.
+* The footer shows detector readiness, monitoring count, trigger reason and
+  separate detector/cleanup faults, plus the global rule. Return cannot bypass an
+  unhealthy detector or revive stopped runs. Window close awaits watcher shutdown,
+  input/source/scheduler cleanup before final close. New human-triggered UI checks
+  remain pending: run `--intervention-manual` using the
+  [isolated acceptance steps](../Rug.UI.Core/InputIntervention.md). No diagnostic
+  Hooks, raw human contents, new grant behavior or automatic restart is introduced.
 
 ## Phase 3 MVP integration (Task 3.4)
 

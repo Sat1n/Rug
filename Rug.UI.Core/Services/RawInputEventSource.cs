@@ -24,6 +24,9 @@ public sealed class RawInputEventSource : IInputEventSource
     private string? _error;
     private EventHandler<InputSourceEvent>? _events;
     private EventHandler? _states;
+    private long _delivered;
+    private TaskCompletionSource _deliveryChanged = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly Dictionary<ulong, (long X, long Y)> _absolutePositions = new();
 
     public RawInputEventSource(int capacity = 1024) : this(() => new WindowsRawInputReceiver(), capacity) { }
     internal RawInputEventSource(Func<IRawInputReceiver> factory, int capacity = 1024)
@@ -34,7 +37,7 @@ public sealed class RawInputEventSource : IInputEventSource
     public InputEventSourceSnapshot Snapshot
     {
         get { lock (_gate) return new(_state, _generation, _revision, _fault, _error, _keyboard, _mouse, _devices,
-            _coalesced, _overflows, _consumerErrors, _buffer.Count, (_events?.GetInvocationList().Length ?? 0) + (_states?.GetInvocationList().Length ?? 0)); }
+            _coalesced, _overflows, _consumerErrors, _buffer.Count, (_events?.GetInvocationList().Length ?? 0) + (_states?.GetInvocationList().Length ?? 0), _sequence); }
     }
     public event EventHandler<InputSourceEvent> InputReceived
     {
@@ -48,7 +51,9 @@ public sealed class RawInputEventSource : IInputEventSource
     }
     private void Wake() { if (_wake.CurrentCount == 0) { try { _wake.Release(); } catch (SemaphoreFullException) { } } }
     private void ChangeState(InputEventSourceState state)
-    { _state = state; _revision++; _notify = true; Wake(); }
+    { _state = state; _revision++; _notify = true; PulseDelivery(); Wake(); }
+    private void PulseDelivery()
+    { var previous = _deliveryChanged; _deliveryChanged = new(TaskCreationOptions.RunContinuationsAsynchronously); previous.TrySetResult(); }
 
     /// <summary>@shape startup: serialized readiness/cancellation; @source receiver: Native/IRawInputReceiver.cs#interface:IRawInputReceiver</summary>
     public async Task StartAsync(CancellationToken cancellationToken = default)
@@ -64,6 +69,7 @@ public sealed class RawInputEventSource : IInputEventSource
             lock (_gate)
             {
                 generation = ++_generation; _sequence = _keyboard = _mouse = _devices = _coalesced = _overflows = _consumerErrors = 0;
+                _delivered = 0; _absolutePositions.Clear();
                 _fault = InputEventSourceFault.None; _error = null;
                 _session = new(); _receiver = _factory(); ChangeState(InputEventSourceState.Starting);
             }
@@ -110,16 +116,32 @@ public sealed class RawInputEventSource : IInputEventSource
             if (observation.Kind == InputEventKind.Keyboard) _keyboard++;
             else if (observation.Kind == InputEventKind.Mouse) _mouse++;
             else _devices++;
-            var item = new InputSourceEvent(generation, ++_sequence, Stopwatch.GetTimestamp(), observation);
+            bool movement = observation.Kind == InputEventKind.Mouse && (observation.X != 0 || observation.Y != 0);
+            if (observation.Kind == InputEventKind.Mouse && (observation.MouseFlags & 1) != 0)
+            {
+                movement = _absolutePositions.TryGetValue(observation.DeviceId, out var previous) && previous != (observation.X, observation.Y);
+                if (_absolutePositions.Count >= 4096 && !_absolutePositions.ContainsKey(observation.DeviceId))
+                { _overflows++; SetFault(InputEventSourceFault.Overflow, "Absolute movement tracking capacity exceeded."); stop = true; }
+                if (!stop)
+                _absolutePositions[observation.DeviceId] = (observation.X, observation.Y);
+            }
+            if (observation.Kind == InputEventKind.DeviceRemoved) _absolutePositions.Remove(observation.DeviceId);
+            long ticks = Stopwatch.GetTimestamp();
+            var item = new InputSourceEvent(generation, ++_sequence, ticks, observation, FirstSequence: _sequence, HasMovement: movement,
+                MovementSequence: movement ? _sequence : 0, MovementTicks: movement ? ticks : 0);
             try
             {
+                if (stop) throw new OverflowException();
                 if (_buffer.Last is { Value: var last } && last.Observation.IsPureMovement && observation.IsPureMovement
                     && last.Observation.DeviceId == observation.DeviceId && last.Observation.Foreground == observation.Foreground
                     && last.Observation.MouseFlags == observation.MouseFlags && last.Observation.ExtraInformation == observation.ExtraInformation)
                 {
                     bool absolute = (observation.MouseFlags & 1) != 0;
-                    _buffer.Last.Value = item with { Samples = checked(last.Samples + 1), Observation = observation with
-                    { X = absolute ? observation.X : checked(last.Observation.X + observation.X), Y = absolute ? observation.Y : checked(last.Observation.Y + observation.Y) } };
+                    _buffer.Last.Value = item with { Samples = checked(last.Samples + 1), FirstSequence = last.FirstSequence,
+                        HasMovement = last.HasMovement || movement, Observation = observation with
+                    { X = absolute ? observation.X : checked(last.Observation.X + observation.X), Y = absolute ? observation.Y : checked(last.Observation.Y + observation.Y) },
+                        MovementSequence = movement ? item.Sequence : last.MovementSequence,
+                        MovementTicks = movement ? ticks : last.MovementTicks };
                     _coalesced++;
                 }
                 else if (_buffer.Count >= _capacity) throw new OverflowException();
@@ -127,7 +149,8 @@ public sealed class RawInputEventSource : IInputEventSource
             }
             catch (OverflowException)
             {
-                _overflows++; SetFault(InputEventSourceFault.Overflow, "Input buffer overflow; observation continuity lost."); stop = true;
+                if (!stop) { _overflows++; SetFault(InputEventSourceFault.Overflow, "Input buffer overflow; observation continuity lost."); }
+                stop = true;
             }
             _revision++; Wake();
         }
@@ -166,12 +189,24 @@ public sealed class RawInputEventSource : IInputEventSource
                     lock (_gate) { if (_state != InputEventSourceState.Ready || token.IsCancellationRequested) break; }
                     Invoke(() => handler(this, item));
                 }
+                if (item is not null) lock (_gate) { _delivered = item.Sequence; PulseDelivery(); }
                 if (item is null) break;
             }
         }
     }
     private void Invoke(Action callback)
-    { try { callback(); } catch { lock (_gate) { _consumerErrors++; _revision++; } } }
+    {
+        try { callback(); }
+        catch
+        {
+            lock (_gate)
+            {
+                _consumerErrors++; _revision++; PulseDelivery();
+                // Signal lost consumer reliability once, without recursively notifying a failing subscriber.
+                if (_consumerErrors == 1) { _notify = true; Wake(); }
+            }
+        }
+    }
 
     private async Task EndSessionAsync()
     {
@@ -180,7 +215,7 @@ public sealed class RawInputEventSource : IInputEventSource
         if (_native is not null) await _native.ConfigureAwait(false);
         if (_consumer is not null) await _consumer.ConfigureAwait(false);
         _session.Dispose(); _session = null; _receiver = null; _native = _consumer = null;
-        lock (_gate) _buffer.Clear();
+        lock (_gate) { _buffer.Clear(); PulseDelivery(); }
     }
     private void RequestEnd()
     {
@@ -202,12 +237,34 @@ public sealed class RawInputEventSource : IInputEventSource
                 states = _state == InputEventSourceState.Stopped ? null : _states?.GetInvocationList();
                 if (_state != InputEventSourceState.Stopped) { _state = _fault == InputEventSourceFault.CleanupFailure ? InputEventSourceState.Faulted : InputEventSourceState.Stopped; _revision++; }
                 _events = null; _states = null; _notify = false;
+                PulseDelivery();
             }
             if (states is not null) await Task.Run(() => { foreach (EventHandler handler in states) Invoke(() => handler(this, EventArgs.Empty)); }).ConfigureAwait(false);
         }
         finally { _lifecycle.Release(); }
     }
     internal Task SynchronizeAsync() => _receiver?.SynchronizeAsync() ?? Task.CompletedTask;
+    /// <summary>@shape boundary: one generation and captured sequence drained through consumers;
+    /// @source receiver: Native/IRawInputReceiver.cs#interface:IRawInputReceiver</summary>
+    public async Task<InputEventBoundary> CaptureBoundaryAsync(CancellationToken cancellationToken = default)
+    {
+        var generation = Snapshot.Generation;
+        await SynchronizeAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
+        InputEventBoundary boundary;
+        lock (_gate) boundary = new(generation, _sequence, Stopwatch.GetTimestamp());
+        while (true)
+        {
+            Task changed;
+            lock (_gate)
+            {
+                if (_state != InputEventSourceState.Ready || _generation != generation || _consumerErrors != 0)
+                    throw new InputUnavailableException("Input detector observation boundary is unavailable.");
+                if (_delivered >= boundary.Sequence) return boundary;
+                changed = _deliveryChanged.Task;
+            }
+            await changed.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
     public async ValueTask DisposeAsync()
     {
         RequestEnd();
@@ -217,7 +274,7 @@ public sealed class RawInputEventSource : IInputEventSource
             if (_disposed) return;
             _disposed = true;
             await EndSessionAsync().ConfigureAwait(false);
-            lock (_gate) { _state = _fault == InputEventSourceFault.CleanupFailure ? InputEventSourceState.Faulted : InputEventSourceState.Stopped; _revision++; _events = null; _states = null; _notify = false; }
+            lock (_gate) { _state = _fault == InputEventSourceFault.CleanupFailure ? InputEventSourceState.Faulted : InputEventSourceState.Stopped; _revision++; _events = null; _states = null; _notify = false; PulseDelivery(); }
         }
         finally { _lifecycle.Release(); }
     }

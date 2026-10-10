@@ -37,6 +37,9 @@
                     <Button Content="交还控制" AutomationProperties.Name="Return control" Click="ReturnControl_Click"/>
                     <TextBlock x:Name="InputControlStatus" Text="自动化可用" VerticalAlignment="Center"/>
                 </StackPanel>
+                <TextBlock x:Name="InputDetectorStatus" Text="输入检测器尚未就绪" TextWrapping="Wrap"/>
+                <TextBlock Text="输入任务运行期间，在其他窗口操作键鼠也会触发全局接管。"
+                           Opacity="0.7" TextWrapping="Wrap"/>
                 <StackPanel Orientation="Horizontal" Spacing="12">
                     <TextBlock Text="当前实例" VerticalAlignment="Center"/>
                     <ComboBox x:Name="InstancePicker" MinWidth="150" MaxWidth="250"
@@ -47,6 +50,8 @@
                             Click="NextInstanceButton_Click"/>
                     <Button Content="插件权限" AutomationProperties.Name="Plugin permissions"
                             Click="PluginPermissions_Click"/>
+                    <Button Content="运行绑定窗口任务" AutomationProperties.Name="Start bound task"
+                            Click="StartBoundTask_Click"/>
                     <TextBlock x:Name="ReloadStatus" Text="监控中" Opacity="0.7"
                                VerticalAlignment="Center"/>
                 </StackPanel>
