@@ -197,6 +197,12 @@ Failed/ExecutionFailed rather than being hidden by parameter classification.
 Foreground-failure regressions retain the root exception and operation identity
 only in host logs, including actual Lua dispatch; adapter results remain sanitized
 and duplicate requests neither reexecute input nor repeat failure logs.
+`ForegroundConfirmationTests.cs` uses controlled barriers and a monotonic test clock
+to verify accepted-but-delayed activation, already-foreground targets, declined
+activation, confirmation timeout, cancellation, permission revocation, invalid
+targets and takeover. Conflicting input stays queued through confirmation; rejected
+actions send no key, and retained Gateway duplicates never retry focus or input.
+These tests do not certify actual Windows foreground permission or human acceptance.
 
 Task 3.5-04 uses explicit `TestAuthorizationHost` setup for legacy positive cases.
 `AuthorizationTests.cs` separately verifies fail-closed startup, missing-name

@@ -62,6 +62,15 @@ permission or target recheck rejecting the action after movement. Mode binding,
 coordinate validation and queued admission alone do not mark execution started.
 Foreground confirmation can fail after changing focus, so marking occurs before
 that call. Retained duplicate results preserve this flag without repeating input.
+The default bridge uses [ForegroundWindowActivation](Native/ForegroundWindowActivation.cs#class:ForegroundWindowActivation):
+one `SetForegroundWindow` attempt followed by cancellable foreground queries,
+at most one second, using monotonic time and asynchronous 10 ms waits. Cross-input-queue
+activation may finish after the API returns ([Windows explanation](https://devblogs.microsoft.com/oldnewthing/20161118-00/?p=94745)).
+The lease remains held, and each query rechecks live admission. A declined call or
+unconfirmed activation faults without sending a key/mouse action; host failure logs
+include the activation return, target/observed HWND and elapsed confirmation time.
+Windows foreground restrictions still apply. This is neither an activation retry
+nor an input-detection grace period; takeover/cancellation interrupts the wait.
 `InputUnavailable` is a stable rejection code for closed input admission/invalid
 target lifetime/queue capacity. Existing permission, identity and parameter
 errors remain distinct. Deduplication still pins live underlying work.

@@ -132,6 +132,11 @@ approve grants or synthesize human input. In the same app session:
    Wait for paired target counts to grow before accepting software-input exclusion.
    Rug sends B repeatedly to the target without triggering takeover. A refused
    foreground activation is NOT RUN for software input, never filtering success.
+   Foreground confirmation now awaits asynchronous activation for at most one second,
+   keeping detection active. If it fails, the host log distinguishes
+   `activationAccepted=False`/`confirmation=declined` from accepted activation with
+   `confirmation=timed-out`, including target/observed HWND. Do not switch windows
+   after startup to work around failure: that is a candidate input and must trigger takeover.
 3. Press/release a key or move/click/scroll while Rug or another app is foreground,
    including the 5-second gap between input actions. Repeat with fresh runs for
    foreground/background and keyboard/mouse. Expect TakingOver, then ManualControl

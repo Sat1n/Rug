@@ -17,7 +17,8 @@ public sealed class InputBridge : IAsyncDisposable
     private readonly IInputService _input;
     private readonly ICoordinateMapper _mapper;
     private readonly PermissionInterceptor _permissions;
-    private readonly Func<nint, bool> _ensureForeground;
+    private readonly Func<nint, bool>? _ensureForeground;
+    private readonly Func<nint, CancellationToken, Action, Task> _confirmForeground = ForegroundWindowActivation.EnsureAsync;
     private readonly IInputArbiter _arbiter;
     private readonly InputOwner _owner;
     private readonly Action _validateRun;
@@ -36,10 +37,17 @@ public sealed class InputBridge : IAsyncDisposable
         _input = input ?? throw new ArgumentNullException(nameof(input));
         _permissions = permissions ?? throw new ArgumentNullException(nameof(permissions));
         _mapper = mapper ?? new CoordinateMapper();
-        _ensureForeground = ensureForeground ?? EnsureForeground;
+        _ensureForeground = ensureForeground;
         _arbiter = arbiter ?? InputArbiter.Shared;
         _owner = owner ?? InputOwner.ForDevTools("host.input.bridge");
         _validateRun = validateRun ?? (() => { });
+    }
+
+    internal InputBridge(IInputService input, PermissionInterceptor permissions, IInputArbiter arbiter,
+        Func<nint, CancellationToken, Action, Task> confirmForeground)
+        : this(input, permissions, arbiter: arbiter)
+    {
+        _confirmForeground = confirmForeground;
     }
 
     /// <summary>Latest validated screen projection; native input still receives client pixels.</summary>
@@ -147,8 +155,14 @@ public sealed class InputBridge : IAsyncDisposable
             // Foreground activation may visibly change focus even if its subsequent
             // confirmation rejects or throws. It belongs to the input side-effect boundary.
             InputExecutionBoundary.MarkStarted();
-            if (!_ensureForeground(_hwnd))
-                throw new InvalidOperationException("Target window could not be brought to the foreground for SendInput.");
+            if (_ensureForeground is not null)
+            {
+                if (!_ensureForeground(_hwnd))
+                    throw new InvalidOperationException("Target window could not be brought to the foreground for SendInput.");
+            }
+            else
+                await _confirmForeground(_hwnd, ct, lease.Validate).ConfigureAwait(false);
+            lease.Validate();
         }
     }
 
@@ -167,14 +181,6 @@ public sealed class InputBridge : IAsyncDisposable
             lease.CleanupFailed(error);
             throw new InputCleanupException("Input release failed; resources remain quarantined.", error);
         }
-    }
-
-    private static bool EnsureForeground(nint hwnd)
-    {
-        if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763))
-            throw new PlatformNotSupportedException("Foreground input requires Windows 10 or later.");
-        return WindowNative.GetForegroundWindow() == hwnd ||
-            WindowNative.SetForegroundWindow(hwnd) && WindowNative.GetForegroundWindow() == hwnd;
     }
 
     private static void ValidateMode(InputDeliveryMode mode)

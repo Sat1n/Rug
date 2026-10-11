@@ -20,6 +20,7 @@ internal static class InputArbitrationTests
 
     public static async Task RunAsync()
     {
+        await ForegroundConfirmationTests.RunAsync();
         await MatrixAsync();
         await QueuedAdmissionAsync();
         await QueuedBridgeValidationAsync();
