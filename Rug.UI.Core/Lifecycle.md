@@ -78,7 +78,18 @@ pause; Stop still uses the watchdog. No timeout pretends Native work has ended.
 
 ## Stop and cleanup
 
-Cancellation closes new actions. Stop waits for actual service tasks (including
+The transition to Stopping atomically closes business admission under the run's
+transition lock, before publishing lifecycle notifications. Cancellation and
+notifications execute outside that lock; their propagation speed is never an
+admission condition. Gateway checks Stopping/Stopped/Faulted at receipt and
+dispatch (`Rejected/InvalidLifecycleState`, no uncertainty before execution).
+Run work permits and deferred-business waits enforce the same closed state.
+Input rechecks it after bridge/arbiter queues and between composite action steps;
+already queued input cannot start after closure even while the token remains
+uncancelled. A late Resume validation cannot reopen the run. Stop requests still
+share cleanup, and KeyUp/MouseUp releases bypass business admission.
+
+Stop waits for actual service tasks (including
 noncooperative capture/OCR/input and the existing anomaly logger), Lua exit and mandatory releases before `on_stop`,
 capture stop, runtime/input/capture disposal and state/subscription cleanup. Every
 cleanup stage is attempted independently. Prepared instances invoke `on_stop`
@@ -116,6 +127,10 @@ dotnet run --project Rug.UI.Tests/Rug.UI.Tests.csproj -c Debug -p:Platform=x64 -
 Actual Lua plus controlled barriers cover init/tick, sleep/capture/OCR, KeyUp and
 native work, admitted queues, timeout/Pause/concurrent Stop, dual runs, startup
 stop, invalid target, grants/takeover, late results, repeats and cleanup failures.
+Stopping-notification barriers deliberately retain an uncancelled token while
+asserting new UI/Lua/Agent/MCP requests, bridge/arbiter queues and Gateway dispatch
+queues cannot execute. Independent-thread cancellation callbacks verify locks are
+not held; late Resume and all terminal states reject without physical side effects.
 The isolated WinUI timer regression explicitly grants permission and verifies
 labels, button enablement, independent selection, explicit Resume, a paused timer
 retained across manual takeover, refreshed new runs after UI reload and cleanup.

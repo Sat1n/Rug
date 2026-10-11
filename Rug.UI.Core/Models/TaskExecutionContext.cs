@@ -161,6 +161,7 @@ public sealed class TaskExecutionContext
             Task wait;
             lock (_gate)
             {
+                ValidateBusinessLocked();
                 token.ThrowIfCancellationRequested();
                 if (!_pauseRequested) return;
                 wait = _activation.Task;
@@ -184,12 +185,28 @@ public sealed class TaskExecutionContext
     {
         lock (_gate)
         {
+            ValidateBusinessLocked();
             Cancellation.Token.ThrowIfCancellationRequested();
             if (input && _pauseRequested) throw new AutomationGateway.GatewayRejectedException(OperationError.InvalidLifecycleState);
             if (_work++ == 0) _workDrained = Signal();
             if (input && _inputs++ == 0) _inputDrained = Signal();
             return new WorkLease(this, segment: false, input);
         }
+    }
+    // Status and admission share the transition lock. Stopping closes the gate
+    // before Notify/Cancel run outside it; cancellation propagation is not admission.
+    internal bool IsBusinessClosed
+    {
+        get { lock (_gate) return _status is AutomationTaskStatus.Stopping or AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted; }
+    }
+    internal void ValidateBusiness()
+    {
+        lock (_gate) ValidateBusinessLocked();
+    }
+    private void ValidateBusinessLocked()
+    {
+        if (_status is AutomationTaskStatus.Stopping or AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted)
+            throw new AutomationGateway.GatewayRejectedException(OperationError.InvalidLifecycleState);
     }
     internal Task DrainOperationsAsync() { lock (_gate) return Task.WhenAll(_workDrained.Task, _segmentsDrained.Task); }
     private sealed class WorkLease(TaskExecutionContext context, bool segment, bool input) : IDisposable

@@ -27,7 +27,193 @@ internal static class LifecycleTests
         await InputBoundaryAsync(); await QueuedInputAsync(); await TimeoutStopAsync();
         await StartingStopAsync(); await StartupPauseTransitionAsync(); await IndependentRunsAsync(); await LostAuthorityAsync();
         await CleanupFailureAsync(); await AnomalyDrainAsync();
+        await StopAdmissionAsync(bridgeQueue: true); await StopAdmissionAsync(bridgeQueue: false);
+        await LateResumeStopAsync(); await TerminalAdmissionAsync(); await DispatchStopAsync(); await CompositeStopAsync();
+        Console.WriteLine("Stop admission barriers passed with uncancelled tokens: adapters, bridge/arbiter/dispatch queues, composite steps, releases, late Resume and terminal states");
         Console.WriteLine("Lifecycle barriers passed: init/tick, sleep/vision, actual input/releases, queued input, late work, stop priority, resume validation and cleanup");
+    }
+
+    private static async Task StopAdmissionAsync(bool bridgeQueue)
+    {
+        await using var f = await Fixture.CreateAsync("function on_tick() rug.sleep(60000) end function on_stop() rug.log('stop_once') end",
+            [Permission.ControlInput, Permission.Timer, Permission.Capture]);
+        f.HoldPress = bridgeQueue;
+        var c = await f.StartAsync();
+        await Until(() => c.Runtime.State == ScriptState.Yielded);
+        var caller = await f.CallerAsync(c);
+        bool cancellationChecked = false;
+        using var cancellationObserver = c.Cancellation.Token.Register(() =>
+        {
+            // A separate thread must be able to query/admit while Cancel runs.
+            // Reentrancy on the cancelling thread alone would not detect a held lock.
+            var result = Task.Run(async () =>
+            {
+                Check(c.Snapshot.Status == AutomationTaskStatus.Stopping, "cancellation preceded closed admission");
+                return await f.Scheduler.Gateway.ExecuteAsync(caller, Request(AutomationOperation.PressKey, c.Identity, new { key = 69 }));
+            }).WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
+            Check(result.Error == OperationError.InvalidLifecycleState && !result.OutcomeUncertain, "cancel callback reopened input");
+            cancellationChecked = true;
+        });
+        IInputLease? blocker = null;
+        Task<OperationResult>? first = null;
+        using var releaseNotification = new ManualResetEventSlim();
+        var notification = Signal();
+        c.LifecycleChanged += (_, e) =>
+        {
+            if (e.Snapshot.Status != AutomationTaskStatus.Stopping) return;
+            notification.TrySetResult(); releaseNotification.Wait();
+        };
+        Task? stop = null;
+        try
+        {
+            if (bridgeQueue)
+            {
+                first = f.Scheduler.Gateway.ExecuteAsync(caller, Request(AutomationOperation.PressKey, c.Identity, new { key = 66 }));
+                await Bound(f.Input.PressEntered.Task);
+            }
+            else blocker = await f.Arbiter.AcquireAsync(InputOwner.ForDevTools("test-blocker"), f.Arbiter.BindTarget(123),
+                InputDeliveryMode.Win32PostMessage, () => { });
+            var queuedRequest = Request(AutomationOperation.PressKey, c.Identity, new { key = 67 });
+            var queued = f.Scheduler.Gateway.ExecuteAsync(caller, queuedRequest);
+            if (bridgeQueue) await Until(() => f.Scheduler.Gateway.ActiveWorkCount >= 3); // Lua sleep + two inputs
+            else await Until(() => f.Arbiter.Snapshot.Waiting == 1);
+            stop = Task.Run(() => f.Scheduler.StopTaskAsync(c.InstanceId));
+            await Bound(notification.Task);
+            Check(c.TaskStatus == AutomationTaskStatus.Stopping && !c.Cancellation.IsCancellationRequested,
+                "barrier failed to isolate Stopping before cancellation propagation");
+            foreach (var source in new[] { AutomationSource.PluginUI, AutomationSource.Lua, AutomationSource.Agent, AutomationSource.Mcp })
+            {
+                var context = await f.CallerAsync(c, source);
+                foreach (var op in new[] { AutomationOperation.PressKey, AutomationOperation.Sleep, AutomationOperation.Capture })
+                {
+                    object parameters = op switch { AutomationOperation.PressKey => new { key = 68 }, AutomationOperation.Sleep => new { ms = 1 }, _ => new { } };
+                    var result = await f.Scheduler.Gateway.ExecuteAsync(context, Request(op, c.Identity, parameters));
+                    Check(result.Status == OperationStatus.Rejected && result.Error == OperationError.InvalidLifecycleState && !result.OutcomeUncertain,
+                        $"Stopping admitted new work before token cancellation: {source}/{op}");
+                }
+            }
+            Check(!f.Scheduler.PauseTask(c.InstanceId) && !f.Scheduler.ResumeTask(c.InstanceId), "Stopping accepted late controls");
+            // Let previously queued work reach actual admission while cancellation is still blocked.
+            f.Input.PressRelease.TrySetResult(); blocker?.Dispose(); blocker = null;
+            var refused = await BoundResult(queued);
+            Check(refused.Status == OperationStatus.Rejected && refused.Error == OperationError.InvalidLifecycleState && !refused.OutcomeUncertain,
+                "previously queued input ran after Stop without token propagation");
+            Check(await f.Scheduler.Gateway.ExecuteAsync(caller, queuedRequest) == refused, "duplicate queued rejection changed outcome");
+            if (first is not null) Check((await BoundResult(first)).Status == OperationStatus.Success, "admitted physical work failed to finish/releases");
+            Check(f.Input.PressCalls == (bridgeQueue ? 1 : 0) && f.Input.KeyUps == (bridgeQueue ? 1 : 0) && f.Capture.FrameCalls == 0,
+                "stopped input escaped admission or necessary release was blocked");
+        }
+        finally
+        {
+            blocker?.Dispose(); f.Input.PressRelease.TrySetResult(); releaseNotification.Set();
+            if (stop is not null) await Bound(stop);
+        }
+        Check(cancellationChecked && c.TaskStatus == AutomationTaskStatus.Stopped && c.LastError is null && f.Logger.StopCalls == 1 &&
+            f.Arbiter.Snapshot.Active == 0 && f.Arbiter.Snapshot.Waiting == 0, "Stop barrier leaked/faulted cleanup");
+    }
+
+    private static async Task LateResumeStopAsync()
+    {
+        await using var f = await Fixture.CreateAsync("function on_tick() rug.sleep(60000) end", [Permission.Timer]);
+        var c = await f.StartAsync(); f.Scheduler.PauseTask(c.InstanceId);
+        await Until(() => c.TaskStatus == AutomationTaskStatus.Paused);
+        using var releaseValidation = new ManualResetEventSlim();
+        using var releaseNotification = new ManualResetEventSlim();
+        var validation = Signal(); var notification = Signal();
+        var original = c.ValidateResume;
+        c.ValidateResume = () => { validation.TrySetResult(); releaseValidation.Wait(); original?.Invoke(); };
+        c.LifecycleChanged += (_, e) => { if (e.Snapshot.Status == AutomationTaskStatus.Stopping) { notification.TrySetResult(); releaseNotification.Wait(); } };
+        var resume = Task.Run(() => f.Scheduler.ResumeTask(c.InstanceId));
+        await Bound(validation.Task);
+        var stop = Task.Run(() => f.Scheduler.StopTaskAsync(c.InstanceId));
+        try
+        {
+            await Bound(notification.Task); releaseValidation.Set();
+            Check(!await resume.WaitAsync(TimeSpan.FromSeconds(5)) && c.TaskStatus == AutomationTaskStatus.Stopping && !c.Snapshot.ResumeRequested &&
+                !c.Cancellation.IsCancellationRequested, "late Resume reopened stopped business before cancellation");
+        }
+        finally { releaseValidation.Set(); releaseNotification.Set(); await Bound(stop); }
+        Check(c.TaskStatus == AutomationTaskStatus.Stopped && c.LastError is null, "late Resume corrupted terminal cleanup");
+    }
+
+    private static async Task TerminalAdmissionAsync()
+    {
+        foreach (var status in new[] { AutomationTaskStatus.Stopping, AutomationTaskStatus.Stopped, AutomationTaskStatus.Faulted })
+        {
+            using var cancellation = new CancellationTokenSource();
+            var capture = new GateCapture(); var input = new InputArbitrationTests.ControlledInput();
+            await using var runtime = new LuaRuntime(capture, new GateOcr(), input, NullLogger<LuaRuntime>.Instance);
+            var c = new TaskExecutionContext(new("terminal", Guid.NewGuid(), 1, null, 0), cancellation, runtime, capture, input);
+            c.SetStatus(AutomationTaskStatus.Stopping); c.SetStatus(status);
+            var manifest = new PluginManifest([Permission.Timer]) { Id = "terminal", PluginDirectory = AppContext.BaseDirectory };
+            var auth = new PluginAuthorization(); auth.Register(manifest); auth.Grant(PluginInstallation.From(manifest), manifest.Permissions);
+            var gateway = new AutomationGateway(NullLogger.Instance, authorization: auth);
+            int calls = 0;
+            gateway.RegisterRun(c.Identity, manifest, cancellation.Token, (_, _, _) => { calls++; return Task.FromResult<object?>(true); }, c);
+            var caller = gateway.BindContext(manifest, "trusted-test", AutomationSource.Agent, c.Identity);
+            var result = await gateway.ExecuteAsync(caller, Request(AutomationOperation.Sleep, c.Identity, new { ms = 1 }));
+            Check(result.Status == OperationStatus.Rejected && result.Error == OperationError.InvalidLifecycleState && !result.OutcomeUncertain && calls == 0,
+                $"terminal admission depended on a cancellation token: {status}");
+            try { using var work = c.EnterOperation(input: false); throw new Exception("closed operation admitted"); }
+            catch (AutomationGateway.GatewayRejectedException error) { Check(error.Error == OperationError.InvalidLifecycleState, "wrong closed code"); }
+            gateway.EndRun(c.InstanceId); c.Complete();
+        }
+    }
+
+    private static async Task DispatchStopAsync()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var capture = new GateCapture(); var input = new InputArbitrationTests.ControlledInput();
+        await using var runtime = new LuaRuntime(capture, new GateOcr(), input, NullLogger<LuaRuntime>.Instance);
+        var c = new TaskExecutionContext(new("dispatch", Guid.NewGuid(), 1, null, 0), cancellation, runtime, capture, input);
+        var manifest = new PluginManifest([Permission.Timer]) { Id = "dispatch", PluginDirectory = AppContext.BaseDirectory };
+        var auth = new PluginAuthorization(); auth.Register(manifest); auth.Grant(PluginInstallation.From(manifest), manifest.Permissions);
+        var entered = Signal(); var release = Signal();
+        var gateway = new AutomationGateway(NullLogger.Instance, authorization: auth,
+            waitForDispatch: () => { entered.TrySetResult(); return release.Task; });
+        int calls = 0;
+        gateway.RegisterRun(c.Identity, manifest, cancellation.Token, (_, _, _) => { calls++; return Task.FromResult<object?>(true); }, c);
+        var caller = gateway.BindContext(manifest, "trusted-test", AutomationSource.Mcp, c.Identity);
+        var request = Request(AutomationOperation.Sleep, c.Identity, new { ms = 1 });
+        var work = gateway.ExecuteAsync(caller, request);
+        try
+        {
+            await Bound(entered.Task); c.SetStatus(AutomationTaskStatus.Stopping); release.TrySetResult();
+            var result = await BoundResult(work);
+            Check(result.Error == OperationError.InvalidLifecycleState && !result.OutcomeUncertain && calls == 0 &&
+                await gateway.ExecuteAsync(caller, request) == result, "dispatch queue admitted stopped work/duplicate");
+            await Bound(c.DrainOperationsAsync());
+            Check(!cancellation.IsCancellationRequested, "dispatch regression relied on cancellation propagation");
+        }
+        finally { release.TrySetResult(); await Bound(c.DrainOperationsAsync()); gateway.EndRun(c.InstanceId); c.Complete(); }
+    }
+
+    private static async Task CompositeStopAsync()
+    {
+        await using var f = await Fixture.CreateAsync("function on_tick() rug.sleep(60000) end", [Permission.ControlInput, Permission.Timer]);
+        var c = await f.StartAsync(); var caller = await f.CallerAsync(c);
+        f.Input.HoldMove = true;
+        using var releaseNotification = new ManualResetEventSlim(); var notification = Signal();
+        c.LifecycleChanged += (_, e) => { if (e.Snapshot.Status == AutomationTaskStatus.Stopping) { notification.TrySetResult(); releaseNotification.Wait(); } };
+        var request = Request(AutomationOperation.Click, c.Identity, new { x = 1, y = 1 });
+        // Use physical client validation without an actual HWND or native input.
+        // The fixture's mapper is injected for the real bridge path.
+        var work = f.Scheduler.Gateway.ExecuteAsync(caller, request);
+        Task? stop = null;
+        try
+        {
+            await Bound(f.Input.MoveEntered.Task);
+            stop = Task.Run(() => f.Scheduler.StopTaskAsync(c.InstanceId)); await Bound(notification.Task);
+            f.Input.MoveRelease.TrySetResult(); var result = await BoundResult(work);
+            Check(!c.Cancellation.IsCancellationRequested && result.Error == OperationError.InvalidLifecycleState && result.OutcomeUncertain &&
+                f.Input.MoveCalls == 1 && f.Input.Clicks == 0,
+                "Stop allowed the next composite input step or discarded movement uncertainty");
+            Check((await f.Scheduler.Gateway.ExecuteAsync(caller, request)).Status == OperationStatus.Rejected && f.Input.MoveCalls == 1 && f.Input.Clicks == 0,
+                "duplicate composite request repeated input");
+        }
+        finally { f.Input.MoveRelease.TrySetResult(); releaseNotification.Set(); if (stop is not null) await Bound(stop); }
+        Check(f.Input.Clicks == 0 && c.LastError is null && c.TaskStatus == AutomationTaskStatus.Stopped,
+            "composite stop faulted/replayed physical work");
     }
 
     private static async Task SegmentAsync(string hook)
@@ -394,7 +580,7 @@ internal static class LifecycleTests
             f.Scheduler = new Scheduler(new PluginManager(NullLogger<PluginManager>.Instance), root,
                 () => { var c = new GateCapture { HoldFrame = f.HoldFrame, HoldStart = f.HoldStart }; f.Captures.Add(c); return c; },
                 () => { var i = new InputArbitrationTests.ControlledInput { HoldPress = f.HoldPress, HoldUp = f.HoldUp }; f.Inputs.Add(i); return i; },
-                (c, i) => new LuaRuntime(c, f.Ocr, i, f.Logger, ensureForeground: _ => true, commandBus: f.Bus),
+                (c, i) => new LuaRuntime(c, f.Ocr, i, f.Logger, new FakeCoordinateMapper(), ensureForeground: _ => true, commandBus: f.Bus),
                 NullLogger<Scheduler>.Instance, new NoAnomaly(), commandBus: f.Bus, authorization: f.Auth, inputArbiter: f.Arbiter);
             return f;
         }

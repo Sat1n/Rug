@@ -177,7 +177,7 @@ public sealed class AutomationGateway : IAutomationGateway
         }
         else
         {
-            if (request.Target.InstanceId is not { } id || !_runs.TryGetValue(id, out run) || run.Token.IsCancellationRequested)
+            if (request.Target.InstanceId is not { } id || !_runs.TryGetValue(id, out run))
                 return OperationError.InstanceNotFound;
             if (caller.Authorization.Installation != run.Installation) return OperationError.InvalidCaller;
             if (!SamePlugin(run.Identity.PluginId, request.Target.PluginId)) return OperationError.InvalidCaller;
@@ -186,6 +186,11 @@ public sealed class AutomationGateway : IAutomationGateway
             if (caller.BoundRun is { } bound && bound != run.Identity) return OperationError.InvalidCaller;
             if (caller.Source == AutomationSource.Lua && request.Operation is AutomationOperation.Stop or AutomationOperation.Pause or AutomationOperation.Resume)
                 return OperationError.UnsupportedOperation;
+            // Stop remains available for the shared cleanup. Every other request
+            // rejects terminal phases even before cancellation callbacks propagate.
+            if (request.Operation != AutomationOperation.Stop && run.Lifecycle?.IsBusinessClosed == true)
+                return OperationError.InvalidLifecycleState;
+            if (request.Operation != AutomationOperation.Stop && run.Token.IsCancellationRequested) return OperationError.InstanceNotFound;
         }
         missing = Missing(caller, request, run).ToArray();
         if (missing.Length > 0) return OperationError.PermissionDenied;
@@ -295,6 +300,7 @@ public sealed class AutomationGateway : IAutomationGateway
                         using var admission = Authorization.Admit(caller.Authorization, Required(caller, request));
                         using var dispatchToken = CancellationTokenSource.CreateLinkedTokenSource(executionToken, admission.Token);
                         dispatchToken.Token.ThrowIfCancellationRequested();
+                        if (business) run?.Lifecycle?.ValidateBusiness();
                         bool inputOperation = request.Operation is AutomationOperation.Click or AutomationOperation.PressKey;
                         if (!inputOperation) Volatile.Write(ref started, 1);
                         var previousBoundary = InputExecutionBoundary.Started.Value;

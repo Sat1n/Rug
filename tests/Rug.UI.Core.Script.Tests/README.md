@@ -15,6 +15,11 @@ resume authority/target checks, startup stop and cleanup failures. Assertions
 distinguish request acceptance from confirmed Paused. Epoch cancellation and
 unexplained Lua Stopped regressions remain. See
 [lifecycle contract and UI/manual verification](../../Rug.UI.Core/Lifecycle.md).
+Stop-admission barriers hold the Stopping notification before token cancellation:
+new UI/Lua/Agent/MCP requests and previously queued bridge/arbiter/Gateway work
+must not execute. Tests retain necessary KeyUp, reject late Resume/terminal work,
+deduplicate refused requests and check cancellation callbacks from another thread
+can query/admit without a lock deadlock. Only Fake services send input in these tests.
 
 Opt-in `--hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split|keyboard-pump|keyboard-direct|keyboard-messages|keyboard-messages-mouse|keyboard-messages-keyboard|keyboard-native-messages|target-native-messages|keyboard-native-callback` supports the
 [controlled comparison](../NativeInputProbe/ControlledStages.md). It sends no

@@ -46,6 +46,11 @@ Paused. Resume requires confirmed Paused and current declarations within the
 caller's live grant/capability ceiling; invalid phases return
 `InvalidLifecycleState`. The serial driver revalidates grants, the original
 target and input control before advancing Lua. See [06A lifecycle](Lifecycle.md).
+Stopping/Stopped/Faulted reject new business/control requests with
+`InvalidLifecycleState` at receipt and actual dispatch, independently of token
+propagation. Already queued input rechecks the owning lifecycle before execution;
+required releases and shared Stop cleanup remain allowed. No-start rejection keeps
+`OutcomeUncertain=false`; effects already begun retain the existing uncertainty.
 Existing bridge checks remain
 defense in depth: external
 templates require `filesystem`, symlink/path restrictions and client-coordinate,

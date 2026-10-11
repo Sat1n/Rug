@@ -224,7 +224,13 @@ public sealed class LuaRuntime : IScriptRuntime
         _permissions = new PermissionInterceptor(manifest, _logger, _gateway.Authorization, _caller.Authorization);
         _visual = new VisualEngineBridge(_capture, _ocr, _matcher, _permissions, manifest.PluginDirectory);
         _inputBridge = new InputBridge(_input, _permissions, _coordinateMapper, _ensureForeground,
-            _inputArbiter, InputOwner.ForRun(_identity), () => _lifetime.Token.ThrowIfCancellationRequested());
+            _inputArbiter, InputOwner.ForRun(_identity), () =>
+            {
+                // Recheck after bridge/arbiter queues and between composite steps.
+                // Mandatory releases bypass this business check.
+                _context?.ValidateBusiness();
+                _lifetime.Token.ThrowIfCancellationRequested();
+            });
         if (manifest.Permissions.Contains(Permission.ControlInput))
             await _inputBridge.BindAsync(manifest.TargetWindow,
                 manifest.InputDelivery ?? (manifest.BackgroundInput ? InputDeliveryMode.Win32PostMessage : InputDeliveryMode.Win32SendInput),
