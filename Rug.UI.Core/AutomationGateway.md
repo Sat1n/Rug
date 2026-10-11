@@ -89,6 +89,11 @@ frame/vision table conversion, permission rejection to `PermissionDeniedExceptio
 cancellation to stop, and other outcomes to a script error. An operation failure
 does not automatically retry.
 
+Execution failures retain the original exception in trusted host error logs with
+operation/correlation IDs, source, target identity and operation type. Adapter and
+Lua results keep the stable error code; they do not receive the exception or stack.
+Retained duplicates neither execute again nor produce another failure log.
+
 The first admitted caller token, deadline and instance token cancel execution.
 Expired/pre-cancelled work never starts. Duplicate callers share the original
 terminal task; later duplicate cancellation/deadline/correlation values do not

@@ -194,6 +194,9 @@ fields, wrong JSON types, integer/enum/threshold/region ranges and actual Lua
 coercion attempts, asserting Rejected/InvalidParameters without uncertainty or
 capture/OCR/matching/input calls. A real service InvalidOperationException remains
 Failed/ExecutionFailed rather than being hidden by parameter classification.
+Foreground-failure regressions retain the root exception and operation identity
+only in host logs, including actual Lua dispatch; adapter results remain sanitized
+and duplicate requests neither reexecute input nor repeat failure logs.
 
 Task 3.5-04 uses explicit `TestAuthorizationHost` setup for legacy positive cases.
 `AuthorizationTests.cs` separately verifies fail-closed startup, missing-name

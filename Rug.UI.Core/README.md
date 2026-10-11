@@ -319,7 +319,7 @@ The Hook gap and frozen native artifacts remain; new human UI acceptance is pend
 * Plugin UI lifecycle and Lua automation use `IAutomationGateway.ExecuteAsync`
   before dispatch to the registered run's services. Host-bound caller grants,
   complete run identity, cancellation/deadlines, bounded deduplication and
-  sanitized outcomes are defined in [Automation Gateway](AutomationGateway.md).
+  sanitized outcomes and host-only failure logs are defined in [Automation Gateway](AutomationGateway.md).
   Existing bridge/path/input gates remain enforced; denied Lua calls retain
   `PermissionDeniedException` and a security warning. Anomaly/state/config/log
   keep their existing paths.

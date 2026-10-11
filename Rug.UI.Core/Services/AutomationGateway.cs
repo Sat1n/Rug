@@ -300,7 +300,13 @@ public sealed class AutomationGateway : IAutomationGateway
         catch (KeyNotFoundException) { result = new(OperationStatus.Rejected, OperationError.InvalidParameters); }
         catch (Exception error) when (error is ArgumentException or JsonException or InvalidCastException or FormatException or OverflowException)
         { result = new(OperationStatus.Rejected, OperationError.InvalidParameters); }
-        catch (Exception) { result = new(OperationStatus.Failed, OperationError.ExecutionFailed, OutcomeUncertain: Volatile.Read(ref started) != 0); }
+        catch (Exception error)
+        {
+            // Preserve the root cause in trusted host diagnostics, never in adapter results.
+            _logger.LogError(error, "Automation execution failed operation={OperationId} correlation={CorrelationId} source={Source} target={Target} type={Type}",
+                request.OperationId, request.CorrelationId, caller.Source, request.Target, request.Operation);
+            result = new(OperationStatus.Failed, OperationError.ExecutionFailed, OutcomeUncertain: Volatile.Read(ref started) != 0);
+        }
         // Rejection describes why the action ended, not whether earlier input had effects.
         // Keep every input failure mapping aligned with the same execution boundary.
         if (request.Operation is AutomationOperation.Click or AutomationOperation.PressKey && result.Status != OperationStatus.Success)

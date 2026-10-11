@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Rug.UI.Core.Contracts.Services;
 using Rug.UI.Core.Models;
@@ -11,11 +12,58 @@ internal static class GatewayRepairTests
         await LateFrameAsync(root, timeout: true);
         await LateFrameAsync(root, timeout: false);
         await InvalidParametersAsync(root);
+        await FailureEvidenceAsync(root);
         Console.WriteLine("Gateway late-frame cache and parameter-boundary regressions passed");
     }
     private static OperationRequest Request(AutomationOperation operation, RunIdentity identity, object parameters) =>
         new(operation, JsonSerializer.SerializeToElement(parameters), Guid.NewGuid(), "gateway-repair",
             OperationTarget.ForRun(identity), DateTimeOffset.UtcNow.AddSeconds(5));
+    private sealed class FailureLogger : ILogger
+    {
+        public readonly System.Collections.Concurrent.ConcurrentQueue<(string Message, Exception Error)> Failures = new();
+        public IDisposable BeginScope<TState>(TState state) => NoopScope.Instance;
+        public bool IsEnabled(LogLevel level) => true;
+        public void Log<TState>(LogLevel level, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        { if (exception is not null) Failures.Enqueue((formatter(state, exception), exception)); }
+        private sealed class NoopScope : IDisposable
+        {
+            public static readonly NoopScope Instance = new();
+            public void Dispose() { }
+        }
+    }
+    private static async Task FailureEvidenceAsync(string root)
+    {
+        string path = Path.Combine(root, "failure-evidence.lua");
+        await File.WriteAllTextAsync(path, "function on_tick() rug.press_key(66,80) end");
+        var manifest = new PluginManifest([Permission.ControlInput]) { Id = "failure-evidence", PluginDirectory = root,
+            TargetWindow = 123, InputDelivery = InputDeliveryMode.Win32SendInput };
+        var identity = new RunIdentity(manifest.Id, Guid.NewGuid(), 1, Guid.NewGuid(), 123);
+        var logger = new FailureLogger();
+        var gateway = new AutomationGateway(logger, getPlugin: (_, _) => Task.FromResult(manifest));
+        var input = new FakeInput();
+        int foregroundCalls = 0;
+        await using var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), input, NullLogger<LuaRuntime>.Instance,
+            new FakeCoordinateMapper(), _ => { foregroundCalls++; return false; });
+        runtime.ConfigureGateway(gateway);
+        runtime.ConfigureState(identity, new Dictionary<string, object?>(), new Dictionary<string, object?>());
+        await TestAuthorizationHost.InitializeAsync(runtime, path, manifest);
+        var caller = await gateway.CreateContextAsync(manifest.Id, "ui", AutomationSource.PluginUI);
+        var request = Request(AutomationOperation.PressKey, identity, new { key = 66, durationMs = 80 });
+        OperationResult result = await gateway.ExecuteAsync(caller, request);
+        Expect(result is { Status: OperationStatus.Failed, Error: OperationError.ExecutionFailed, OutcomeUncertain: true } &&
+            input.KeyDownCalls == 0 && input.KeyUpCalls == 0, "foreground failure changed result boundary or emitted input");
+        var failure = logger.Failures.Single();
+        Expect(failure.Error is InvalidOperationException && failure.Error.Message.Contains("foreground") &&
+            failure.Message.Contains(request.OperationId.ToString()) && failure.Message.Contains("PressKey") &&
+            failure.Message.Contains(request.CorrelationId) && failure.Message.Contains(identity.InstanceId.ToString()),
+            "host lost the original exception or its operation identity");
+        Expect(!JsonSerializer.Serialize(result).Contains("foreground"), "adapter result leaked the internal failure");
+        await gateway.ExecuteAsync(caller, request);
+        Expect(foregroundCalls == 1 && logger.Failures.Count == 1, "duplicate failure retried input or repeated root-cause logs");
+        Expect((await runtime.StepAsync()).State == ScriptState.Yielded && (await runtime.ResumeAsync()).State == ScriptState.Faulted &&
+            logger.Failures.Count == 2 && input.KeyDownCalls == 0, "actual Lua failure did not preserve host evidence");
+    }
     private static async Task LateFrameAsync(string root, bool timeout)
     {
         var capture = new LateCapture();

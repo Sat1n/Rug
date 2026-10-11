@@ -127,7 +127,7 @@ approve grants or synthesize human input. In the same app session:
    Release the startup click and keep hands off. The detector must show monitoring.
    The fixture script waits 5 seconds before the first B and after each B; detection
    stays active during both waits. Observe passive target B down/up and filtered
-   Lua phase/scheduler-fault logs without typing into the terminal. `issuing-B`
+   Lua phase/Gateway-root-cause/scheduler-fault logs without typing into the terminal. `issuing-B`
    marks an attempted API call; `B-call-completed` is not target-delivery proof.
    Wait for paired target counts to grow before accepting software-input exclusion.
    Rug sends B repeatedly to the target without triggering takeover. A refused

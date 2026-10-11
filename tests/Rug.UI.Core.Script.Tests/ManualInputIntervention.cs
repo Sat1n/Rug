@@ -31,6 +31,7 @@ internal static class ManualInputIntervention
     {
         while (await reader.ReadLineAsync() is { } line)
             if (line.Contains("[intervention-probe]", StringComparison.Ordinal) ||
+                line.Contains("Automation execution failed", StringComparison.Ordinal) ||
                 line.Contains("Automation instance", StringComparison.Ordinal))
                 Console.WriteLine("PROBE LOG: " + line[..Math.Min(line.Length, 1000)]);
     }
