@@ -124,11 +124,16 @@ approve grants or synthesize human input. In the same app session:
    binding instructions; attempting windowless capture is correctly rejected as
    InvalidParameters. The instance selector is in the bottom host bar.
 2. Select input_probe, use **运行绑定窗口任务**, and explicitly approve input/timer.
-   Release the startup click and keep hands off. The detector must show monitoring;
+   Release the startup click and keep hands off. The detector must show monitoring.
+   The fixture script waits 5 seconds before the first B and after each B; detection
+   stays active during both waits. Observe passive target B down/up and filtered
+   Lua phase/scheduler-fault logs without typing into the terminal. `issuing-B`
+   marks an attempted API call; `B-call-completed` is not target-delivery proof.
+   Wait for paired target counts to grow before accepting software-input exclusion.
    Rug sends B repeatedly to the target without triggering takeover. A refused
    foreground activation is NOT RUN for software input, never filtering success.
 3. Press/release a key or move/click/scroll while Rug or another app is foreground,
-   including the 1.5-second gap between input actions. Repeat with fresh runs for
+   including the 5-second gap between input actions. Repeat with fresh runs for
    foreground/background and keyboard/mouse. Expect TakingOver, then ManualControl
    only after releases/cleanup. No raw key contents appear in the host UI.
 4. Confirm input_probe has no remaining run; timer_probe and optional vision_probe

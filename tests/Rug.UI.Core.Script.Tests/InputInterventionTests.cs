@@ -69,6 +69,7 @@ internal static class InputInterventionTests
     public static async Task RunAsync()
     {
         ManualFixtureSchema();
+        await ManualFixtureScriptAsync();
         await PolicyAsync(); await AbsoluteMotionAsync(); await BoundariesAsync(); await FaultsAsync(); await LeasesAsync();
         await GatewayLateAsync(); await GatewayLateAsync(detectorFailure: true);
         await SchedulerAsync(); await ProductionBarrierAsync(); await ProductionMotionAsync(); await ConsumerFaultAsync();
@@ -91,6 +92,51 @@ internal static class InputInterventionTests
             Check(schema.Children.Single(item => item.Id == "stop").Command == "host.stop_selected",
                 "manual fixture lost its instance stop command");
         }
+    }
+    private static async Task ManualFixtureScriptAsync()
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "manual-fixture-" + Guid.NewGuid().ToString("N") + ".lua");
+        await File.WriteAllTextAsync(path, ManualInputIntervention.CreateScript("input_probe"));
+        try
+        {
+            foreach (bool cancelBeforeInput in new[] { true, false })
+            {
+                var input = new FakeInput();
+                var logs = new System.Collections.Concurrent.ConcurrentQueue<string>();
+                await using var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), input,
+                    new RecordingLogger<LuaRuntime>(logs), new FakeCoordinateMapper(), _ => true);
+                var manifest = new PluginManifest([Permission.Timer, Permission.ControlInput], TargetWindow: 123)
+                    { InputDelivery = InputDeliveryMode.Win32SendInput };
+                await TestAuthorizationHost.InitializeAsync(runtime, path, manifest);
+                await runtime.PrepareLifecycleAsync();
+                Check((await runtime.StepAsync()).State == ScriptState.Yielded && input.KeyDownCalls == 0 &&
+                    logs.Any(item => item.Contains("waiting-before-first-B")), "fixture did not yield before input");
+                var watch = Stopwatch.StartNew();
+                Task<ScriptExecutionResult> waiting = runtime.ResumeAsync();
+                if (cancelBeforeInput)
+                {
+                    runtime.Stop();
+                    Check((await waiting.WaitAsync(TimeSpan.FromSeconds(1))).State == ScriptState.Stopped && input.KeyDownCalls == 0,
+                        "fixture startup wait bypassed cancellation or emitted input");
+                    continue;
+                }
+                Check((await waiting).State == ScriptState.Ready && watch.ElapsedMilliseconds >= 4900,
+                    "fixture startup wait was shortened");
+                await runtime.BeginTickAsync();
+                Check((await runtime.StepAsync()).State == ScriptState.Yielded && logs.Any(item => item.Contains("issuing-B")),
+                    "fixture omitted issuing phase");
+                Check((await runtime.ResumeAsync()).State == ScriptState.Yielded && input.KeyDownCalls == 1 && input.KeyUpCalls == 1 &&
+                    input.Key == 66 && logs.Any(item => item.Contains("B-call-completed")),
+                    "fixture did not finish the B hold/release before its wait");
+                Task<ScriptExecutionResult> gap = runtime.ResumeAsync();
+                runtime.Stop();
+                Check((await gap.WaitAsync(TimeSpan.FromSeconds(1))).State == ScriptState.Stopped && input.KeyDownCalls == 1,
+                    "fixture waiting period survived stop or repeated input");
+                await runtime.InvokeStopHookAsync(TimeSpan.FromSeconds(1));
+                Check(logs.Any(item => item.Contains("on_stop")), "fixture lost stop evidence");
+            }
+        }
+        finally { File.Delete(path); }
     }
     private static async Task ExpectUnavailable(Func<Task> action)
     { try { await action(); throw new Exception("Expected detector rejection"); } catch (InputUnavailableException) { } }

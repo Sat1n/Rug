@@ -285,6 +285,11 @@ and human operations are required; no synthetic human input or diagnostic Hook i
 installed. Only timer_probe exposes windowless Start; vision_probe/input_probe
 show instructions to bind the isolated window and use the bottom host bound-task
 button. The intervention suite parses all three schemas and checks these entries.
+The input fixture waits 5 seconds before its first B and after each B, with
+monitoring active throughout. Filtered Lua phase/scheduler-fault logs and passive
+target B counters separate pre-input cancellation, API completion and actual
+delivery; no terminal command is needed during input. Real Lua tests check the
+startup yield, B down/up and cancellation of both waits.
 See [exact human steps and boundaries](../../Rug.UI.Core/InputIntervention.md).
 New human-triggered WinUI scenarios are NOT RUN by the agent. Existing 05B-01
 acceptance and frozen native/Hook discrepancy evidence remain separate.
