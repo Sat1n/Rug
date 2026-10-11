@@ -5,6 +5,21 @@ using Rug.UI.Core.Native;
 /// <summary>Opt-in real WinUI fixture. No synthesized human input, grants or Hook experiment.</summary>
 internal static class ManualInputIntervention
 {
+    internal static string CreateSchema(string pluginId)
+    {
+        object start = pluginId == "timer_probe"
+            ? new { type = "ButtonCard", id = "start", title = "启动无窗口计时任务", command = "host.start_windowless" }
+            : (object)new { type = "InfoBanner", id = "start", title = "需要绑定目标窗口",
+                description = "在开发工具中用准星绑定白色隔离窗口，然后点击底部“运行绑定窗口任务”。此插件不能无窗口启动。" };
+        return JsonSerializer.Serialize(new { type = "Page", id = "root", children = new object[]
+        {
+            start,
+            new { type = "ButtonCard", id = "stop", title = "停止当前实例", command = "host.stop_selected" },
+            new { type = "InfoBanner", id = "help", title = "人工接管验证",
+                description = "请通过底部当前实例选择器检查任务是否仍在运行。" }
+        }});
+    }
+
     /// <summary>@shape fixture: isolated temporary plugin root, owned target/UI processes, aggregate target counters.
     /// @source policy: ../../Rug.UI.Core/InputIntervention.md</summary>
     public static async Task RunAsync()
@@ -26,12 +41,7 @@ internal static class ManualInputIntervention
                 string[] permissions = id == "input_probe" ? ["input", "timer"] : id == "vision_probe" ? ["vision.capture", "timer"] : ["timer"];
                 await File.WriteAllTextAsync(Path.Combine(dir, "manifest.json"), JsonSerializer.Serialize(new
                 { id, name = id, version = "1", entry = "main.lua", targetProcess = "isolated-probe", permissions, inputDelivery = "Win32SendInput" }));
-                await File.WriteAllTextAsync(Path.Combine(dir, "ui.json"), """
-                    {"type":"Page","id":"root","children":[
-                    {"type":"ButtonCard","id":"start","title":"启动无窗口计时任务","command":"host.start_windowless"},
-                    {"type":"ButtonCard","id":"stop","title":"停止当前实例","command":"host.stop_selected"},
-                    {"type":"InfoBanner","id":"help","title":"人工接管验证","description":"请通过顶部运行实例选择器检查任务是否仍在运行。"}]}
-                    """);
+                await File.WriteAllTextAsync(Path.Combine(dir, "ui.json"), CreateSchema(id));
                 string script = id == "input_probe"
                     ? "function on_tick() rug.set_state('probe.ticks', (rug.get_state('probe.ticks') or 0)+1); rug.press_key(66,80); rug.sleep(1500) end"
                     : id == "vision_probe"
@@ -57,6 +67,7 @@ internal static class ManualInputIntervention
             }
             Console.WriteLine($"MANUAL READY: isolatedTarget=0x{hwnd:X} UIprocess={app.Id}; no Hooks/Raw source in this fixture, no synthesized human input.");
             Console.WriteLine("Use WinUI DevTools crosshair to bind the white isolated window; start timer, optional bound vision, then bound input. Approve permissions explicitly.");
+            Console.WriteLine("Only timer_probe has windowless Start. For vision_probe/input_probe use the bottom host button 运行绑定窗口任务 after binding the target.");
             Console.WriteLine("Hands off while Rug sends B; human keyboard/mouse in any window must cause takeover. Check cleanup, timer/vision preservation, explicit return and no old-run revival.");
             Console.WriteLine("Use status for aggregate target B down/up only; done closes this fixture's UI/target and removes its temporary plugins. Human acceptance is NOT RUN until you perform/confirm it.");
             while (Console.ReadLine() is { } line && line.Trim() != "done")

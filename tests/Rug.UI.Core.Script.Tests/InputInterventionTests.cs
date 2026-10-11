@@ -68,10 +68,29 @@ internal static class InputInterventionTests
     }
     public static async Task RunAsync()
     {
+        ManualFixtureSchema();
         await PolicyAsync(); await AbsoluteMotionAsync(); await BoundariesAsync(); await FaultsAsync(); await LeasesAsync();
         await GatewayLateAsync(); await GatewayLateAsync(detectorFailure: true);
         await SchedulerAsync(); await ProductionBarrierAsync(); await ProductionMotionAsync(); await ConsumerFaultAsync();
         Console.WriteLine("Candidate intervention policy, session boundaries, faults, delayed native cleanup and scheduler integration tests passed");
+    }
+    private static void ManualFixtureSchema()
+    {
+        var parser = new Rug.UI.Core.Schema.SchemaParser();
+        foreach (string plugin in new[] { "timer_probe", "vision_probe", "input_probe" })
+        {
+            var schema = parser.Parse(ManualInputIntervention.CreateSchema(plugin));
+            var start = schema.Children.Single(item => item.Id == "start");
+            if (plugin == "timer_probe")
+                Check(start.Type == "ButtonCard" && start.Command == "host.start_windowless",
+                    "timer fixture lost its valid windowless start command");
+            else
+                Check(start.Type == "InfoBanner" && start.Description.Contains("运行绑定窗口任务") &&
+                    schema.Children.All(item => item.Command != "host.start_windowless"),
+                    "window-bound fixture still exposes an invalid windowless start command");
+            Check(schema.Children.Single(item => item.Id == "stop").Command == "host.stop_selected",
+                "manual fixture lost its instance stop command");
+        }
     }
     private static async Task ExpectUnavailable(Func<Task> action)
     { try { await action(); throw new Exception("Expected detector rejection"); } catch (InputUnavailableException) { } }

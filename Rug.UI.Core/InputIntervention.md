@@ -120,6 +120,9 @@ approve grants or synthesize human input. In the same app session:
 1. In DevTools use the crosshair to bind the white target. Select timer_probe,
    invoke its windowless Start and explicitly approve timer permission. Optionally
    select vision_probe and use the host **运行绑定窗口任务** button; approve capture.
+   Only timer_probe has a windowless Start card. Vision/input pages instead show
+   binding instructions; attempting windowless capture is correctly rejected as
+   InvalidParameters. The instance selector is in the bottom host bar.
 2. Select input_probe, use **运行绑定窗口任务**, and explicitly approve input/timer.
    Release the startup click and keep hands off. The detector must show monitoring;
    Rug sends B repeatedly to the target without triggering takeover. A refused

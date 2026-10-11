@@ -282,6 +282,9 @@ Actual RawInputEventSource barriers and net-zero merged motion are included.
 `--intervention-manual` creates an isolated target and temporary input/timer/vision
 plugins, launching actual WinUI with its production source. Explicit user grants
 and human operations are required; no synthetic human input or diagnostic Hook is
-installed. See [exact human steps and boundaries](../../Rug.UI.Core/InputIntervention.md).
+installed. Only timer_probe exposes windowless Start; vision_probe/input_probe
+show instructions to bind the isolated window and use the bottom host bound-task
+button. The intervention suite parses all three schemas and checks these entries.
+See [exact human steps and boundaries](../../Rug.UI.Core/InputIntervention.md).
 New human-triggered WinUI scenarios are NOT RUN by the agent. Existing 05B-01
 acceptance and frozen native/Hook discrepancy evidence remain separate.
