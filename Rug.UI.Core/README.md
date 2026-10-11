@@ -18,7 +18,7 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 > black-box logs, scoped state/commands, schema/hot reload and Gateway are implemented.
 > Process-local explicit grants and shared input arbitration support host manual takeover.
 > Task 3.5-05B-02 connects production candidate-input monitoring to safe takeover;
-> new human UI acceptance is pending; the independent Hook gap remains incomplete.
+> 05B-02 human UI acceptance is user-confirmed; the independent Hook gap remains incomplete.
 
 ## Internal Topology
 
@@ -291,7 +291,7 @@ motion globally request existing takeover; releases, repeats, software tags and 
 changes do not. Failed detection blocks input/return; timer/vision tasks remain.
 [Diagnostics](RawInputEvents.md) and [production acceptance](../tests/Rug.UI.Core.Script.Tests/ProductionSourceAcceptance.md)
 separate target, Raw and Hook evidence. Tags are spoofable hints, not authority.
-The Hook gap and frozen native artifacts remain; new human UI acceptance is pending.
+The Hook gap and frozen native artifacts remain; 05B-02 human UI acceptance is user-confirmed.
 
 ## Native Interop & Memory Safety (CRITICAL)
 

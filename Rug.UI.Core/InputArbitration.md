@@ -130,4 +130,4 @@ queueing, after waiting, before lease steps and on Return control. Source failur
 cannot be bypassed by returning control. Host input sessions span entire input
 runs/DevTools sequences, including gaps, and drain after actual cleanup before
 ManualControl. Candidate external input is not authenticated physical input;
-diagnostic Hook gaps remain separate and new human UI acceptance is pending.
+diagnostic Hook gaps remain separate; 05B-02 human UI acceptance is user-confirmed.

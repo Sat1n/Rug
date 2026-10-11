@@ -113,7 +113,7 @@ The WinUI `--takeover-ui` automation checks real detector readiness, the global
 rule text, manual controls and timer-only preservation. Simulated candidates
 prove policy, not actual human acceptance.
 
-For **pending manual WinUI acceptance**, build Debug/x64 UI and script tests, then:
+To reproduce **user-confirmed manual WinUI acceptance**, build Debug/x64 UI and script tests, then:
 
 ```powershell
 dotnet run --no-build --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64 -- --intervention-manual
@@ -161,7 +161,19 @@ approve grants or synthesize human input. In the same app session:
    Close via `done`; the fixture closes its app/target and deletes only its own
    verified temporary plugin root. Report visible state, preservation and cleanup.
 
-These new human-triggered UI scenarios are NOT RUN by the development agent.
+### 05B-02 manual acceptance — 2026-10-11
+
+User manually confirmed PASS against baseline
+`81fca0b5ebb001fccc5195400696f74f200b82b4` using the fixture above.
+With an English keyboard layout, four automatic B presses/releases grew the
+isolated target counters from `(0,0)` to `(4,4)` without takeover. Real user
+operations triggered takeover; timer/vision runs remained active, and explicit
+Return control did not revive stopped input runs. `on_stop` completed normally;
+`Unexpected Lua hook state: Stopped` did not recur. These are user observations,
+not synthetic human input or actions performed by the development agent.
+
+This acceptance does **not** resolve the independent low-level Hook observation
+gap. Keep its missing observations and frozen reversal evidence separate.
 The [05B-01 production acceptance](../tests/Rug.UI.Core.Script.Tests/ProductionSourceAcceptance.md)
 is retained separately. Its Hook discrepancy remains INCOMPLETE; frozen reversal
 artifacts are unchanged. This unit does not extend the root-cause investigation

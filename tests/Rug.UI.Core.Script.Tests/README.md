@@ -305,5 +305,6 @@ target B counters separate pre-input cancellation, API completion and actual
 delivery; no terminal command is needed during input. Real Lua tests check the
 startup yield, B down/up and cancellation of both waits.
 See [exact human steps and boundaries](../../Rug.UI.Core/InputIntervention.md).
-New human-triggered WinUI scenarios are NOT RUN by the agent. Existing 05B-01
+05B-02 human-triggered WinUI scenarios are user-confirmed passed (not performed
+by the agent); see the acceptance record above. Existing 05B-01
 acceptance and frozen native/Hook discrepancy evidence remain separate.

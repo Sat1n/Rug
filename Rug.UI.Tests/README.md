@@ -43,7 +43,7 @@ and timer-run preservation, then stops its run and cleans up its own app/files.
 Task 3.5-05B-02 additionally checks actual production detector Ready/no-session
 status and the global takeover rule before/after timer startup and each return.
 It does not simulate human acceptance. Real human-triggered WinUI verification
-is pending via the script harness `--intervention-manual`; see
+is user-confirmed passed via the script harness `--intervention-manual`; see
 [isolated target steps](../Rug.UI.Core/InputIntervention.md). The host UI owns
 permission confirmation and target binding; no automatic approval/test bypass
 is added. Existing generic-instance/demo/hot-reload regressions remain enabled.

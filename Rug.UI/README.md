@@ -124,8 +124,8 @@ no automation pipeline and no native interop itself.
 * The footer shows detector readiness, monitoring count, trigger reason and
   separate detector/cleanup faults, plus the global rule. Return cannot bypass an
   unhealthy detector or revive stopped runs. Window close awaits watcher shutdown,
-  input/source/scheduler cleanup before final close. New human-triggered UI checks
-  remain pending: run `--intervention-manual` using the
+  input/source/scheduler cleanup before final close. 05B-02 human-triggered UI checks
+  are user-confirmed passed; reproduce with `--intervention-manual` using the
   [isolated acceptance steps](../Rug.UI.Core/InputIntervention.md). No diagnostic
   Hooks, raw human contents, new grant behavior or automatic restart is introduced.
 
