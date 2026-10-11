@@ -42,6 +42,8 @@ public sealed class TaskExecutionContext
     internal AuthorizationLease? AuthorizationLease { get; set; }
     internal CancellationTokenRegistration AuthorizationCancellation { get; set; }
     internal CancellationTokenRegistration InputCancellation { get; set; }
+    // Keep the run's original epoch, not a later epoch queried after Return control.
+    internal CancellationToken InputEpochToken { get; set; }
     internal bool DeclaresInput { get; set; }
     internal IInputSession? InputSession { get; set; }
 

@@ -23,6 +23,12 @@ receiver registration, not just a thread. Input-declaring plugin startup registe
 its complete RunIdentity before capture/input factories or Lua initialization.
 The registration lasts through starting, running, pause, sleep and other gaps,
 until actual runtime/native cleanup completes. Failed startup releases it too.
+The scheduler retains the run's original input epoch token. Cancellation callbacks
+may wake Lua before the instance token is cancelled; a `Stopped` hook result backed
+by cancellation of that epoch (or its host grant lease) propagates cancellation
+and completes normal cleanup instead of recording a script fault. It never queries
+a new epoch after Return control. Unexplained `Stopped` results and actual script
+or cleanup errors remain faults.
 DevTools registers a trusted session around an entire input test; stress testing
 retains it across capture/OCR gaps. Preview, pure trajectory planning and
 timer/vision-only instances do not register sessions. Session capacity is 256.
@@ -123,6 +129,10 @@ approve grants or synthesize human input. In the same app session:
    Only timer_probe has a windowless Start card. Vision/input pages instead show
    binding instructions; attempting windowless capture is correctly rejected as
    InvalidParameters. The instance selector is in the bottom host bar.
+   For the B-delivery check, select an English keyboard layout for the white target
+   before starting input_probe. IME message processing can change what its legacy
+   key counter observes ([Windows IME messages](https://learn.microsoft.com/en-us/windows/win32/intl/ime-messages));
+   this counter is not production Raw Input classification evidence.
 2. Select input_probe, use **运行绑定窗口任务**, and explicitly approve input/timer.
    Release the startup click and keep hands off. The detector must show monitoring.
    The fixture script waits 5 seconds before the first B and after each B; detection

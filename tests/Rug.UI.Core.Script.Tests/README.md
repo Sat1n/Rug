@@ -203,6 +203,11 @@ activation, confirmation timeout, cancellation, permission revocation, invalid
 targets and takeover. Conflicting input stays queued through confirmation; rejected
 actions send no key, and retained Gateway duplicates never retry focus or input.
 These tests do not certify actual Windows foreground permission or human acceptance.
+The intervention suite also blocks cancellation propagation between Lua and the
+scheduler using a controlled callback barrier. Actual Lua startup/tick waits must
+stop cleanly when their original input epoch is cancelled, call `on_stop` once,
+release capture/session resources and preserve timer runs. An unexplained runtime
+stop still faults; returning control cannot revive the stopped run.
 
 Task 3.5-04 uses explicit `TestAuthorizationHost` setup for legacy positive cases.
 `AuthorizationTests.cs` separately verifies fail-closed startup, missing-name

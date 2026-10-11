@@ -68,12 +68,92 @@ internal static class InputInterventionTests
     }
     public static async Task RunAsync()
     {
+        await SchedulerCancellationOrderAsync();
         ManualFixtureSchema();
         await ManualFixtureScriptAsync();
         await PolicyAsync(); await AbsoluteMotionAsync(); await BoundariesAsync(); await FaultsAsync(); await LeasesAsync();
         await GatewayLateAsync(); await GatewayLateAsync(detectorFailure: true);
         await SchedulerAsync(); await ProductionBarrierAsync(); await ProductionMotionAsync(); await ConsumerFaultAsync();
         Console.WriteLine("Candidate intervention policy, session boundaries, faults, delayed native cleanup and scheduler integration tests passed");
+    }
+    private static async Task SchedulerCancellationOrderAsync()
+    {
+        foreach (string phase in new[] { "init", "tick", "unexplained" })
+        {
+            string root = Path.Combine(AppContext.BaseDirectory, "cancel-order-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            try
+            {
+                foreach (string id in new[] { "input", "timer" })
+                {
+                    string directory = Path.Combine(root, id); Directory.CreateDirectory(directory);
+                    await File.WriteAllTextAsync(Path.Combine(directory, "manifest.json"), JsonSerializer.Serialize(new
+                    { id, name = id, version = "1", targetProcess = "test", permissions = id == "input" ? new[] { "input", "timer" } : new[] { "timer" } }));
+                    string hook = id == "input" && phase == "init" ? "on_init" : "on_tick";
+                    await File.WriteAllTextAsync(Path.Combine(directory, "main.lua"),
+                        $"function {hook}() rug.sleep(60000) end function on_stop() rug.log('order_stop') end");
+                }
+                await using var f = new Fixture(); await f.StartAsync();
+                var authorization = new PluginAuthorization(); TestAuthorizationHost.ApproveCatalog(authorization, root);
+                using var release = new ManualResetEventSlim();
+                var entered = Signal();
+                CancellationTokenRegistration barrier = default;
+                var logs = new System.Collections.Concurrent.ConcurrentQueue<string>();
+                bool inputStarting = false;
+                LuaRuntime? inputRuntime = null;
+                FakeCapture? inputCapture = null;
+                await using var scheduler = new Scheduler(new PluginManager(NullLogger<PluginManager>.Instance), root,
+                    () => { var capture = new FakeCapture(); if (inputStarting) inputCapture = capture; return capture; },
+                    () => new FakeInput(), (capture, input) =>
+                    {
+                        // Cancellation callbacks run LIFO. Hold propagation to the scheduler/session
+                        // after Lua's direct epoch callback has fired, forcing the original race.
+                        if (inputStarting && phase != "unexplained")
+                            barrier = f.Arbiter.AutomationToken.Register(() => { entered.TrySetResult(); release.Wait(); });
+                        var runtime = new LuaRuntime(capture, new FakeOcr(), input,
+                            new RecordingLogger<LuaRuntime>(logs), new FakeCoordinateMapper(), _ => true);
+                        if (inputStarting) inputRuntime = runtime;
+                        return runtime;
+                    }, new RecordingLogger<Scheduler>(logs), new NoAnomaly(), authorization: authorization,
+                    inputArbiter: f.Arbiter, intervention: f.Monitor);
+                try
+                {
+                    Guid timer = await scheduler.StartTaskAsync("timer", 0);
+                    inputStarting = true;
+                    Guid id = await scheduler.StartTaskAsync("input", 123);
+                    var context = scheduler.Instances.Single(item => item.InstanceId == id);
+                    await Until(() => inputRuntime!.State == ScriptState.Yielded);
+                    if (phase == "unexplained") inputRuntime!.Stop();
+                    else
+                    {
+                        f.Source.Emit(Mouse(x: 2));
+                        await entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+                    }
+                    await context.Runner!.WaitAsync(TimeSpan.FromSeconds(3));
+                    if (phase == "unexplained")
+                        Check(context.TaskStatus == AutomationTaskStatus.Faulted && context.LastError?.Message.Contains("Unexpected Lua hook state") == true,
+                            "unexplained runtime stop was silently treated as takeover cancellation");
+                    else
+                        Check(context.TaskStatus == AutomationTaskStatus.Stopped && context.LastError is null &&
+                            !logs.Any(item => item.Contains("faulted")), "known input epoch cancellation faulted the scheduler: " + phase);
+                    Check(inputCapture is { StopCalls: 1, Disposed: true } && inputRuntime!.State == ScriptState.Stopped &&
+                        scheduler.Instances.Single().InstanceId == timer && f.Monitor.Snapshot.Sessions == 0 &&
+                        logs.Count(item => item == "Lua: order_stop") == 1, "cancellation order lost cleanup, hook or timer isolation");
+                    release.Set();
+                    if (phase != "unexplained")
+                    {
+                        await f.Monitor.PendingTakeover.WaitAsync(TimeSpan.FromSeconds(3));
+                        Check(f.Arbiter.Snapshot is { State: InputControlState.ManualControl, Active: 0, Waiting: 0 },
+                            "cancellation order did not finish takeover");
+                        f.Arbiter.ReturnControl();
+                        Check(scheduler.Instances.Single().InstanceId == timer, "return revived cancelled run");
+                    }
+                }
+                finally { release.Set(); barrier.Dispose(); }
+            }
+            finally { Directory.Delete(root, recursive: true); }
+        }
+        Console.WriteLine("Scheduler takeover cancellation callback order passed (init/tick); unexplained stops remain faults");
     }
     private static void ManualFixtureSchema()
     {

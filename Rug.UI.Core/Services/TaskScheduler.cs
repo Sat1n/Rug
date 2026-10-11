@@ -155,6 +155,7 @@ public sealed class TaskScheduler : ITaskScheduler
         AuthorizationLease? authorizationLease = null;
         CancellationTokenRegistration authorizationCancellation = default;
         CancellationTokenRegistration inputCancellation = default;
+        CancellationToken inputEpoch = default;
         bool inputStarting = false;
         IInputSession? inputSession = null;
         try
@@ -172,7 +173,8 @@ public sealed class TaskScheduler : ITaskScheduler
                     inputStarting = true;
                     if (++_startingInput == 1) _inputStartsDrained = new(TaskCreationOptions.RunContinuationsAsynchronously);
                 }
-                inputCancellation = _inputArbiter.AutomationToken.Register(() => cancellation.Cancel());
+                inputEpoch = _inputArbiter.AutomationToken;
+                inputCancellation = inputEpoch.Register(() => cancellation.Cancel());
                 _inputArbiter.BindTarget(hwnd);
                 cancellation.Token.ThrowIfCancellationRequested();
             }
@@ -217,6 +219,7 @@ public sealed class TaskScheduler : ITaskScheduler
             context.AuthorizationLease = authorizationLease;
             context.AuthorizationCancellation = authorizationCancellation;
             context.InputCancellation = inputCancellation;
+            context.InputEpochToken = inputEpoch;
             context.DeclaresInput = declaresInput;
             context.InputSession = inputSession;
             onReady?.Invoke(identity);
@@ -350,7 +353,12 @@ public sealed class TaskScheduler : ITaskScheduler
                 case ScriptState.Ready: return;
                 case ScriptState.Yielded: resume = true; break;
                 case ScriptState.Paused: break;
-                case ScriptState.Stopped when token.IsCancellationRequested:
+                case ScriptState.Stopped when token.IsCancellationRequested || context.InputEpochToken.IsCancellationRequested ||
+                    context.AuthorizationLease?.Token.IsCancellationRequested == true:
+                    // Linked cancellation callbacks can wake Lua before they reach the
+                    // scheduler. A cancelled host-owned epoch/grant is sufficient evidence;
+                    // propagate it before classifying this terminal result as cancellation.
+                    context.Cancel();
                     throw new OperationCanceledException(token);
                 case ScriptState.Faulted:
                     throw result.Error ?? new InvalidOperationException("Lua hook faulted.");

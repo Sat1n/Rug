@@ -70,7 +70,8 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   capture, and disposes Lua/input resources after actual input and releases finish.
   Stop can wait for noncooperative native calls; no fixed timeout frees their
   input handles early. `on_stop()` is synchronous; yielding
-  from it is rejected during cleanup. Instances are removed after cleanup.
+  from it is rejected during cleanup. Cancelled input/grant epochs stop cleanly;
+  instances leave after cleanup.
   `ITaskScheduler.InstancesChanged` fires after an instance enters or leaves the
   active collection; the WinUI host marshals it to its dispatcher and rereads
   `Instances` to bind the selected run. A failed UI subscriber cannot fail the run.
