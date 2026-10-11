@@ -239,8 +239,9 @@ internal static class GatewayTests
         var launches = await Task.WhenAll(Enumerable.Range(0, 5).Select(_ => scheduler.Gateway.ExecuteAsync(caller, start)));
         var identity = (RunIdentity)launches[0].Value!;
         Expect(launches.All(result => Equals(result.Value, identity)) && scheduler.Instances.Count == 1, "duplicate start created multiple runs");
-        Expect((await scheduler.Gateway.ExecuteAsync(caller, Request(AutomationOperation.Pause, OperationTarget.ForRun(identity)))).Status == OperationStatus.Success &&
-            scheduler.Instances.Single().TaskStatus == AutomationTaskStatus.Paused, "gateway pause failed");
+        Expect((await scheduler.Gateway.ExecuteAsync(caller, Request(AutomationOperation.Pause, OperationTarget.ForRun(identity)))).Status == OperationStatus.Success,
+            "gateway did not accept pause");
+        await UntilAsync(() => scheduler.Instances.Single().TaskStatus == AutomationTaskStatus.Paused);
         Expect((await scheduler.Gateway.ExecuteAsync(caller, Request(AutomationOperation.Resume, OperationTarget.ForRun(identity)))).Status == OperationStatus.Success,
             "gateway resume failed");
         Expect((await scheduler.Gateway.ExecuteAsync(caller, Request(AutomationOperation.Stop, OperationTarget.ForRun(identity)))).Status == OperationStatus.Success &&

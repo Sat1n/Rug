@@ -59,22 +59,17 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 ## Task lifecycle and watchdog (Task 2.1.3)
 
 * `TaskScheduler.StartTaskAsync(pluginId, hwnd)` gets a scanned plugin, creates
-  independent capture/input/runtime instances through factories, starts capture
-  before Lua can call `rug.capture()`, prepares the lifecycle coroutine, then
-  registers the instance and returns its ID. A background runner executes
+  independent capture/input/runtime instances through factories, registers
+  Starting before capture/runtime setup and returns its ID after setup.
+  Capture precedes Lua `rug.capture()`. A background runner executes
   `on_init()` once, followed by `on_tick()` at a configurable interval. The script
   body defines hooks on its first run. Missing hooks are no-ops.
-* `PauseTask` suspends progress at the next coroutine boundary and preserves the
-  pending operation; `ResumeTask` continues it. `StopTaskAsync` cancels the instance,
-  awaits the runner, invokes `on_stop()` with a bounded watchdog, stops/disposes
-  capture, and disposes Lua/input resources after actual input and releases finish.
-  Stop can wait for noncooperative native calls; no fixed timeout frees their
-  input handles early. `on_stop()` is synchronous; yielding
-  from it is rejected during cleanup. Cancelled input/grant epochs stop cleanly;
-  instances leave after cleanup.
-  `ITaskScheduler.InstancesChanged` fires after an instance enters or leaves the
-  active collection; the WinUI host marshals it to its dispatcher and rereads
-  `Instances` to bind the selected run. A failed UI subscriber cannot fail the run.
+* `PauseTask` accepts a request; `LifecycleSnapshot` / `LifecycleChanged` confirm
+  Paused only after Lua and admitted input/releases drain. Resume is submitted to
+  the serial driver with fresh grant/target/control checks. Stop shares one cleanup,
+  waits for actual native work, invokes bounded non-yielding `on_stop` once and
+  disposes every resource before Stopped/Faulted. Failed observers cannot fail runs.
+  See [06A transitions, cancellation and verification](Lifecycle.md).
 * The host captures `debug.sethook` before removing Lua's `debug` and `coroutine`
   globals. Each host-created coroutine gets a count hook that checks cancellation
   every 10,000 Lua instructions. The hook and coroutine handles live in private

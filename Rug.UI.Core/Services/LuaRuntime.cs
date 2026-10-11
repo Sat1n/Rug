@@ -119,6 +119,7 @@ public sealed class LuaRuntime : IScriptRuntime
     private PluginManifest? _manifest;
     private PermissionInterceptor? _permissions;
     private InputBridge? _inputBridge;
+    private TaskExecutionContext? _context;
     private IInputArbiter _inputArbiter = InputArbiter.Shared;
     private VisualEngineBridge? _visual;
     private Lua? _lua;
@@ -168,6 +169,11 @@ public sealed class LuaRuntime : IScriptRuntime
     {
         if (State != ScriptState.Uninitialized) throw new InvalidOperationException("Gateway must be bound before initialization.");
         _gateway = gateway;
+    }
+    public void ConfigureLifecycle(TaskExecutionContext context)
+    {
+        if (State != ScriptState.Uninitialized) throw new InvalidOperationException("Lifecycle must be bound before initialization.");
+        _context = context;
     }
 
     public void ConfigureState(RunIdentity identity, IReadOnlyDictionary<string, object?> launchInputs,
@@ -223,7 +229,7 @@ public sealed class LuaRuntime : IScriptRuntime
             await _inputBridge.BindAsync(manifest.TargetWindow,
                 manifest.InputDelivery ?? (manifest.BackgroundInput ? InputDeliveryMode.Win32PostMessage : InputDeliveryMode.Win32SendInput),
                 _lifetime.Token).ConfigureAwait(false);
-        _gateway.RegisterRun(_identity, gatewayManifest, _lifetime.Token, ExecuteAutomationAsync);
+        _gateway.RegisterRun(_identity, gatewayManifest, _lifetime.Token, ExecuteAutomationAsync, _context);
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
@@ -427,7 +433,16 @@ public sealed class LuaRuntime : IScriptRuntime
         if (resume)
         {
             Guid id = _pendingId!.Value;
-            try { input = await _operations[id].WaitAsync(token).ConfigureAwait(false); }
+            try
+            {
+                Task<object?> pending = _operations[id];
+                if (_context is not null)
+                {
+                    await Task.WhenAny(pending, _context.PauseSignal).WaitAsync(token).ConfigureAwait(false);
+                    if (_context.PauseRequested) return new(ScriptState.Paused);
+                }
+                input = await pending.WaitAsync(token).ConfigureAwait(false);
+            }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
                 Stop();
@@ -447,6 +462,9 @@ public sealed class LuaRuntime : IScriptRuntime
             {
                 if (State == ScriptState.Stopped) return new(ScriptState.Stopped);
                 if (_paused) return new(ScriptState.Paused);
+                using var segment = _context?.TryEnterLuaSegment();
+                if (_context is not null && segment is null)
+                    return new(token.IsCancellationRequested ? ScriptState.Stopped : ScriptState.Paused);
                 if (completedId is Guid id)
                 {
                     _operations.Remove(id);
@@ -500,6 +518,11 @@ public sealed class LuaRuntime : IScriptRuntime
             throw new InvalidOperationException("Unexpected Lua yield; use rug.* asynchronous APIs.");
         string operation = Convert.ToString(values[3], CultureInfo.InvariantCulture)!;
         Task<object?> task = BeginOperation(operation, values, token);
+        // A paused run can retain a failed/completed pending task until Resume or Stop.
+        // Observe exceptions even when Stop disposes the coroutine without consuming it.
+        _ = task.ContinueWith(t => _ = t.Exception, CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            System.Threading.Tasks.TaskScheduler.Default);
         Guid id = Guid.NewGuid();
         _operations.Add(id, task);
         _pendingId = id;
@@ -557,11 +580,36 @@ public sealed class LuaRuntime : IScriptRuntime
 
     private Task<object?> ExecuteGatewayAsync(AutomationOperation operation, JsonElement parameters, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
+        _context?.Cancellation.Token.ThrowIfCancellationRequested();
+        if (_context?.PauseRequested == true) return AfterActivationAsync();
         var request = new OperationRequest(operation, parameters, Guid.NewGuid(), _identity!.InstanceId.ToString("N"),
             OperationTarget.ForRun(_identity), DateTimeOffset.UtcNow.AddMinutes(10));
         Task<OperationResult> pending = _gateway!.ExecuteAsync(_caller!, request, ct);
-        return pending.IsCompletedSuccessfully ? Task.FromResult(MapGatewayResult(pending.Result, operation)) : AwaitResultAsync();
-        async Task<object?> AwaitResultAsync() => MapGatewayResult(await pending.ConfigureAwait(false), operation);
+        if (pending.IsCompletedSuccessfully)
+        {
+            if (Deferred(pending.Result)) return AfterActivationAsync();
+            ct.ThrowIfCancellationRequested();
+            _context?.Cancellation.Token.ThrowIfCancellationRequested();
+            return Task.FromResult(MapGatewayResult(pending.Result, operation));
+        }
+        return AwaitResultAsync();
+        bool Deferred(OperationResult result) => result.Error == OperationError.InvalidLifecycleState &&
+            !result.OutcomeUncertain && _context?.PauseRequested == true;
+        async Task<object?> AwaitResultAsync()
+        {
+            OperationResult result = await pending.ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            _context?.Cancellation.Token.ThrowIfCancellationRequested();
+            return Deferred(result) ? await AfterActivationAsync().ConfigureAwait(false) : MapGatewayResult(result, operation);
+        }
+        // Pause won admission before any side effect. Resume admits this unexecuted
+        // action with a fresh ID; the rejected ID remains protected by deduplication.
+        async Task<object?> AfterActivationAsync()
+        {
+            await _context!.WaitForBusinessAsync(ct).ConfigureAwait(false);
+            return await ExecuteGatewayAsync(operation, parameters, ct).ConfigureAwait(false);
+        }
     }
     private object? MapGatewayResult(OperationResult result, AutomationOperation operation)
     {
@@ -643,6 +691,7 @@ public sealed class LuaRuntime : IScriptRuntime
 
     private async Task<object?> ResolveAnomalyAsync(LuaTable args)
     {
+        using var work = _context?.EnterOperation(input: false);
         Func<string, string, Task<string>> handler = _anomalyHandler
             ?? throw new InvalidOperationException("Anomaly handler is not configured.");
         string reason = Convert.ToString(args[4], CultureInfo.InvariantCulture) ?? "Unknown anomaly";
@@ -791,7 +840,7 @@ public sealed class LuaRuntime : IScriptRuntime
 
     public void Resume()
     {
-        if (!_paused) return;
+        if (!_paused || _disposed || State is ScriptState.Stopped or ScriptState.Faulted) return;
         _paused = false;
         ChangeState(_pendingId is null ? ScriptState.Ready : ScriptState.Yielded);
     }
@@ -828,22 +877,26 @@ public sealed class LuaRuntime : IScriptRuntime
         Stop();
         await _driveGate.WaitAsync().ConfigureAwait(false);
         await _gate.WaitAsync().ConfigureAwait(false);
+        var errors = new List<Exception>();
         try
         {
-            _drive?.Dispose();
-            _prepareInit?.Dispose();
-            _beginTick?.Dispose();
-            _beginStop?.Dispose();
-            _lua?.Dispose();
-            _authorizationLease?.Dispose();
+            Attempt(() => _drive?.Dispose());
+            Attempt(() => _prepareInit?.Dispose());
+            Attempt(() => _beginTick?.Dispose());
+            Attempt(() => _beginStop?.Dispose());
+            Attempt(() => _lua?.Dispose());
+            Attempt(() => _authorizationLease?.Dispose());
             _operations.Clear();
-            _visual?.Dispose();
-            if (_inputBridge is not null) await _inputBridge.DisposeAsync().ConfigureAwait(false);
-            _lifetime?.Dispose();
-            _commandBus.CloseInstance(_instanceScope);
-            if (_ownsCommandBus) _commandBus.Dispose();
+            Attempt(() => _visual?.Dispose());
+            try { if (_inputBridge is not null) await _inputBridge.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception error) { errors.Add(error); }
+            Attempt(() => _lifetime?.Dispose());
+            Attempt(() => _commandBus.CloseInstance(_instanceScope));
+            if (_ownsCommandBus) Attempt(_commandBus.Dispose);
             _disposed = true;
         }
         finally { _gate.Release(); _driveGate.Release(); _gate.Dispose(); _driveGate.Dispose(); }
+        if (errors.Count > 0) throw new AggregateException("Lua runtime cleanup failed.", errors);
+        void Attempt(Action action) { try { action(); } catch (Exception error) { errors.Add(error); } }
     }
 }

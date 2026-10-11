@@ -8,7 +8,7 @@ public enum AutomationOperation { Start, Stop, Pause, Resume, Sleep, Capture, Oc
 public enum OperationStatus { Success, Rejected, Cancelled, TimedOut, Failed }
 public enum OperationError { None, InvalidParameters, PermissionDenied, InstanceNotFound, StaleRun,
     BindingMismatch, UnsupportedOperation, DeduplicationConflict, DeadlineExceeded, Cancelled,
-    ExecutionFailed, CapacityExceeded, InvalidCaller, InputUnavailable }
+    ExecutionFailed, CapacityExceeded, InvalidCaller, InputUnavailable, InvalidLifecycleState }
 public enum AutomationSource { PluginUI, Lua, Agent, Mcp }
 public sealed record CapturedFrameMetadata(int Width, int Height, int Stride);
 

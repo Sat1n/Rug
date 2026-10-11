@@ -31,6 +31,13 @@ public sealed class InputArbiter(IInputWindowValidator? windows = null, int capa
     public CancellationToken AutomationToken
     { get { CheckGuards(); lock (_gate) { CheckAvailable(); return _epoch.Token; } } }
     public InputTarget BindTarget(nint hwnd) => _windows.Bind(hwnd);
+    public void ValidateTarget(InputTarget target, bool requireControl = true)
+    {
+        if (!_windows.IsValid(target)) throw new InputUnavailableException("Target lifetime is no longer valid.");
+        if (!requireControl) return;
+        CheckGuards();
+        lock (_gate) CheckAvailable();
+    }
 
     private sealed class Pending(InputOwner owner, InputTarget target, bool foreground, CancellationTokenSource cancellation, Action validate)
     {

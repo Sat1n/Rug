@@ -9,6 +9,9 @@ public interface ITaskScheduler : IAsyncDisposable
     AutomationGateway Gateway => throw new NotSupportedException("No automation gateway is bound.");
     /// <summary>Raised after a run enters or leaves the active instance collection.</summary>
     event EventHandler? InstancesChanged;
+    event EventHandler<LifecycleChangedEventArgs>? LifecycleChanged { add { } remove { } }
+    LifecycleSnapshot? GetLifecycle(Guid instanceId) =>
+        Instances.FirstOrDefault(run => run.InstanceId == instanceId)?.Snapshot;
     IReadOnlyCollection<TaskExecutionContext> Instances { get; }
     Task<Guid> StartTaskAsync(string pluginId, nint hwnd, CancellationToken cancellationToken = default);
     Task<Guid> StartTaskAsync(string pluginId, nint hwnd,
@@ -21,6 +24,7 @@ public interface ITaskScheduler : IAsyncDisposable
     Task<IAsyncDisposable> AcquirePluginReloadAsync(string pluginId,
         CancellationToken cancellationToken = default);
     Task RefreshPluginsAsync(CancellationToken cancellationToken = default);
+    /// <summary>Accept a request; Paused is confirmed asynchronously at a safe boundary.</summary>
     bool PauseTask(Guid instanceId);
     bool ResumeTask(Guid instanceId);
     Task StopTaskAsync(Guid instanceId);

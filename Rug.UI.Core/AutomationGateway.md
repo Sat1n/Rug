@@ -41,7 +41,12 @@ constructor. Live grants are additionally enforced through
 exact declarations in both caller and live-run ceilings: `timer`, `vision.capture`,
 `vision.ocr`, `vision.match`, `input`. Start requires all current declarations to
 be explicitly granted; Stop cleanup is independent of revoked grants.
-Pause/Resume still validate the live identity. Existing bridge checks remain
+Pause validates the live identity and returns request acceptance, not confirmed
+Paused. Resume requires confirmed Paused and current declarations within the
+caller's live grant/capability ceiling; invalid phases return
+`InvalidLifecycleState`. The serial driver revalidates grants, the original
+target and input control before advancing Lua. See [06A lifecycle](Lifecycle.md).
+Existing bridge checks remain
 defense in depth: external
 templates require `filesystem`, symlink/path restrictions and client-coordinate,
 button, key and duration validation remain unchanged. A replacement policy can
@@ -100,6 +105,8 @@ terminal task; later duplicate cancellation/deadline/correlation values do not
 replace the first request's execution policy. Stop cancels the instance itself,
 so its own completion wait is governed by caller/deadline rather than the token
 it is cancelling. Request deadlines are limited to at most 24 hours.
+Stop's own cancellation cannot mask its caller deadline as Cancelled: a deadline
+returns TimedOut while real work/cleanup continue and the run stays Stopping.
 
 Already-started work may ignore cancellation. Gateway returns promptly with
 `OutcomeUncertain=true`, observes/discards its late result/failure, and never

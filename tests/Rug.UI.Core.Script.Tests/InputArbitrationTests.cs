@@ -391,8 +391,8 @@ internal static class InputArbitrationTests
 
     internal sealed class ControlledInput : IInputService
     {
-        public readonly TaskCompletionSource PressEntered = Signal(), PressRelease = Signal(), MoveEntered = Signal(), MoveRelease = Signal(), DownEntered = Signal();
-        public bool HoldPress, HoldMove, FailKeyUp, Disposed;
+        public readonly TaskCompletionSource PressEntered = Signal(), PressRelease = Signal(), MoveEntered = Signal(), MoveRelease = Signal(), DownEntered = Signal(), UpEntered = Signal(), UpRelease = Signal();
+        public bool HoldPress, HoldMove, HoldUp, FailKeyUp, Disposed;
         public int PressCalls, KeyUps, MouseUps, Clicks, MoveCalls;
         public Action? AfterMove;
         public Task MoveMouseAsync(int x, int y, TrajectoryType trajectory = TrajectoryType.CubicBezier, bool smooth = true, CancellationToken cancellationToken = default)
@@ -404,7 +404,7 @@ internal static class InputArbitrationTests
         public Task DragAndDropAsync(int sx, int sy, int ex, int ey, TrajectoryType trajectory = TrajectoryType.CubicBezier, bool smooth = true, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task KeyDownAsync(int virtualKey, CancellationToken cancellationToken = default) { DownEntered.TrySetResult(); return Task.CompletedTask; }
         public Task KeyUpAsync(int virtualKey, CancellationToken cancellationToken = default)
-        { KeyUps++; return FailKeyUp ? Task.FromException(new IOException("release failed")) : Task.CompletedTask; }
+        { KeyUps++; UpEntered.TrySetResult(); return FailKeyUp ? Task.FromException(new IOException("release failed")) : HoldUp ? UpRelease.Task : Task.CompletedTask; }
         public Task KeyPressAsync(int virtualKey, int holdMs = 0, CancellationToken cancellationToken = default)
         { PressCalls++; PressEntered.TrySetResult(); return HoldPress ? PressRelease.Task : Task.CompletedTask; }
         public Task SendTextAsync(string text, CancellationToken cancellationToken = default) => Task.CompletedTask;

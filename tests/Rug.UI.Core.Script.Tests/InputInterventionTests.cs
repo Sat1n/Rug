@@ -73,7 +73,7 @@ internal static class InputInterventionTests
         await ManualFixtureScriptAsync();
         await PolicyAsync(); await AbsoluteMotionAsync(); await BoundariesAsync(); await FaultsAsync(); await LeasesAsync();
         await GatewayLateAsync(); await GatewayLateAsync(detectorFailure: true);
-        await SchedulerAsync(); await ProductionBarrierAsync(); await ProductionMotionAsync(); await ConsumerFaultAsync();
+        await SchedulerAsync(); await PausedSourceFaultAsync(); await ProductionBarrierAsync(); await ProductionMotionAsync(); await ConsumerFaultAsync();
         Console.WriteLine("Candidate intervention policy, session boundaries, faults, delayed native cleanup and scheduler integration tests passed");
     }
     private static async Task SchedulerCancellationOrderAsync()
@@ -463,12 +463,17 @@ internal static class InputInterventionTests
             try { await scheduler.StartTaskAsync("input", 123); throw new Exception("factory failure ignored"); } catch (IOException) { }
             Check(f.Monitor.Snapshot.Sessions == 0, "failed startup retained input session"); fail = false;
             var a = await scheduler.StartTaskAsync("input", 123); var b = await scheduler.StartTaskAsync("input", 456);
+            var paused = scheduler.Instances.Single(c => c.InstanceId == a);
+            Check(scheduler.PauseTask(a), "input pause request failed before candidate takeover");
+            await Until(() => paused.TaskStatus == AutomationTaskStatus.Paused);
             using var devtools = await f.SessionAsync();
             Check(f.Monitor.Snapshot.Sessions == 3 && f.Arbiter.Snapshot.Active == 0, "sessions failed to cover waiting periods/multiple instances/DevTools");
             f.Source.Emit(Mouse(x: 3)); await Until(() => devtools.Token.IsCancellationRequested); devtools.Dispose();
             await f.Monitor.PendingTakeover.WaitAsync(TimeSpan.FromSeconds(5));
             Check(scheduler.Instances.Count == 1 && scheduler.Instances.Single().InstanceId == timer, "global trigger stopped timer or retained input runs");
+            Check(paused.TaskStatus == AutomationTaskStatus.Stopped, "candidate did not stop the Paused input instance");
             f.Arbiter.ReturnControl();
+            Check(!scheduler.ResumeTask(a), "Return control revived a Paused input instance");
             var fresh = await scheduler.StartTaskAsync("input", 123);
             Check(fresh != a && fresh != b && scheduler.Instances.Count == 2, "return revived old instances");
             await scheduler.StopTaskAsync(fresh);
@@ -479,6 +484,39 @@ internal static class InputInterventionTests
             try { await starting; throw new Exception("candidate allowed input startup"); } catch (OperationCanceledException) { }
             await f.Monitor.PendingTakeover.WaitAsync(TimeSpan.FromSeconds(5));
             Check(f.Monitor.Snapshot.Sessions == 0 && scheduler.Instances.Single().InstanceId == timer, "starting input cleanup leaked session/run");
+        }
+        finally { Directory.Delete(root, true); }
+    }
+    private static async Task PausedSourceFaultAsync()
+    {
+        string root = Path.Combine(AppContext.BaseDirectory, "paused-source-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            foreach (string id in new[] { "input", "timer" })
+            {
+                string dir = Path.Combine(root, id); Directory.CreateDirectory(dir);
+                await File.WriteAllTextAsync(Path.Combine(dir, "manifest.json"), JsonSerializer.Serialize(new
+                { id, name = id, version = "1", targetProcess = "test", permissions = id == "input" ? new[] { "input", "timer" } : new[] { "timer" } }));
+                await File.WriteAllTextAsync(Path.Combine(dir, "main.lua"), "function on_tick() rug.sleep(60000) end");
+            }
+            await using var f = new Fixture(); await f.StartAsync();
+            var auth = new PluginAuthorization(); TestAuthorizationHost.ApproveCatalog(auth, root);
+            await using var scheduler = new Scheduler(new PluginManager(NullLogger<PluginManager>.Instance), root,
+                () => new FakeCapture(), () => new FakeInput(),
+                (c, i) => new LuaRuntime(c, new FakeOcr(), i, NullLogger<LuaRuntime>.Instance, ensureForeground: _ => true),
+                NullLogger<Scheduler>.Instance, new NoAnomaly(), authorization: auth, inputArbiter: f.Arbiter, intervention: f.Monitor);
+            var timer = await scheduler.StartTaskAsync("timer", 0);
+            var input = await scheduler.StartTaskAsync("input", 123);
+            var context = scheduler.Instances.Single(c => c.InstanceId == input);
+            Check(scheduler.PauseTask(input), "source fault fixture pause failed");
+            await Until(() => context.TaskStatus == AutomationTaskStatus.Paused);
+            f.Source.SetState(InputEventSourceState.Faulted);
+            await f.Monitor.PendingTakeover.WaitAsync(TimeSpan.FromSeconds(5));
+            Check(context.TaskStatus == AutomationTaskStatus.Stopped && f.Monitor.Snapshot.Sessions == 0 &&
+                scheduler.Instances.Single().InstanceId == timer && !scheduler.ResumeTask(input),
+                "source fault revived Paused input or stopped timer");
+            try { f.Arbiter.ReturnControl(); throw new Exception("unhealthy detector allowed return"); } catch (InputUnavailableException) { }
         }
         finally { Directory.Delete(root, true); }
     }

@@ -61,6 +61,7 @@ if (args.Contains("--raw-input-self-test") || args.Contains("--raw-input-diagnos
 
 if (args.Contains("--raw-input-tests")) { await RawInputTests.RunAsync(); return; }
 if (args.Contains("--intervention-tests")) { await InputInterventionTests.RunAsync(); return; }
+if (args.Contains("--lifecycle-tests")) { await LifecycleTests.RunAsync(); return; }
 if (args.Contains("--observer-tests")) { await ExternalHookObserverTests.RunAsync(); return; }
 if (args.Contains("--manual-hook-tests")) { await ManualHookInstallTests.RunAsync(); return; }
 
@@ -1096,6 +1097,7 @@ await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new 
         "JSON launch objects retain their nested structure");
 }
 await GatewayTests.RunAsync();
+await LifecycleTests.RunAsync();
 await AuthorizationTests.RunAsync();
 await InputArbitrationTests.RunAsync();
 await InputInterventionTests.RunAsync();

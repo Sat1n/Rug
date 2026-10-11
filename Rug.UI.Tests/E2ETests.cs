@@ -10,6 +10,8 @@ public static class E2ETests
 
     public static async Task RunTakeoverUiAsync()
         => await RunScriptAsync("ManualTakeoverUiSmoke.ps1", "Manual takeover UI E2E");
+    public static async Task RunLifecycleUiAsync()
+        => await RunScriptAsync("LifecycleUiSmoke.ps1", "Lifecycle UI E2E");
 
     private static async Task RunScriptAsync(string scriptName, string description)
     {

@@ -131,5 +131,13 @@ no automation pipeline and no native interop itself.
 
 ## Phase 3 MVP integration (Task 3.4)
 
+Task 3.5-06A adds host footer Pause/Resume/Stop and selected-run lifecycle labels:
+“正在暂停”, “已暂停”, “正在恢复”, “正在停止”. Pause success means request accepted;
+only the snapshot confirms pause. Buttons follow live status; selection/reload and
+coalesced dispatcher notifications re-query current identity, not stale event
+values. Human observation stays active, including physical Pause clicks on input
+runs. See [lifecycle contract](../Rug.UI.Core/Lifecycle.md) and `--lifecycle-ui`.
+New real-human 06A checks remain NOT RUN by the agent.
+
 * `MainWindow` owns the plugin sidebar, selected dynamic host, hot-reload status and a footer entry for DevTools. The bundled `plugins/demo_arknights` is copied into the app output and seeded into the default local plugin directory only when absent; an explicit `RUG_PLUGINS_ROOT` is never modified.
 * `DemoWorkflowCoordinator` subscribes to `demo.start_selected` and passes the selected task IDs as that run's launch input. Its per-instance state subscription converts `rug.set_state("demo.step_event", json)` into `SchemaStep[]` at the same instance's `demo.steps`; the subscription is released on stop. `MainWindow` supplies a key-specific detached display copy after completion so a card rebuild can still show the timeline, while the stopped InstanceState is evicted. The generic `DynamicUIHost` and `UIFactory` have no demo-specific state key. The demo uses only `timer` permission and simulates wake/OCR steps without controlling an external app.

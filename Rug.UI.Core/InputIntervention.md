@@ -163,6 +163,11 @@ approve grants or synthesize human input. In the same app session:
 
 ### 05B-02 manual acceptance — 2026-10-11
 
+06A ordinary confirmed Pause does not unregister an input session: candidate
+input, grant revocation or detector failure still stops that input run. Timer /
+vision runs remain separate; Return never resumes a paused or stopped run.
+See [pause and stop boundaries](Lifecycle.md) for the distinct 06A checks.
+
 User manually confirmed PASS against baseline
 `81fca0b5ebb001fccc5195400696f74f200b82b4` using the fixture above.
 With an English keyboard layout, four automatic B presses/releases grew the

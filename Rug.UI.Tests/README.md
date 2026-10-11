@@ -23,6 +23,12 @@ when selecting each run, fallback after stop, stale data removal during an
 active-run schema hot reload, and binding a new run after that reload. The test
 uses an isolated plugin directory and cleans it up.
 
+Run with `--lifecycle-ui` for `LifecycleUiSmoke.ps1`: actual timer Pause/Resume
+labels/buttons, two identities, a paused timer retained across takeover/return,
+fresh snapshots after hot reload and disabled terminal controls. Consent is
+explicit; isolated files/app are cleaned. It does not perform human input or
+prove hardware native pause timing. See [06A contract/manual steps](../Rug.UI.Core/Lifecycle.md).
+
 Since Task 3.5-02, selected tasks are per-run launch inputs. The Lua demo writes
 only its InstanceState, and the displayed completed timeline is a detached UI
 copy associated with that run; PluginConfig remains plugin-scoped in memory.

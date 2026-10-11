@@ -26,6 +26,7 @@ public sealed partial class MainWindow : WindowEx
     private IDisposable? _resumeSubscription;
     private Guid? _selectedInstanceId;
     private bool _updatingInstancePicker;
+    private int _lifecycleRefreshQueued;
     private bool _initialized;
     private bool _closingInput, _inputClosed;
 
@@ -50,6 +51,7 @@ public sealed partial class MainWindow : WindowEx
         Closed += (_, _) =>
         {
             if (_scheduler is not null) _scheduler.InstancesChanged -= OnInstancesChanged;
+            if (_scheduler is not null) _scheduler.LifecycleChanged -= OnLifecycleChanged;
             if (_inputArbiter is not null) _inputArbiter.StateChanged -= InputControlChanged;
             if (_intervention is not null) _intervention.StateChanged -= InputControlChanged;
             if (_demo is not null) _demo.TimelineChanged -= OnDemoTimelineChanged;
@@ -71,6 +73,7 @@ public sealed partial class MainWindow : WindowEx
         _inputArbiter.StateChanged += InputControlChanged;
         RefreshInputControl();
         _scheduler.InstancesChanged += OnInstancesChanged;
+        _scheduler.LifecycleChanged += OnLifecycleChanged;
         _demo = App.GetService<Services.DemoWorkflowCoordinator>();
         _demo.TimelineChanged += OnDemoTimelineChanged;
         var bus = App.GetService<ICommandBus>();
@@ -266,6 +269,7 @@ public sealed partial class MainWindow : WindowEx
 
     private void BindSelectedInstance(TaskExecutionContext? selected)
     {
+        RefreshLifecycle();
         if (_host is null) return;
         IReadOnlyDictionary<string, IReadOnlyList<SchemaStep>>? completedDemo = null;
         if (selected is null && _activePlugin == Services.DemoWorkflowCoordinator.PluginId &&
@@ -275,6 +279,49 @@ public sealed partial class MainWindow : WindowEx
                 [Services.DemoWorkflowCoordinator.TimelineStateKey] = demo.CurrentSteps
             };
         _host.SetActiveInstance(selected?.Identity, completedDemo);
+    }
+
+    private void OnLifecycleChanged(object? sender, LifecycleChangedEventArgs args)
+    {
+        if (Interlocked.Exchange(ref _lifecycleRefreshQueued, 1) != 0) return;
+        if (!DispatcherQueue.TryEnqueue(() =>
+        {
+            Interlocked.Exchange(ref _lifecycleRefreshQueued, 0);
+            RefreshLifecycle(); // Re-query selected identity; never replay delayed event values.
+        })) Interlocked.Exchange(ref _lifecycleRefreshQueued, 0);
+    }
+
+    private void RefreshLifecycle()
+    {
+        LifecycleSnapshot? snapshot = _selectedInstanceId is { } id ? _scheduler?.GetLifecycle(id) : null;
+        if (snapshot is not null && !string.Equals(snapshot.Identity.PluginId, _activePlugin, StringComparison.OrdinalIgnoreCase))
+            snapshot = null;
+        LifecycleStatus.Text = snapshot switch
+        {
+            { Status: AutomationTaskStatus.Stopping } => "正在停止",
+            { Status: AutomationTaskStatus.Paused, ResumeRequested: true } => "正在恢复",
+            { Status: AutomationTaskStatus.Paused } => "已暂停",
+            { PauseRequested: true } => "正在暂停",
+            { Status: AutomationTaskStatus.Starting } => "正在启动",
+            { Status: AutomationTaskStatus.Running } => "运行中",
+            { Status: AutomationTaskStatus.Faulted } => "运行故障",
+            { Status: AutomationTaskStatus.Stopped } => "已停止",
+            _ => "无运行实例"
+        };
+        PauseInstanceButton.IsEnabled = snapshot is { PauseRequested: false,
+            Status: AutomationTaskStatus.Starting or AutomationTaskStatus.Running };
+        ResumeInstanceButton.IsEnabled = snapshot is { Status: AutomationTaskStatus.Paused, ResumeRequested: false };
+        StopInstanceButton.IsEnabled = snapshot is { Status: AutomationTaskStatus.Starting or AutomationTaskStatus.Running or AutomationTaskStatus.Paused };
+    }
+
+    private async void PauseInstance_Click(object sender, RoutedEventArgs args) => await LifecycleCommandAsync(AutomationOperation.Pause);
+    private async void ResumeInstance_Click(object sender, RoutedEventArgs args) => await LifecycleCommandAsync(AutomationOperation.Resume);
+    private async void StopInstance_Click(object sender, RoutedEventArgs args) => await LifecycleCommandAsync(AutomationOperation.Stop);
+    private async Task LifecycleCommandAsync(AutomationOperation operation)
+    {
+        try { await ControlSelectedAsync(operation, CancellationToken.None); }
+        catch (Exception error) { ReloadStatus.Text = "生命周期请求失败 · " + error.Message; }
+        finally { RefreshLifecycle(); }
     }
 
     private async Task StartWindowlessAsync(object? parameter, CancellationToken cancellationToken)

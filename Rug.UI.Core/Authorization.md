@@ -45,6 +45,12 @@ operation completion and instance cleanup, without per-run event subscriptions.
 
 ## Startup and dispatch
 
+06A Resume requires the current requested permissions within the caller's live
+capability/grant ceiling. The owning run checks its startup declaration/identity,
+current authorization, original target lifetime and input control again before
+the serial driver resumes Lua. Revocation still stops a Paused input run; regrant
+requires a new identity. Ordinary Pause changes no grant. See [lifecycle contract](Lifecycle.md).
+
 All current requested permissions must be granted before starting. Gateway checks
 the current requested list, not an old caller snapshot. Scheduler independently
 enforces this before capture/input/runtime factories and capture binding, including

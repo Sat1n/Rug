@@ -27,7 +27,7 @@ public sealed class ManifestAutomationPermissionChecker : IAutomationPermissionC
 public sealed class AutomationGateway : IAutomationGateway
 {
     private sealed record Run(RunIdentity Identity, PluginInstallation Installation, string[] Permissions, CancellationToken Token,
-        Func<AutomationOperation, JsonElement, CancellationToken, Task<object?>> Execute);
+        Func<AutomationOperation, JsonElement, CancellationToken, Task<object?>> Execute, TaskExecutionContext? Lifecycle, bool Preparing = false);
     private sealed class Entry(string fingerprint)
     {
         public string Fingerprint { get; } = fingerprint;
@@ -92,9 +92,32 @@ public sealed class AutomationGateway : IAutomationGateway
         RunIdentity? run = null, nint hwnd = 0, Action<RunIdentity>? onReady = null, IEnumerable<string>? capabilities = null) =>
         new(this, principal, source, manifest.Id, manifest.Permissions.ToArray(), Authorization.Bind(manifest, capabilities), run, hwnd, onReady);
     internal void RegisterRun(RunIdentity identity, PluginManifest manifest, CancellationToken token,
-        Func<AutomationOperation, JsonElement, CancellationToken, Task<object?>> execute)
+        Func<AutomationOperation, JsonElement, CancellationToken, Task<object?>> execute, TaskExecutionContext? lifecycle = null)
     {
-        lock (_gate) _runs.Add(identity.InstanceId, new(identity, PluginInstallation.From(manifest), manifest.Permissions.ToArray(), token, execute));
+        lock (_gate)
+        {
+            token.ThrowIfCancellationRequested();
+            var run = new Run(identity, PluginInstallation.From(manifest), manifest.Permissions.ToArray(), token, execute, lifecycle);
+            if (_runs.TryGetValue(identity.InstanceId, out var preparing) && preparing.Preparing &&
+                preparing.Identity == identity && ReferenceEquals(preparing.Lifecycle, lifecycle)) _runs[identity.InstanceId] = run with { Preparing = true };
+            else _runs.Add(identity.InstanceId, run);
+        }
+    }
+    internal void RegisterStartingRun(TaskExecutionContext context, PluginManifest manifest)
+    {
+        lock (_gate)
+        {
+            context.Cancellation.Token.ThrowIfCancellationRequested();
+            if (context.TaskStatus == AutomationTaskStatus.Stopping) throw new OperationCanceledException();
+            _runs.Add(context.InstanceId, new(context.Identity, PluginInstallation.From(manifest), manifest.Permissions.ToArray(),
+                context.Cancellation.Token, (_, _, _) => Task.FromException<object?>(new GatewayRejectedException(OperationError.UnsupportedOperation)),
+                context, Preparing: true));
+        }
+    }
+    internal void CompleteStartingRun(Guid instanceId)
+    {
+        lock (_gate) if (_runs.TryGetValue(instanceId, out var run) && run.Preparing)
+            _runs[instanceId] = run with { Preparing = false };
     }
     internal void EndRun(Guid instanceId)
     {
@@ -108,7 +131,8 @@ public sealed class AutomationGateway : IAutomationGateway
     private static bool SamePlugin(string first, string second) => string.Equals(first, second, StringComparison.OrdinalIgnoreCase);
     private IEnumerable<string> Required(AutomationCallContext caller, OperationRequest request)
     {
-        if (request.Operation == AutomationOperation.Start) return Authorization.Query(caller.Authorization.Installation).Requested;
+        if (request.Operation is AutomationOperation.Start or AutomationOperation.Resume)
+            return Authorization.Query(caller.Authorization.Installation).Requested;
         if (ManifestAutomationPermissionChecker.RequiredPermission(request.Operation) is not { } required) return [];
         if (request.Operation == AutomationOperation.FindImage && request.Parameters.TryGetProperty("path", out var path) &&
             path.ValueKind == JsonValueKind.String)
@@ -241,11 +265,23 @@ public sealed class AutomationGateway : IAutomationGateway
                     linked.Token.ThrowIfCancellationRequested();
                 }
                 if (_activeWork >= ActiveCapacity) throw new GatewayRejectedException(OperationError.CapacityExceeded);
+                bool business = request.Operation is not (AutomationOperation.Start or AutomationOperation.Stop or AutomationOperation.Pause or AutomationOperation.Resume);
+                if (business && run?.Preparing == true) throw new GatewayRejectedException(OperationError.InvalidLifecycleState);
+                var lifetime = business ? run?.Lifecycle?.EnterOperation(
+                    request.Operation is AutomationOperation.Click or AutomationOperation.PressKey) : null;
                 // Admission is atomic with EndRun; service code never runs while holding the registry gate.
-                work = Task.Run(() =>
+                work = Task.Run(async () =>
                 {
+                    using var actualLifetime = lifetime;
                     executionToken.ThrowIfCancellationRequested();
-                    return AuthorizedDispatchAsync();
+                    try { return await AuthorizedDispatchAsync().ConfigureAwait(false); }
+                    catch (InputCleanupException cleanup)
+                    {
+                        // Record before releasing the actual-work permit: pause/stop
+                        // must not publish success ahead of failed mandatory releases.
+                        run?.Lifecycle?.RecordFailure(cleanup);
+                        throw;
+                    }
                     async Task<object?> AuthorizedDispatchAsync()
                     {
                         if (_waitForDispatch is not null) await _waitForDispatch().ConfigureAwait(false);
@@ -279,6 +315,9 @@ public sealed class AutomationGateway : IAutomationGateway
             _ = work.ContinueWith(task =>
             {
                 _ = task.Exception;
+                if (task.IsFaulted && entry.Completion.Task.IsCompleted)
+                    _logger.LogError(task.Exception, "Late automation work failed operation={OperationId} type={Type}",
+                        request.OperationId, request.Operation);
                 lock (_gate) { entry.WorkInFlight = false; _activeWork--; }
             }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, System.Threading.Tasks.TaskScheduler.Default);
             object? value = await work.WaitAsync(linked.Token).ConfigureAwait(false);
@@ -288,7 +327,8 @@ public sealed class AutomationGateway : IAutomationGateway
         }
         catch (OperationCanceledException)
         {
-            bool timedOut = deadline.IsCancellationRequested && !callerToken.IsCancellationRequested && !(run?.Token.IsCancellationRequested ?? false);
+            bool timedOut = deadline.IsCancellationRequested && !callerToken.IsCancellationRequested &&
+                (request.Operation == AutomationOperation.Stop || !(run?.Token.IsCancellationRequested ?? false));
             result = new(timedOut ? OperationStatus.TimedOut : OperationStatus.Cancelled,
                 timedOut ? OperationError.DeadlineExceeded : OperationError.Cancelled, OutcomeUncertain: Volatile.Read(ref started) != 0);
         }
@@ -330,9 +370,13 @@ public sealed class AutomationGateway : IAutomationGateway
                 if (_stop is null) throw new GatewayRejectedException(OperationError.UnsupportedOperation);
                 await _stop(run!.Identity.InstanceId).ConfigureAwait(false); return true;
             case AutomationOperation.Pause:
-                return (_pause ?? throw new GatewayRejectedException(OperationError.UnsupportedOperation))(run!.Identity.InstanceId);
+                if (!(_pause ?? throw new GatewayRejectedException(OperationError.UnsupportedOperation))(run!.Identity.InstanceId))
+                    throw new GatewayRejectedException(OperationError.InvalidLifecycleState);
+                return true; // Request accepted, not a promise of confirmed Paused.
             case AutomationOperation.Resume:
-                return (_resume ?? throw new GatewayRejectedException(OperationError.UnsupportedOperation))(run!.Identity.InstanceId);
+                if (!(_resume ?? throw new GatewayRejectedException(OperationError.UnsupportedOperation))(run!.Identity.InstanceId))
+                    throw new GatewayRejectedException(OperationError.InvalidLifecycleState);
+                return true;
             default: return await run!.Execute(request.Operation, request.Parameters, token).ConfigureAwait(false);
         }
     }
@@ -357,7 +401,7 @@ public sealed class AutomationGateway : IAutomationGateway
         if (result.Error == OperationError.PermissionDenied)
             _logger.LogWarning("Permission denied: plugin={PluginId}, operation={OperationId}, type={Type}", caller.PluginId, request.OperationId, request.Operation);
     }
-    private sealed class GatewayRejectedException(OperationError error, string[]? missing = null) : Exception
+    internal sealed class GatewayRejectedException(OperationError error, string[]? missing = null) : Exception
     {
         public OperationError Error { get; } = error;
         public IReadOnlyList<string> Missing { get; } = Array.AsReadOnly(missing ?? []);

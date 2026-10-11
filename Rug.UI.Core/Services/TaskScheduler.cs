@@ -74,6 +74,9 @@ public sealed class TaskScheduler : ITaskScheduler
     public AutomationGateway Gateway { get; }
     public IReadOnlyCollection<TaskExecutionContext> Instances => _instances.Values.ToArray();
     public event EventHandler? InstancesChanged;
+    public event EventHandler<LifecycleChangedEventArgs>? LifecycleChanged;
+    public LifecycleSnapshot? GetLifecycle(Guid instanceId) =>
+        _instances.TryGetValue(instanceId, out var context) ? context.Snapshot : null;
 
     /// <summary>Replace the cached catalog after a plugin file save, under the same gate used by starts.</summary>
     public async Task RefreshPluginsAsync(CancellationToken cancellationToken = default)
@@ -158,6 +161,8 @@ public sealed class TaskScheduler : ITaskScheduler
         CancellationToken inputEpoch = default;
         bool inputStarting = false;
         IInputSession? inputSession = null;
+        TaskExecutionContext? context = null;
+        InputTarget? target = null;
         try
         {
             PluginManifest source = await GetPluginAsync(pluginId, cancellation.Token).ConfigureAwait(false);
@@ -175,7 +180,7 @@ public sealed class TaskScheduler : ITaskScheduler
                 }
                 inputEpoch = _inputArbiter.AutomationToken;
                 inputCancellation = inputEpoch.Register(() => cancellation.Cancel());
-                _inputArbiter.BindTarget(hwnd);
+                target = _inputArbiter.BindTarget(hwnd);
                 cancellation.Token.ThrowIfCancellationRequested();
             }
             bool needsWindow = source.Permissions.Contains(Permission.Capture) ||
@@ -207,34 +212,64 @@ public sealed class TaskScheduler : ITaskScheduler
             runtime.ConfigureInputArbiter(_inputArbiter);
             _commandBus?.OpenInstance(identity.InstanceScope);
             runtime.ConfigureState(identity, launchInputs, configuration);
-            // Capture is ready before Lua on_init can call rug.capture().
-            if (hwnd != 0)
-                await capture.StartAsync(hwnd, cancellation.Token).ConfigureAwait(false);
-            await runtime.InitializeAsync(Path.Combine(source.PluginDirectory, source.Entry),
-                manifest, cancellation.Token).ConfigureAwait(false);
-            await runtime.PrepareLifecycleAsync().ConfigureAwait(false);
-            var context = new TaskExecutionContext(identity, cancellation, runtime, capture, input);
-            runtime.ConfigureAnomalyHandler((reason, detail) => _anomalies.LogAnomalyAsync(context, reason, detail));
-            cancellation.Token.ThrowIfCancellationRequested();
-            context.AuthorizationLease = authorizationLease;
-            context.AuthorizationCancellation = authorizationCancellation;
-            context.InputCancellation = inputCancellation;
-            context.InputEpochToken = inputEpoch;
-            context.DeclaresInput = declaresInput;
-            context.InputSession = inputSession;
-            onReady?.Invoke(identity);
+            if (hwnd != 0) target ??= _inputArbiter.BindTarget(hwnd);
+            context = new TaskExecutionContext(identity, cancellation, runtime, capture, input)
+            {
+                AuthorizationLease = authorizationLease, AuthorizationCancellation = authorizationCancellation,
+                InputCancellation = inputCancellation, InputEpochToken = inputEpoch,
+                DeclaresInput = declaresInput, InputSession = inputSession
+            };
+            context.ValidateResume = () =>
+            {
+                cancellation.Token.ThrowIfCancellationRequested();
+                using var admission = Gateway.Authorization.Admit(ticket, source.Permissions);
+                admission.Token.ThrowIfCancellationRequested();
+                if (target is not null) _inputArbiter.ValidateTarget(target, declaresInput);
+            };
+            runtime.ConfigureLifecycle(context);
+            context.LifecycleChanged += ForwardLifecycle;
             lock (_lifecycleGate)
             {
                 if (_disposed) throw new ObjectDisposedException(nameof(TaskScheduler));
                 cancellation.Token.ThrowIfCancellationRequested();
                 if (!_instances.TryAdd(id, context)) throw new InvalidOperationException("Duplicate instance id.");
+            }
+            Gateway.RegisterStartingRun(context, manifest);
+            TaskExecutionContext owned = context;
+            context.LifetimeCancellation = cancellation.Token.Register(owned.Cancel);
+            NotifyInstancesChanged();
+            // Capture is ready before Lua on_init can call rug.capture().
+            if (hwnd != 0)
+                await capture.StartAsync(hwnd, cancellation.Token).ConfigureAwait(false);
+            cancellation.Token.ThrowIfCancellationRequested();
+            await runtime.InitializeAsync(Path.Combine(source.PluginDirectory, source.Entry),
+                manifest, cancellation.Token).ConfigureAwait(false);
+            cancellation.Token.ThrowIfCancellationRequested();
+            await runtime.PrepareLifecycleAsync().ConfigureAwait(false);
+            context.Prepared = true;
+            Gateway.CompleteStartingRun(context.InstanceId);
+            runtime.ConfigureAnomalyHandler((reason, detail) => _anomalies.LogAnomalyAsync(context, reason, detail));
+            cancellation.Token.ThrowIfCancellationRequested();
+            onReady?.Invoke(identity);
+            lock (_lifecycleGate)
+            {
+                if (_disposed) throw new ObjectDisposedException(nameof(TaskScheduler));
+                cancellation.Token.ThrowIfCancellationRequested();
                 context.Runner = Task.Run(() => RunAsync(context));
             }
             NotifyInstancesChanged();
             return id;
         }
-        catch
+        catch (Exception error)
         {
+            if (context is not null)
+            {
+                if (error is not OperationCanceledException || !cancellation.IsCancellationRequested)
+                    context.RecordFailure(error);
+                context.Cancel();
+                await CleanupAsync(context).ConfigureAwait(false);
+                throw;
+            }
             cancellation.Cancel();
             if (identity is not null) _commandBus?.CloseInstance(identity.InstanceScope);
             if (runtime is not null)
@@ -275,8 +310,7 @@ public sealed class TaskScheduler : ITaskScheduler
     {
         if (!_instances.TryGetValue(instanceId, out TaskExecutionContext? context)) return;
         context.Cancel();
-        if (context.Runner is Task runner)
-            await runner.ConfigureAwait(false);
+        await context.Completion.ConfigureAwait(false);
     }
 
     private async Task StopInputRunsAsync()
@@ -312,8 +346,7 @@ public sealed class TaskScheduler : ITaskScheduler
         try
         {
             await DriveHookAsync(context, token).ConfigureAwait(false); // on_init
-            if (context.TaskStatus != AutomationTaskStatus.Paused)
-                context.SetStatus(AutomationTaskStatus.Running);
+            context.SetStatus(AutomationTaskStatus.Running);
             while (true)
             {
                 token.ThrowIfCancellationRequested();
@@ -326,14 +359,12 @@ public sealed class TaskScheduler : ITaskScheduler
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch (Exception ex)
         {
-            context.LastError = ex;
-            context.SetStatus(AutomationTaskStatus.Faulted);
+            context.RecordFailure(ex);
             _logger.LogError(ex, "Automation instance {InstanceId} faulted", context.InstanceId);
         }
         finally
         {
-            context.Cancellation.Cancel();
-            context.Runtime.Stop();
+            context.Cancel();
             await CleanupAsync(context).ConfigureAwait(false);
         }
     }
@@ -348,6 +379,9 @@ public sealed class TaskScheduler : ITaskScheduler
             ScriptExecutionResult result = resume
                 ? await context.Runtime.ResumeAsync().ConfigureAwait(false)
                 : await context.Runtime.StepAsync().ConfigureAwait(false);
+            // Ready/yield is a boundary too: pause must win before returning to on_tick.
+            if (context.PauseRequested && result.State is ScriptState.Ready or ScriptState.Yielded or ScriptState.Paused)
+                await context.WaitIfPausedAsync(token).ConfigureAwait(false);
             switch (result.State)
             {
                 case ScriptState.Ready: return;
@@ -372,7 +406,10 @@ public sealed class TaskScheduler : ITaskScheduler
     {
         try
         {
-            try { await context.Runtime.InvokeStopHookAsync(_watchdogTimeout).ConfigureAwait(false); }
+            // Gateway may have returned cancellation while native work is still alive.
+            // Do not run on_stop or touch any service handle until actual work ends.
+            await context.DrainOperationsAsync().ConfigureAwait(false);
+            try { if (context.Prepared) await context.Runtime.InvokeStopHookAsync(_watchdogTimeout).ConfigureAwait(false); }
             catch (Exception ex) { RecordCleanupError(context, ex, "on_stop"); }
             try { await context.Capture.StopAsync().ConfigureAwait(false); }
             catch (Exception ex) { RecordCleanupError(context, ex, "capture stop"); }
@@ -385,16 +422,29 @@ public sealed class TaskScheduler : ITaskScheduler
         }
         finally
         {
-            _commandBus?.CloseInstance(context.InstanceScope);
-            context.SetStatus(context.LastError is null ? AutomationTaskStatus.Stopped : AutomationTaskStatus.Faulted);
-            _instances.TryRemove(context.InstanceId, out _);
-            context.AuthorizationCancellation.Dispose();
-            context.InputCancellation.Dispose();
-            context.InputSession?.Dispose();
-            context.AuthorizationLease?.Dispose();
-            context.Cancellation.Dispose();
-            NotifyInstancesChanged();
+            try
+            {
+                TryCleanup(() => _commandBus?.CloseInstance(context.InstanceScope), "state close");
+                TryCleanup(context.AuthorizationCancellation.Dispose, "authorization subscription");
+                TryCleanup(context.InputCancellation.Dispose, "input subscription");
+                TryCleanup(context.LifetimeCancellation.Dispose, "lifetime subscription");
+                TryCleanup(() => context.InputSession?.Dispose(), "input session");
+                TryCleanup(() => context.AuthorizationLease?.Dispose(), "authorization lease");
+                TryCleanup(context.Cancellation.Dispose, "cancellation disposal");
+                context.SetStatus(context.LastError is null ? AutomationTaskStatus.Stopped : AutomationTaskStatus.Faulted);
+                _instances.TryRemove(context.InstanceId, out _);
+                NotifyInstancesChanged();
+            }
+            finally { context.Complete(); }
+            void TryCleanup(Action action, string stage)
+            { try { action(); } catch (Exception error) { RecordCleanupError(context, error, stage); } }
         }
+    }
+
+    private void ForwardLifecycle(object? sender, LifecycleChangedEventArgs args)
+    {
+        foreach (EventHandler<LifecycleChangedEventArgs> handler in LifecycleChanged?.GetInvocationList() ?? [])
+            try { handler(this, args); } catch (Exception error) { _logger.LogWarning(error, "Lifecycle notification failed"); }
     }
 
     private void NotifyInstancesChanged()
@@ -405,7 +455,7 @@ public sealed class TaskScheduler : ITaskScheduler
 
     private void RecordCleanupError(TaskExecutionContext context, Exception ex, string stage)
     {
-        context.LastError ??= ex;
+        context.RecordFailure(ex);
         _logger.LogError(ex, "Automation instance {InstanceId} failed during {Stage}", context.InstanceId, stage);
     }
 

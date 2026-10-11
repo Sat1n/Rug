@@ -75,6 +75,13 @@ nor an input-detection grace period; takeover/cancellation interrupts the wait.
 target lifetime/queue capacity. Existing permission, identity and parameter
 errors remain distinct. Deduplication still pins live underlying work.
 
+06A ordinary Pause keeps already admitted input/queues under these checks until
+actual work and releases finish; only then is Paused confirmed. New run input is
+rejected while pause is pending/confirmed. Gateway timeout does not shorten this
+permit, and Stop waits for actual drain before disposal. Resume rechecks the original
+target stamp/control and current grants. Human takeover still stops Paused input
+runs; Return does not revive them. See [lifecycle contract](Lifecycle.md).
+
 Synchronous C-ABI calls cannot be interrupted once entered. A takeover may wait
 for such a call, and residual native input can occur before it completes. A call
 that never completes keeps its lease and native handle alive; the UI stays in

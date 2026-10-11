@@ -245,12 +245,14 @@ internal static class AuthorizationTests
         auth.Revoke(installation, [Permission.Capture]);
         var outcome = await work;
         Check(outcome.Status == OperationStatus.Cancelled && outcome.OutcomeUncertain, "in-flight revoke lost uncertainty");
+        Check(scheduler.Instances.Single(c => c.InstanceId == first).TaskStatus == AutomationTaskStatus.Stopping,
+            "revocation declared stopped while noncooperative capture was live");
+        captures[0].Release();
         await Until(() => scheduler.Instances.Count == 1);
         Check(scheduler.Instances.Single().InstanceId == other, "revocation affected other plugin or retained sibling");
         auth.Grant(installation, [Permission.Capture]);
         Guid fresh = await scheduler.StartTaskAsync("first", 789);
         Check(fresh != first && fresh != sibling, "new start inherited identity");
-        captures[0].Release();
         await Until(() => scheduler.Gateway.ActiveWorkCount == 0);
         Check((await scheduler.Gateway.ExecuteAsync(caller, duplicate)).Status != OperationStatus.Success && captures[0].Calls == 1,
             "revocation cleared dedup and repeated old side effect");

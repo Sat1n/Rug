@@ -9,6 +9,8 @@ public interface IScriptRuntime : IAsyncDisposable
 {
     void ConfigureGateway(AutomationGateway gateway) { }
     void ConfigureInputArbiter(IInputArbiter arbiter) { }
+    /// <summary>Trusted scheduler-owned lifecycle gate, never an adapter parameter.</summary>
+    void ConfigureLifecycle(TaskExecutionContext context) { }
     ScriptState State { get; }
     event EventHandler<ScriptStateChangedEventArgs>? StateChanged;
     /// <summary>Bind structural identity, launch inputs and a plugin config snapshot before initialization.</summary>

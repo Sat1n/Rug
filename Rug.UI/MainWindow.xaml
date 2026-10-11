@@ -55,6 +55,15 @@
                     <TextBlock x:Name="ReloadStatus" Text="监控中" Opacity="0.7"
                                VerticalAlignment="Center"/>
                 </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                    <TextBlock x:Name="LifecycleStatus" Text="无运行实例" VerticalAlignment="Center"/>
+                    <Button x:Name="PauseInstanceButton" Content="暂停" AutomationProperties.Name="Pause instance"
+                            IsEnabled="False" Click="PauseInstance_Click"/>
+                    <Button x:Name="ResumeInstanceButton" Content="恢复" AutomationProperties.Name="Resume instance"
+                            IsEnabled="False" Click="ResumeInstance_Click"/>
+                    <Button x:Name="StopInstanceButton" Content="停止" AutomationProperties.Name="Stop instance"
+                            IsEnabled="False" Click="StopInstance_Click"/>
+                </StackPanel>
             </StackPanel>
         </Border>
     </Grid>

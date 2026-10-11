@@ -8,6 +8,14 @@ tags: [lua, tests, input]
 
 # Lua coroutine bridge tests
 
+Task 3.5-06A adds `--lifecycle-tests` (also in the normal suite): actual Lua and
+controlled barriers for init/tick, sleep/vision, input/KeyUp, admitted queues,
+late native work after Gateway timeout, Stop priority, independent identities,
+resume authority/target checks, startup stop and cleanup failures. Assertions
+distinguish request acceptance from confirmed Paused. Epoch cancellation and
+unexplained Lua Stopped regressions remain. See
+[lifecycle contract and UI/manual verification](../../Rug.UI.Core/Lifecycle.md).
+
 Opt-in `--hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split|keyboard-pump|keyboard-direct|keyboard-messages|keyboard-messages-mouse|keyboard-messages-keyboard|keyboard-native-messages|target-native-messages|keyboard-native-callback` supports the
 [controlled comparison](../NativeInputProbe/ControlledStages.md). It sends no
 input; both-raw modes add Raw Input after both Hooks; target-raw adds it without
