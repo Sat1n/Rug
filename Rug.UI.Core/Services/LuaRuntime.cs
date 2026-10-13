@@ -705,7 +705,13 @@ public sealed class LuaRuntime : IScriptRuntime
 
     private async Task<object?> ResolveAnomalyAsync(LuaTable args)
     {
-        using var work = _context?.EnterOperation(input: false);
+        IDisposable? work;
+        try { work = _context?.EnterOperation(input: false); }
+        catch (AutomationGateway.GatewayRejectedException error) when
+            (error.Error == OperationError.InvalidLifecycleState && _context!.IsBusinessClosed)
+        { throw new HostStopAdmissionCancellation(); }
+        // Convert only direct admission, never permission or archive failures.
+        using var admittedWork = work;
         Func<string, string, Task<string>> handler = _anomalyHandler
             ?? throw new InvalidOperationException("Anomaly handler is not configured.");
         string reason = Convert.ToString(args[4], CultureInfo.InvariantCulture) ?? "Unknown anomaly";

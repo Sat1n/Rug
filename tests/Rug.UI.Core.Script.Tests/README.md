@@ -29,6 +29,11 @@ Real Lua Stop-classification barriers cover synchronous and awaited admission
 refusals and pause-deferred waits without token propagation. Lua/permission errors,
 unrelated service cancellation and KeyUp cleanup failure retain Faulted semantics;
 host Stop refusals cleanly stop without another action.
+The anomaly admission barrier blocks Stop notification before token propagation
+and then lets actual Lua reach resolve_anomaly: zero frame calls, one on_stop and
+normal Stopped. Permission denial remains Faulted with no capture; a real
+AnomalyLogger directory/file IO failure remains Faulted after capture. Previously
+admitted anomaly work still drains through the existing regression.
 
 Opt-in `--hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split|keyboard-pump|keyboard-direct|keyboard-messages|keyboard-messages-mouse|keyboard-messages-keyboard|keyboard-native-messages|target-native-messages|keyboard-native-callback` supports the
 [controlled comparison](../NativeInputProbe/ControlledStages.md). It sends no

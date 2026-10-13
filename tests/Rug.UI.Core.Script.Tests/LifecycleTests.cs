@@ -28,6 +28,8 @@ internal static class LifecycleTests
         await InputBoundaryAsync(); await QueuedInputAsync(); await TimeoutStopAsync();
         await StartingStopAsync(); await StartupPauseTransitionAsync(); await IndependentRunsAsync(); await LostAuthorityAsync();
         await CleanupFailureAsync(); await AnomalyDrainAsync();
+        foreach (string mode in new[] { "closed", "denied", "archive-failure" }) await AnomalyAdmissionStopAsync(mode);
+        Console.WriteLine("Direct anomaly admission passed: host Stop cancels before capture; permission denial and real archive IO failure remain faults");
         await StopAdmissionAsync(bridgeQueue: true); await StopAdmissionAsync(bridgeQueue: false);
         await LateResumeStopAsync(); await TerminalAdmissionAsync(); await DispatchStopAsync(); await CompositeStopAsync();
         foreach (bool timeout in new[] { false, true })
@@ -750,6 +752,62 @@ internal static class LifecycleTests
         }
     }
 
+    private static async Task AnomalyAdmissionStopAsync(string mode)
+    {
+        await using var f = await Fixture.CreateAsync("""
+            function on_tick()
+              rug.log('anomaly_admission_barrier')
+              rug.agent.resolve_anomaly('incident', 'detail')
+              rug.log('anomaly_unreachable')
+            end
+            function on_stop() rug.log('stop_once') end
+            """, mode == "denied" ? [Permission.Capture] : [Permission.Agent, Permission.Capture],
+            anomaliesFactory: mode != "archive-failure" ? null : root =>
+            {
+                string path = Path.Combine(root, "existing-file-not-log-directory");
+                File.WriteAllText(path, "blocked");
+                return new AnomalyLogger(NullLogger<AnomalyLogger>.Instance, path);
+            });
+        using var releaseLua = new ManualResetEventSlim(); using var releaseStop = new ManualResetEventSlim();
+        var luaEntered = Signal(); var stopping = Signal(); int advanced = 0;
+        f.Logger.Intercept = message =>
+        {
+            if (message.Contains("anomaly_admission_barrier")) { luaEntered.TrySetResult(); releaseLua.Wait(); }
+            if (message.Contains("anomaly_unreachable")) Interlocked.Increment(ref advanced);
+        };
+        var c = await f.StartAsync(); await Bound(luaEntered.Task);
+        var scriptTerminal = new TaskCompletionSource<ScriptState>(TaskCreationOptions.RunContinuationsAsynchronously);
+        c.Runtime.StateChanged += (_, e) =>
+        { if (e.Current is ScriptState.Stopped or ScriptState.Faulted) scriptTerminal.TrySetResult(e.Current); };
+        Task? stop = null;
+        try
+        {
+            if (mode != "archive-failure")
+            {
+                c.LifecycleChanged += (_, e) =>
+                {
+                    if (e.Snapshot.Status == AutomationTaskStatus.Stopping) { stopping.TrySetResult(); releaseStop.Wait(); }
+                };
+                stop = Task.Run(() => f.Scheduler.StopTaskAsync(c.InstanceId)); await Bound(stopping.Task);
+                Check(c.TaskStatus == AutomationTaskStatus.Stopping && !c.Cancellation.IsCancellationRequested,
+                    "anomaly barrier did not isolate admission closure before token propagation");
+            }
+            releaseLua.Set(); await scriptTerminal.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            // Classify Lua before allowing the original Stop to propagate its token.
+            // Fault notifications must not stay blocked while awaiting host cleanup.
+            releaseStop.Set(); await Bound(c.Completion);
+            Check(advanced == 0 && f.Logger.StopCalls == 1 && f.Capture.Disposed && f.Input.Disposed && f.Scheduler.Gateway.RegisteredRunCount == 0,
+                "anomaly admission advanced/repeated/leaked cleanup");
+            Check(mode switch
+            {
+                "closed" => c.TaskStatus == AutomationTaskStatus.Stopped && c.LastError is null && f.Capture.FrameCalls == 0,
+                "denied" => c.TaskStatus == AutomationTaskStatus.Faulted && c.LastError is PermissionDeniedException && f.Capture.FrameCalls == 0,
+                _ => c.TaskStatus == AutomationTaskStatus.Faulted && c.LastError is IOException && f.Capture.FrameCalls == 1
+            }, $"wrong direct anomaly admission semantics: {mode}, status={c.TaskStatus}, capture={f.Capture.FrameCalls}, error={c.LastError}");
+        }
+        finally { releaseLua.Set(); releaseStop.Set(); if (stop is not null) await Bound(stop); }
+    }
+
     private static async Task AnomalyDrainAsync()
     {
         await using var f = await Fixture.CreateAsync("function on_tick() rug.agent.resolve_anomaly('incident', 'detail') end",
@@ -785,7 +843,8 @@ internal static class LifecycleTests
         public bool HoldFrame, HoldStart, HoldPress, HoldUp;
         public bool Windowed;
         public PluginInstallation Installation => new("lifecycle", Path.Combine(Root, "lifecycle"));
-        public static async Task<Fixture> CreateAsync(string script, string[] permissions, IAutomationPermissionChecker? permissionChecker = null)
+        public static async Task<Fixture> CreateAsync(string script, string[] permissions, IAutomationPermissionChecker? permissionChecker = null,
+            Func<string, IAnomalyLogger>? anomaliesFactory = null)
         {
             string root = Path.Combine(AppContext.BaseDirectory, "lifecycle-" + Guid.NewGuid().ToString("N"));
             string plugin = Path.Combine(root, "lifecycle"); Directory.CreateDirectory(plugin);
@@ -800,7 +859,7 @@ internal static class LifecycleTests
                 () => { var c = new GateCapture { HoldFrame = f.HoldFrame, HoldStart = f.HoldStart }; f.Captures.Add(c); return c; },
                 () => { var i = new InputArbitrationTests.ControlledInput { HoldPress = f.HoldPress, HoldUp = f.HoldUp }; f.Inputs.Add(i); return i; },
                 (c, i) => new LuaRuntime(c, f.Ocr, i, f.Logger, new FakeCoordinateMapper(), ensureForeground: _ => true, commandBus: f.Bus),
-                NullLogger<Scheduler>.Instance, new NoAnomaly(), commandBus: f.Bus, authorization: f.Auth, inputArbiter: f.Arbiter, permissionChecker: permissionChecker);
+                NullLogger<Scheduler>.Instance, anomaliesFactory?.Invoke(root) ?? new NoAnomaly(), commandBus: f.Bus, authorization: f.Auth, inputArbiter: f.Arbiter, permissionChecker: permissionChecker);
             return f;
         }
         public async Task<TaskExecutionContext> StartAsync()

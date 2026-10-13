@@ -98,6 +98,10 @@ arbitrary exceptions: genuine Lua errors, permission denials and unrelated servi
 cancellation remain faults. Mandatory release/cleanup errors remain in LastError
 and lead to Faulted/quarantine even when they also cancel Lua. Gateway status,
 deduplication and input OutcomeUncertain remain unchanged.
+The direct `resolve_anomaly` work admission uses the same Stop cancellation
+conversion, scoped only to EnterOperation. Agent permission checks and actual
+archive failures remain faults; already-admitted anomaly work keeps its existing
+drain/cancellation/terminal incident behavior.
 
 Stop waits for actual service tasks (including
 noncooperative capture/OCR/input and the existing anomaly logger), Lua exit and mandatory releases before `on_stop`,

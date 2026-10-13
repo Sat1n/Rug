@@ -90,6 +90,7 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   captures a private Lua traceback alongside the supplied context, and dispatches
   to the owning task's `IAnomalyLogger`. Unauthorized calls raise an audited
   `PermissionDeniedException` before invoking the logger.
+  Closed-host admission refusal cancels before capture.
 * `AnomalyLogger` captures the owning instance's current BGRA frame and writes a
   real RGBA PNG plus same-basename JSON under `./logs/anomalies/` by default.
   The JSON stores a UTC timestamp, plugin/instance IDs, reason, script context,
