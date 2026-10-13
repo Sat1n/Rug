@@ -98,6 +98,10 @@ or stack is returned to adapters. Lua maps successful values through its existin
 frame/vision table conversion, permission rejection to `PermissionDeniedException`,
 cancellation to stop, and other outcomes to a script error. An operation failure
 does not automatically retry.
+For a host-closed run only, Lua maps InvalidLifecycleState admission refusal to
+normal Stop cancellation (including synchronous/awaited results and paused
+deferral). Genuine Lua/permission/cleanup failures remain faults; Gateway results
+and input uncertainty are not rewritten by this Lua classification.
 
 Execution failures retain the original exception in trusted host error logs with
 operation/correlation IDs, source, target identity and operation type. Adapter and

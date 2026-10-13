@@ -387,10 +387,11 @@ public sealed class TaskScheduler : ITaskScheduler
                 case ScriptState.Ready: return;
                 case ScriptState.Yielded: resume = true; break;
                 case ScriptState.Paused: break;
-                case ScriptState.Stopped when token.IsCancellationRequested || context.InputEpochToken.IsCancellationRequested ||
+                case ScriptState.Stopped when context.IsBusinessClosed || token.IsCancellationRequested || context.InputEpochToken.IsCancellationRequested ||
                     context.AuthorizationLease?.Token.IsCancellationRequested == true:
                     // Linked cancellation callbacks can wake Lua before they reach the
                     // scheduler. A cancelled host-owned epoch/grant is sufficient evidence;
+                    // a closed host lifecycle also proves Stop before token propagation.
                     // propagate it before classifying this terminal result as cancellation.
                     context.Cancel();
                     throw new OperationCanceledException(token);

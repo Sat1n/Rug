@@ -429,7 +429,7 @@ public sealed class LuaRuntime : IScriptRuntime
     {
         if (_disposed) throw new ObjectDisposedException(nameof(LuaRuntime));
         if (State == ScriptState.Stopped) return new(ScriptState.Stopped);
-        if (_paused) return new(ScriptState.Paused);
+        if (_paused) return new(_context?.IsBusinessClosed == true ? ScriptState.Stopped : ScriptState.Paused);
         if (resume != (_pendingId is not null))
             throw new InvalidOperationException(resume ? "No yielded operation to resume." : "Use ResumeAsync for a yielded operation.");
         if (!resume && State != ScriptState.Ready) throw new InvalidOperationException("Runtime is not ready.");
@@ -449,7 +449,7 @@ public sealed class LuaRuntime : IScriptRuntime
                 }
                 input = await pending.WaitAsync(token).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            catch (OperationCanceledException error) when (token.IsCancellationRequested || error is HostStopAdmissionCancellation)
             {
                 Stop();
                 return new(ScriptState.Stopped);
@@ -470,7 +470,7 @@ public sealed class LuaRuntime : IScriptRuntime
                 if (_paused) return new(ScriptState.Paused);
                 using var segment = _context?.TryEnterLuaSegment();
                 if (_context is not null && segment is null)
-                    return new(token.IsCancellationRequested ? ScriptState.Stopped : ScriptState.Paused);
+                    return new(token.IsCancellationRequested || _context.IsBusinessClosed ? ScriptState.Stopped : ScriptState.Paused);
                 if (completedId is Guid id)
                 {
                     _operations.Remove(id);
@@ -490,7 +490,7 @@ public sealed class LuaRuntime : IScriptRuntime
             }
             finally { _gate.Release(); }
         }
-        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        catch (OperationCanceledException error) when (token.IsCancellationRequested || error is HostStopAdmissionCancellation)
         {
             Stop();
             return new(ScriptState.Stopped);
@@ -613,12 +613,20 @@ public sealed class LuaRuntime : IScriptRuntime
         // action with a fresh ID; the rejected ID remains protected by deduplication.
         async Task<object?> AfterActivationAsync()
         {
-            await _context!.WaitForBusinessAsync(ct).ConfigureAwait(false);
+            try { await _context!.WaitForBusinessAsync(ct).ConfigureAwait(false); }
+            catch (AutomationGateway.GatewayRejectedException error) when
+                (error.Error == OperationError.InvalidLifecycleState && _context!.IsBusinessClosed)
+            { throw new HostStopAdmissionCancellation(); }
             return await ExecuteGatewayAsync(operation, parameters, ct).ConfigureAwait(false);
         }
     }
+    // Only a lifecycle admission refusal for this closed host run gets this tag.
+    // Do not classify arbitrary Lua/service/permission errors by a stopping flag.
+    private sealed class HostStopAdmissionCancellation : OperationCanceledException;
     private object? MapGatewayResult(OperationResult result, AutomationOperation operation)
     {
+        if (result.Status == OperationStatus.Rejected && result.Error == OperationError.InvalidLifecycleState && _context?.IsBusinessClosed == true)
+            throw new HostStopAdmissionCancellation();
         if (result.Error == OperationError.PermissionDenied)
             throw new Rug.UI.Core.Exceptions.PermissionDeniedException(_identity!.PluginId,
                 result.DeniedPermission ?? ManifestAutomationPermissionChecker.RequiredPermission(operation)!, "rug." + (operation switch

@@ -25,6 +25,10 @@ verify different IDs join one cleanup and same IDs share original pending/timeou
 results. Forged identities/installations and live policy denial still reject
 before deduplication; terminal picker removal cannot shortcut host completion,
 and finished runs retain no lifecycle/entry/lease records.
+Real Lua Stop-classification barriers cover synchronous and awaited admission
+refusals and pause-deferred waits without token propagation. Lua/permission errors,
+unrelated service cancellation and KeyUp cleanup failure retain Faulted semantics;
+host Stop refusals cleanly stop without another action.
 
 Opt-in `--hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split|keyboard-pump|keyboard-direct|keyboard-messages|keyboard-messages-mouse|keyboard-messages-keyboard|keyboard-native-messages|target-native-messages|keyboard-native-callback` supports the
 [controlled comparison](../NativeInputProbe/ControlledStages.md). It sends no

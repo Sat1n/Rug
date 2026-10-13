@@ -89,6 +89,16 @@ already queued input cannot start after closure even while the token remains
 uncancelled. A late Resume validation cannot reopen the run. Stop requests still
 share cleanup, and KeyUp/MouseUp releases bypass business admission.
 
+Lua classifies a Rejected/InvalidLifecycleState result for its closed host run
+as normal Stop cancellation, for both immediate and awaited Gateway results.
+Pause-deferred business waits use the same explicit cancellation tag. The serial
+driver accepts that host-closed lifecycle as evidence even before token callbacks
+propagate; a closed pause boundary cannot resume Lua. This does not suppress
+arbitrary exceptions: genuine Lua errors, permission denials and unrelated service
+cancellation remain faults. Mandatory release/cleanup errors remain in LastError
+and lead to Faulted/quarantine even when they also cancel Lua. Gateway status,
+deduplication and input OutcomeUncertain remain unchanged.
+
 Stop waits for actual service tasks (including
 noncooperative capture/OCR/input and the existing anomaly logger), Lua exit and mandatory releases before `on_stop`,
 capture stop, runtime/input/capture disposal and state/subscription cleanup. Every
@@ -146,6 +156,10 @@ Repeated Stop barriers cover noncooperative input, final capture disposal, remov
 from the picker before host completion and first-request timeout/replay. They
 assert one on_stop/cleanup, retained validation and zero leftover run/entry/lease
 records after completion; these tests do not emit native input.
+Real Lua classification barriers close admission with an uncancelled token before
+immediate rejection, held movement completion and paused deferral. They assert
+normal Stopped/no next input, while real Lua/permission/unrelated cancellation
+errors and failed KeyUp retain their fault semantics.
 The isolated WinUI timer regression explicitly grants permission and verifies
 labels, button enablement, independent selection, explicit Resume, a paused timer
 retained across manual takeover, refreshed new runs after UI reload and cleanup.
