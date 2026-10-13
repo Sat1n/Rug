@@ -435,7 +435,11 @@ public sealed class TaskScheduler : ITaskScheduler
                 _instances.TryRemove(context.InstanceId, out _);
                 NotifyInstancesChanged();
             }
-            finally { context.Complete(); }
+            finally
+            {
+                try { Gateway.EndRun(context.InstanceId); }
+                finally { context.Complete(); }
+            }
             void TryCleanup(Action action, string stage)
             { try { action(); } catch (Exception error) { RecordCleanupError(context, error, stage); } }
         }

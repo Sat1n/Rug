@@ -71,7 +71,8 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   disposes every resource before Stopped/Faulted. Failed observers cannot fail runs.
   Stopping closes business admission atomically before notifying observers;
   Gateway dispatch and input queue rechecks reject without depending on token
-  propagation, while required releases and shared Stop cleanup remain available.
+  propagation. The host retains Stop identity/dedup until cleanup ends; required
+  releases and shared Stop cleanup remain available.
   See [06A transitions, cancellation and verification](Lifecycle.md).
 * The host captures `debug.sethook` before removing Lua's `debug` and `coroutine`
   globals. Each host-created coroutine gets a count hook that checks cancellation

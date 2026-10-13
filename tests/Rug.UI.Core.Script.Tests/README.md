@@ -20,6 +20,11 @@ new UI/Lua/Agent/MCP requests and previously queued bridge/arbiter/Gateway work
 must not execute. Tests retain necessary KeyUp, reject late Resume/terminal work,
 deduplicate refused requests and check cancellation callbacks from another thread
 can query/admit without a lock deadlock. Only Fake services send input in these tests.
+Repeated Gateway Stop tests retain noncooperative work and final-disposal barriers,
+verify different IDs join one cleanup and same IDs share original pending/timeout
+results. Forged identities/installations and live policy denial still reject
+before deduplication; terminal picker removal cannot shortcut host completion,
+and finished runs retain no lifecycle/entry/lease records.
 
 Opt-in `--hook-isolation-stage load|target|keyboard|both|both-raw|both-raw-split|target-raw|keyboard-raw|keyboard-split|keyboard-pump|keyboard-direct|keyboard-messages|keyboard-messages-mouse|keyboard-messages-keyboard|keyboard-native-messages|target-native-messages|keyboard-native-callback` supports the
 [controlled comparison](../NativeInputProbe/ControlledStages.md). It sends no

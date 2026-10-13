@@ -853,7 +853,9 @@ public sealed class LuaRuntime : IScriptRuntime
 
     public void Stop()
     {
-        if (_identity is not null) _gateway?.EndRun(_identity.InstanceId);
+        // A scheduler-owned run remains addressable for Stop until host cleanup
+        // completes. Business admission is already closed by its lifecycle/token.
+        if (_context is null && _identity is not null) _gateway?.EndRun(_identity.InstanceId);
         if (State == ScriptState.Stopped) return;
         _lifetime?.Cancel();
         ChangeState(ScriptState.Stopped);
@@ -871,7 +873,7 @@ public sealed class LuaRuntime : IScriptRuntime
         }
         if (state is ScriptState.Stopped or ScriptState.Faulted)
         {
-            if (_identity is not null) _gateway?.EndRun(_identity.InstanceId);
+            if (_context is null && _identity is not null) _gateway?.EndRun(_identity.InstanceId);
             _lifetime?.Cancel();
         }
         StateChanged?.Invoke(this, new(previous, state));

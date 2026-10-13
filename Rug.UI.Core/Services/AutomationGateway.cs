@@ -374,7 +374,11 @@ public sealed class AutomationGateway : IAutomationGateway
                 return await _start!(caller.PluginId, caller.StartHwnd, inputs, caller.OnReady, token).ConfigureAwait(false);
             case AutomationOperation.Stop:
                 if (_stop is null) throw new GatewayRejectedException(OperationError.UnsupportedOperation);
-                await _stop(run!.Identity.InstanceId).ConfigureAwait(false); return true;
+                await _stop(run!.Identity.InstanceId).ConfigureAwait(false);
+                // Keep the captured host completion authoritative even if cleanup
+                // already removed the instance from the scheduler's live picker.
+                if (run.Lifecycle is { } lifecycle) await lifecycle.Completion.ConfigureAwait(false);
+                return true;
             case AutomationOperation.Pause:
                 if (!(_pause ?? throw new GatewayRejectedException(OperationError.UnsupportedOperation))(run!.Identity.InstanceId))
                     throw new GatewayRejectedException(OperationError.InvalidLifecycleState);

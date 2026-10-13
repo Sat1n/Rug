@@ -100,6 +100,17 @@ are recorded before drain signals, preventing an early terminal success.
 Stop's own run cancellation does not mask a caller deadline: Gateway returns
 TimedOut while the shared cleanup continues in Stopping.
 
+Lua Stop/Faulted does not unregister a scheduler-owned run. Its identity,
+installation, generation and binding stay in the host Gateway until the scheduler
+completes cleanup, including disposal and terminal notifications. Business remains
+closed. Valid Stop requests with different IDs await the captured host completion;
+the live picker removing an instance cannot shortcut that wait. Same-ID replays
+share the original request task/result, including a timeout, without replacing its
+deadline. Identity and live permission policy still precede deduplication.
+Completion unregisters the run and removes its completed entries; requests after
+unregistration are rejected, not an unbounded terminal replay cache. Standalone
+Lua runtimes continue to unregister themselves on Stop/Faulted.
+
 The original input epoch/grant cancellation still permits clean Lua Stopped.
 Unexpected Stopped without host cancellation still faults. Human candidate input
 uses takeover: stop input runs, preserve timer/vision, and require explicit Return
@@ -131,6 +142,10 @@ Stopping-notification barriers deliberately retain an uncancelled token while
 asserting new UI/Lua/Agent/MCP requests, bridge/arbiter queues and Gateway dispatch
 queues cannot execute. Independent-thread cancellation callbacks verify locks are
 not held; late Resume and all terminal states reject without physical side effects.
+Repeated Stop barriers cover noncooperative input, final capture disposal, removal
+from the picker before host completion and first-request timeout/replay. They
+assert one on_stop/cleanup, retained validation and zero leftover run/entry/lease
+records after completion; these tests do not emit native input.
 The isolated WinUI timer regression explicitly grants permission and verifies
 labels, button enablement, independent selection, explicit Resume, a paused timer
 retained across manual takeover, refreshed new runs after UI reload and cleanup.

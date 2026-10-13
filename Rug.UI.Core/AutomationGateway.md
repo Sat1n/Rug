@@ -112,6 +112,11 @@ so its own completion wait is governed by caller/deadline rather than the token
 it is cancelling. Request deadlines are limited to at most 24 hours.
 Stop's own cancellation cannot mask its caller deadline as Cancelled: a deadline
 returns TimedOut while real work/cleanup continue and the run stays Stopping.
+Scheduler-owned lifecycle records survive Lua Stop/Faulted until host cleanup
+completion. Different Stop IDs join that same completion, including after picker
+removal; a same-ID retry returns the original task/result even after its timeout.
+Full identity/installation and current permission-policy checks remain before
+deduplication. Retaining a lifecycle record never reopens business input.
 
 Already-started work may ignore cancellation. Gateway returns promptly with
 `OutcomeUncertain=true`, observes/discards its late result/failure, and never

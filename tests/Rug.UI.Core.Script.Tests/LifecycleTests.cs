@@ -29,6 +29,10 @@ internal static class LifecycleTests
         await CleanupFailureAsync(); await AnomalyDrainAsync();
         await StopAdmissionAsync(bridgeQueue: true); await StopAdmissionAsync(bridgeQueue: false);
         await LateResumeStopAsync(); await TerminalAdmissionAsync(); await DispatchStopAsync(); await CompositeStopAsync();
+        foreach (bool timeout in new[] { false, true })
+            foreach (bool cleanup in new[] { false, true }) await RepeatedGatewayStopAsync(timeout, cleanup);
+        await TerminalStopCompletionAsync();
+        Console.WriteLine("Repeated Gateway Stop passed: pending work/cleanup, timed-out replay, validated identity/policy, shared completion and registry cleanup");
         Console.WriteLine("Stop admission barriers passed with uncancelled tokens: adapters, bridge/arbiter/dispatch queues, composite steps, releases, late Resume and terminal states");
         Console.WriteLine("Lifecycle barriers passed: init/tick, sleep/vision, actual input/releases, queued input, late work, stop priority, resume validation and cleanup");
     }
@@ -214,6 +218,112 @@ internal static class LifecycleTests
         finally { f.Input.MoveRelease.TrySetResult(); releaseNotification.Set(); if (stop is not null) await Bound(stop); }
         Check(f.Input.Clicks == 0 && c.LastError is null && c.TaskStatus == AutomationTaskStatus.Stopped,
             "composite stop faulted/replayed physical work");
+    }
+
+    private static async Task RepeatedGatewayStopAsync(bool timeout, bool cleanup)
+    {
+        var policy = new StopPolicy();
+        await using var f = await Fixture.CreateAsync("function on_tick() rug.sleep(60000) end function on_stop() rug.log('stop_once') end",
+            [Permission.ControlInput, Permission.Timer], policy);
+        f.HoldPress = !cleanup;
+        var c = await f.StartAsync(); var caller = await f.CallerAsync(c);
+        f.Capture.HoldDispose = cleanup;
+        Task<OperationResult>? input = null;
+        if (!cleanup)
+        {
+            input = f.Scheduler.Gateway.ExecuteAsync(caller, Request(AutomationOperation.PressKey, c.Identity, new { key = 66 }));
+            await Bound(f.Input.PressEntered.Task);
+        }
+        var request = Request(AutomationOperation.Stop, c.Identity);
+        if (timeout) request = request with { Deadline = DateTimeOffset.UtcNow.AddMilliseconds(100) };
+        var first = f.Scheduler.Gateway.ExecuteAsync(caller, request);
+        try
+        {
+            if (cleanup) await Bound(f.Capture.DisposeEntered.Task);
+            else await Until(() => c.Runtime.State == ScriptState.Stopped);
+            Check(c.TaskStatus == AutomationTaskStatus.Stopping && f.Scheduler.Gateway.RegisteredRunCount == 1,
+                "Lua Stop removed host lifecycle record before actual work/cleanup ended");
+            OperationResult? expired = timeout ? await BoundResult(first) : null;
+            Check(timeout ? expired!.Status == OperationStatus.TimedOut && expired.Error == OperationError.DeadlineExceeded : !first.IsCompleted,
+                "first Stop failed to retain pending cleanup/its own timeout");
+            var retry = f.Scheduler.Gateway.ExecuteAsync(caller, request with { Deadline = DateTimeOffset.UtcNow.AddSeconds(10), CorrelationId = "retry" });
+            Check(ReferenceEquals(first, retry), "same operationId Stop did not share original request task");
+            Check(ReferenceEquals(first, f.Scheduler.Gateway.ExecuteAsync(caller, request)), "expired original Stop policy bypassed retained request task");
+            if (timeout) Check(await retry == expired, "retry replaced original timeout with a new policy/result");
+            policy.RejectStop = true;
+            Check((await f.Scheduler.Gateway.ExecuteAsync(caller, request)).Error == OperationError.PermissionDenied,
+                "Stop replay skipped current host permission policy before deduplication");
+            policy.RejectStop = false;
+            var others = Enumerable.Range(0, 3).Select(_ => f.Scheduler.Gateway.ExecuteAsync(caller, Request(AutomationOperation.Stop, c.Identity))).ToArray();
+            await Until(() => others.Any(t => t.IsCompleted) || f.Scheduler.Gateway.ActiveWorkCount >= 4);
+            Check(others.All(t => !t.IsCompleted), "different Stop IDs did not await the same actual cleanup");
+            var denied = await f.Scheduler.Gateway.ExecuteAsync(caller, Request(AutomationOperation.PressKey, c.Identity, new { key = 67 }));
+            Check(denied.Error == OperationError.InvalidLifecycleState && !denied.OutcomeUncertain && f.Input.PressCalls == (cleanup ? 0 : 1),
+                "retained lifecycle record reopened stopped input");
+            foreach (var forged in new[]
+            {
+                request with { Target = request.Target with { RunGeneration = c.RunGeneration + 1 } },
+                request with { Target = request.Target with { TargetBindingId = Guid.NewGuid() } },
+                request with { Target = request.Target with { PluginId = "another-plugin" } },
+                request with { Target = request.Target with { InstanceId = Guid.NewGuid() } }
+            })
+            {
+                var rejected = await f.Scheduler.Gateway.ExecuteAsync(caller, forged);
+                Check(rejected.Status == OperationStatus.Rejected && rejected.Error is OperationError.StaleRun or OperationError.BindingMismatch or OperationError.InvalidCaller or OperationError.InstanceNotFound,
+                    "Stop deduplication bypassed full target validation");
+            }
+            var foreignManifest = new PluginManifest([Permission.ControlInput, Permission.Timer]) { Id = "lifecycle", PluginDirectory = Path.Combine(f.Root, "other-installation") };
+            var foreign = f.Scheduler.Gateway.BindContext(foreignManifest, "test-host", AutomationSource.PluginUI, c.Identity);
+            Check((await f.Scheduler.Gateway.ExecuteAsync(foreign, request)).Error == OperationError.InvalidCaller,
+                "same ID Stop inherited a foreign installation's cached result");
+            f.Input.PressRelease.TrySetResult(); f.Capture.DisposeRelease.TrySetResult();
+            foreach (var other in others) Check((await BoundResult(other)).Status == OperationStatus.Success, "joined Stop failed after real cleanup");
+            if (!timeout) Check((await BoundResult(first)).Status == OperationStatus.Success, "original Stop failed to complete shared cleanup");
+            else Check(await retry == expired, "late cleanup changed original timeout result");
+            if (input is not null) await BoundResult(input);
+            await Until(() => f.Scheduler.Gateway.ActiveWorkCount == 0);
+            Check(c.TaskStatus == AutomationTaskStatus.Stopped && c.LastError is null && f.Logger.StopCalls == 1 &&
+                f.Capture.StopCalls == 1 && f.Capture.DisposeCalls == 1 && f.Input.KeyUps == (cleanup ? 0 : 1) &&
+                f.Scheduler.Instances.Count == 0 && f.Scheduler.Gateway.RegisteredRunCount == 0 && f.Scheduler.Gateway.RetainedOperationCount == 0 &&
+                f.Auth.ActiveLeaseCount == 0 && f.Arbiter.Snapshot.Active == 0,
+                "repeated Stop reran cleanup or retained registry/dedup/resources");
+        }
+        finally { f.Input.PressRelease.TrySetResult(); f.Capture.DisposeRelease.TrySetResult(); }
+    }
+
+    private static async Task TerminalStopCompletionAsync()
+    {
+        await using var f = await Fixture.CreateAsync("function on_tick() rug.sleep(60000) end function on_stop() rug.log('stop_once') end", [Permission.Timer]);
+        var c = await f.StartAsync(); var caller = await f.CallerAsync(c);
+        using var release = new ManualResetEventSlim(); var entered = Signal();
+        f.Scheduler.InstancesChanged += (_, _) =>
+        {
+            if (c.TaskStatus == AutomationTaskStatus.Stopped && f.Scheduler.Instances.Count == 0)
+            { entered.TrySetResult(); release.Wait(); }
+        };
+        var original = f.Scheduler.Gateway.ExecuteAsync(caller, Request(AutomationOperation.Stop, c.Identity));
+        try
+        {
+            await Bound(entered.Task);
+            var joined = f.Scheduler.Gateway.ExecuteAsync(caller, Request(AutomationOperation.Stop, c.Identity));
+            await Until(() => joined.IsCompleted || f.Scheduler.Gateway.ActiveWorkCount >= 2);
+            Check(!original.IsCompleted && !joined.IsCompleted && f.Scheduler.Gateway.RegisteredRunCount == 1,
+                "removed picker instance bypassed the authoritative host completion");
+            release.Set();
+            Check((await BoundResult(original)).Status == OperationStatus.Success && (await BoundResult(joined)).Status == OperationStatus.Success && f.Logger.StopCalls == 1,
+                "terminal Stop did not share the original cleanup completion");
+            await Until(() => f.Scheduler.Gateway.ActiveWorkCount == 0);
+            Check(f.Scheduler.Gateway.RegisteredRunCount == 0 && f.Scheduler.Gateway.RetainedOperationCount == 0, "terminal completion retained lifecycle/Stop entries");
+        }
+        finally { release.Set(); }
+    }
+
+    private sealed class StopPolicy : IAutomationPermissionChecker
+    {
+        public volatile bool RejectStop;
+        private readonly ManifestAutomationPermissionChecker _default = new();
+        public bool IsAllowed(AutomationCallContext caller, IReadOnlyList<string> permissions, AutomationOperation operation) =>
+            !(RejectStop && operation == AutomationOperation.Stop) && _default.IsAllowed(caller, permissions, operation);
     }
 
     private static async Task SegmentAsync(string hook)
@@ -566,7 +676,7 @@ internal static class LifecycleTests
         public bool HoldFrame, HoldStart, HoldPress, HoldUp;
         public bool Windowed;
         public PluginInstallation Installation => new("lifecycle", Path.Combine(Root, "lifecycle"));
-        public static async Task<Fixture> CreateAsync(string script, string[] permissions)
+        public static async Task<Fixture> CreateAsync(string script, string[] permissions, IAutomationPermissionChecker? permissionChecker = null)
         {
             string root = Path.Combine(AppContext.BaseDirectory, "lifecycle-" + Guid.NewGuid().ToString("N"));
             string plugin = Path.Combine(root, "lifecycle"); Directory.CreateDirectory(plugin);
@@ -581,7 +691,7 @@ internal static class LifecycleTests
                 () => { var c = new GateCapture { HoldFrame = f.HoldFrame, HoldStart = f.HoldStart }; f.Captures.Add(c); return c; },
                 () => { var i = new InputArbitrationTests.ControlledInput { HoldPress = f.HoldPress, HoldUp = f.HoldUp }; f.Inputs.Add(i); return i; },
                 (c, i) => new LuaRuntime(c, f.Ocr, i, f.Logger, new FakeCoordinateMapper(), ensureForeground: _ => true, commandBus: f.Bus),
-                NullLogger<Scheduler>.Instance, new NoAnomaly(), commandBus: f.Bus, authorization: f.Auth, inputArbiter: f.Arbiter);
+                NullLogger<Scheduler>.Instance, new NoAnomaly(), commandBus: f.Bus, authorization: f.Auth, inputArbiter: f.Arbiter, permissionChecker: permissionChecker);
             return f;
         }
         public async Task<TaskExecutionContext> StartAsync()
@@ -592,7 +702,7 @@ internal static class LifecycleTests
             await Scheduler.Gateway.ExecuteAsync(await CallerAsync(c), Request(op, c.Identity));
         public async ValueTask DisposeAsync()
         {
-            foreach (var c in Captures) { c.FrameRelease.TrySetResult(); c.StartRelease.TrySetResult(); }
+            foreach (var c in Captures) { c.FrameRelease.TrySetResult(); c.StartRelease.TrySetResult(); c.DisposeRelease.TrySetResult(); }
             foreach (var i in Inputs) { i.PressRelease.TrySetResult(); i.UpRelease.TrySetResult(); }
             Ocr.Release.TrySetResult();
             await Scheduler.DisposeAsync(); Bus.Dispose(); Directory.Delete(Root, true);
@@ -622,15 +732,17 @@ internal static class LifecycleTests
     private sealed class GateCapture : ICaptureService
     {
         public readonly TaskCompletionSource StartEntered = Signal(), StartRelease = Signal(), FrameEntered = Signal(), FrameRelease = Signal();
-        public bool HoldStart, HoldFrame, FailStop, Disposed;
-        public int StopCalls, FrameCalls;
+        public readonly TaskCompletionSource DisposeEntered = Signal(), DisposeRelease = Signal();
+        public bool HoldStart, HoldFrame, FailStop, Disposed, HoldDispose;
+        public int StopCalls, FrameCalls, DisposeCalls;
         public bool IsCapturing => !Disposed;
         public async Task StartAsync(nint hwnd, CancellationToken cancellationToken = default)
         { StartEntered.TrySetResult(); if (HoldStart) await StartRelease.Task.WaitAsync(cancellationToken); }
         public async Task<CapturedFrame?> GrabFrameAsync(CancellationToken cancellationToken = default)
         { FrameCalls++; FrameEntered.TrySetResult(); if (HoldFrame) await FrameRelease.Task; return new(new byte[28], 7, 1, 28); }
         public Task StopAsync() { StopCalls++; return FailStop ? Task.FromException(new IOException("capture stop failed")) : Task.CompletedTask; }
-        public ValueTask DisposeAsync() { Disposed = true; return ValueTask.CompletedTask; }
+        public async ValueTask DisposeAsync()
+        { DisposeCalls++; DisposeEntered.TrySetResult(); if (HoldDispose) await DisposeRelease.Task; Disposed = true; }
     }
     private sealed class GateOcr : IOcrService
     {
