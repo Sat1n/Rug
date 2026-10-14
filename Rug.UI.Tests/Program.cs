@@ -3,6 +3,17 @@ using Rug.UI.Core.Schema;
 using Rug.UI.Core.Services;
 using Rug.UI.Core.Models;
 
+var displayIdentity = new RunIdentity("display", Guid.NewGuid(), 1, null, 0);
+var displayRecoveryId = Guid.NewGuid();
+var validatingSnapshot = new LifecycleSnapshot(displayIdentity, AutomationTaskStatus.Recovering, false, false, 1, false,
+    new(displayRecoveryId, 1, RecoveryPhase.Validating, "controlled-ready", new(RecoveryStatus.NeedsHuman, displayRecoveryId, "controlled-ready")));
+foreach (var (status, expectedCaption) in new[] {
+    (AutomationTaskStatus.Recovering, "正在验证"), (AutomationTaskStatus.Stopping, "正在停止"),
+    (AutomationTaskStatus.Faulted, "运行故障"), (AutomationTaskStatus.Stopped, "已停止"), (AutomationTaskStatus.AwaitingHuman, "等待人工") })
+    Check(Rug.UI.Helpers.LifecyclePresentation.Caption(validatingSnapshot with { Status = status }) == expectedCaption,
+        "retained verification phase hid authoritative lifecycle status: " + status);
+Console.WriteLine("UI lifecycle presentation passed: terminal/Stopping status overrides retained validation phase");
+
 var parser = new SchemaParser();
 string file = Path.Combine(AppContext.BaseDirectory, "ui.json");
 UISchemaNode page = await parser.ParseFileAsync(file);

@@ -51,8 +51,12 @@ Gateway Pause preserves its success/Boolean envelope and deduplication contract.
 `GetLifecycle(id)` and `LifecycleChanged` provide confirmation. Resume is accepted
 only for confirmed Paused (pending duplicates coalesce); it never executes Lua on
 the caller thread. Current grants, the original window lifetime stamp and input
-control are checked before accepting and again on the serial driver. Gateway
-Resume also requires the current declared permissions within the caller's live
+control are checked before accepting and again on the serial driver.
+The driver first distinguishes Stop from an explicit Resume wake, independent
+of token propagation. Stop skips resume validation and uses a narrow host-stop
+cancellation signal; unrelated Lua/permission/resource/cleanup errors still fault.
+An explicit resume check racing with Stop cannot reactivate the closed run.
+Gateway Resume also requires the current declared permissions within the caller's live
 authorization/capability ceiling, just as Start does. Gateway
 also checks full plugin/instance/generation/binding identity.
 

@@ -43,16 +43,19 @@ public sealed class RecoveryCoordinator : IRecoveryCoordinator
     private readonly IRecoveryExecutor? _executor;
     private readonly RecoveryOptions _options;
     private readonly ILogger<RecoveryCoordinator> _diagnostics;
+    private readonly TimeProvider _clock;
     private int _adviceInFlight;
     public const int AdviceCapacity = 32;
     public int ActiveRecoveries => _sessions.Count;
     public int AdviceInFlight => Volatile.Read(ref _adviceInFlight);
 
     public RecoveryCoordinator(IAnomalyLogger logger, IPluginAuthorization authorization,
-        IRecoveryValidatorRegistry validators, IRecoveryExecutor? executor = null, RecoveryOptions? options = null, ILogger<RecoveryCoordinator>? diagnostics = null)
+        IRecoveryValidatorRegistry validators, IRecoveryExecutor? executor = null, RecoveryOptions? options = null, ILogger<RecoveryCoordinator>? diagnostics = null,
+        TimeProvider? clock = null)
     {
         _logger = logger; _authorization = authorization; _validators = validators; _executor = executor;
         _options = options ?? RecoveryOptions.Default; _diagnostics = diagnostics ?? NullLogger<RecoveryCoordinator>.Instance;
+        _clock = clock ?? TimeProvider.System;
         if (_options.AttemptTimeout <= TimeSpan.Zero || _options.ValidationTimeout <= TimeSpan.Zero ||
             _options.AttemptTimeout > TimeSpan.FromMinutes(1) || _options.ValidationTimeout > TimeSpan.FromMinutes(1))
             throw new ArgumentOutOfRangeException(nameof(options));
@@ -139,6 +142,16 @@ public sealed class RecoveryCoordinator : IRecoveryCoordinator
     private async Task WaitHumanAsync(Session session, RecoveryError error)
     {
         Check(session);
+        // A verified image may have been archived before final commitment was cancelled.
+        // Keep the record aligned with the retained coroutine, not that provisional success.
+        if (session.Record is { } record && session.Context.Snapshot.Recovery is { ValidationGeneration: > 0 } snapshot)
+            await ActualAsync(session, async () =>
+            {
+                await _logger.UpdateRecoveryAsync(record, new(session.Request.RecoveryId, snapshot.ValidationGeneration,
+                    "needs_human", error.ToString(), session.Request.Scenario, DateTime.UtcNow)).ConfigureAwait(false);
+                return true;
+            }).ConfigureAwait(false);
+        Check(session);
         Update(session, RecoveryPhase.HandingOff, error);
         if (session.Context.HandoffRecovery is { } handoff) await handoff().ConfigureAwait(false);
         Check(session);
@@ -146,7 +159,8 @@ public sealed class RecoveryCoordinator : IRecoveryCoordinator
     }
     /// <summary>@shape recoveryId: host token bound to run; concurrent callers join one bounded verification.
     /// @source request: ../Models/RecoveryModels.cs#class:RecoveryRequest</summary>
-    public Task<RecoveryResult> VerifyAndContinueAsync(TaskExecutionContext context, Guid recoveryId, CancellationToken cancellationToken = default)
+    public Task<RecoveryResult> VerifyAndContinueAsync(TaskExecutionContext context, Guid recoveryId,
+        CancellationToken cancellationToken = default, DateTimeOffset? requestDeadline = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (context.IsBusinessClosed) throw new OperationCanceledException();
@@ -161,18 +175,20 @@ public sealed class RecoveryCoordinator : IRecoveryCoordinator
             if (session.Verification is { IsCompleted: false }) return session.Verification;
             if (context.TaskStatus != AutomationTaskStatus.AwaitingHuman)
                 throw new AutomationGateway.GatewayRejectedException(OperationError.InvalidLifecycleState);
-            return StartVerificationLocked(session, automatic: false, cancellationToken);
+            return StartVerificationLocked(session, automatic: false, cancellationToken, requestDeadline);
         }
     }
     private Task<RecoveryResult> StartVerification(Session session, bool automatic)
     { lock (session.Gate) return StartVerificationLocked(session, automatic, CancellationToken.None); }
-    private Task<RecoveryResult> StartVerificationLocked(Session session, bool automatic, CancellationToken callerToken)
+    private Task<RecoveryResult> StartVerificationLocked(Session session, bool automatic, CancellationToken callerToken, DateTimeOffset? requestDeadline = null)
     {
         if (session.ActualVerification is { IsCompleted: false } || session.Context.RecoveryWorkInFlight) return Task.FromResult(Result(session, RecoveryStatus.NeedsHuman, RecoveryError.Busy));
-        return session.Verification = Task.Run(() => VerifyAsync(session, automatic, callerToken));
+        return session.Verification = Task.Run(() => VerifyAsync(session, automatic, callerToken, requestDeadline));
     }
-    private async Task<RecoveryResult> VerifyAsync(Session session, bool automatic, CancellationToken callerToken)
+    private async Task<RecoveryResult> VerifyAsync(Session session, bool automatic, CancellationToken callerToken, DateTimeOffset? requestDeadline)
     {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(session.Context.Cancellation.Token, callerToken);
+        DateTimeOffset expiresAt = DateTimeOffset.MaxValue;
         try
         {
             callerToken.ThrowIfCancellationRequested();
@@ -183,7 +199,8 @@ public sealed class RecoveryCoordinator : IRecoveryCoordinator
             { await WaitHumanAsync(session, RecoveryError.NoValidator).ConfigureAwait(false); return Result(session, RecoveryStatus.NeedsHuman, RecoveryError.NoValidator); }
             long generation = Interlocked.Increment(ref session.ValidationGeneration);
             Update(session, RecoveryPhase.Validating, validation: generation);
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(session.Context.Cancellation.Token, callerToken);
+            expiresAt = _clock.GetUtcNow() + _options.ValidationTimeout;
+            if (requestDeadline is { } requested && requested < expiresAt) expiresAt = requested;
             deadline.CancelAfter(_options.ValidationTimeout);
             using var validation = new RecoveryValidationContext(session.Request, session.Context,
                 _authorization, () => Check(session), deadline.Token);
@@ -211,8 +228,10 @@ public sealed class RecoveryCoordinator : IRecoveryCoordinator
             if (!ReferenceEquals(_validators.Find(session.Request.Installation, session.Request.Scenario), validator))
             { await WaitHumanAsync(session, RecoveryError.NoValidator).ConfigureAwait(false); return Result(session, RecoveryStatus.NeedsHuman, RecoveryError.NoValidator); }
             if (!valid) { await WaitHumanAsync(session, result.Error).ConfigureAwait(false); return result; }
-            if (!session.Context.ResolveRecovery(session.Request.RecoveryId, result)) throw new OperationCanceledException();
-            session.Result.TrySetResult(result);
+            // The last registry/service lookup may block or run user code. Commit checks must follow it
+            // under the same lifecycle lock as Stop and include the original request deadline.
+            if (!session.Context.ResolveRecovery(session.Request, result, generation, deadline.Token, expiresAt, _clock, session.Result))
+                throw new OperationCanceledException();
             return result;
         }
         catch (OperationCanceledException) when (session.Context.IsBusinessClosed || session.Context.Cancellation.IsCancellationRequested) { throw; }
@@ -220,6 +239,11 @@ public sealed class RecoveryCoordinator : IRecoveryCoordinator
         {
             await WaitHumanAsync(session, RecoveryError.Cancelled).ConfigureAwait(false);
             return Result(session, RecoveryStatus.NeedsHuman, RecoveryError.Cancelled);
+        }
+        catch (OperationCanceledException) when (deadline.IsCancellationRequested || _clock.GetUtcNow() >= expiresAt)
+        {
+            await WaitHumanAsync(session, RecoveryError.ValidationTimedOut).ConfigureAwait(false);
+            return Result(session, RecoveryStatus.NeedsHuman, RecoveryError.ValidationTimedOut);
         }
         catch (InputUnavailableException)
         {

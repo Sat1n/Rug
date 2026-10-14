@@ -94,16 +94,6 @@ public partial class App : Application
             });
             services.AddSingleton<IRecoveryValidatorRegistry>(p => p.GetRequiredService<RecoveryValidatorRegistry>());
             services.AddSingleton<IRecoveryCoordinator, RecoveryCoordinator>();
-            services.AddSingleton<RecoveryValidatorRegistry>(_ =>
-            {
-                var registry = new RecoveryValidatorRegistry();
-                // Trusted sample registration only; arbitrary plugins have no default success validator.
-                registry.Register(new PluginInstallation("recovery_probe", Path.Combine(PluginsRoot, "recovery_probe")),
-                    "controlled-ready", new FreshGreenFrameValidator());
-                return registry;
-            });
-            services.AddSingleton<IRecoveryValidatorRegistry>(p => p.GetRequiredService<RecoveryValidatorRegistry>());
-            services.AddSingleton<IRecoveryCoordinator, RecoveryCoordinator>();
             services.AddSingleton<ICommandBus>(provider =>
             {
                 var dispatcher = MainWindow.DispatcherQueue;

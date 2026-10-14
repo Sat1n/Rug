@@ -48,7 +48,7 @@ public sealed class AutomationGateway : IAutomationGateway
     private readonly Func<string, nint, IReadOnlyDictionary<string, object?>, Action<RunIdentity>?, CancellationToken, Task<RunIdentity>>? _start;
     private readonly Func<Guid, Task>? _stop;
     private readonly Func<Guid, bool>? _pause, _resume;
-    private readonly Func<Guid, Guid, CancellationToken, Task<RecoveryResult>>? _verifyRecovery;
+    private readonly Func<Guid, Guid, DateTimeOffset, CancellationToken, Task<RecoveryResult>>? _verifyRecovery;
     private int _activeWork;
     private readonly Func<Task>? _waitForDispatch;
     public const int Capacity = 4096;
@@ -60,7 +60,7 @@ public sealed class AutomationGateway : IAutomationGateway
         Func<string, CancellationToken, Task<PluginManifest>>? getPlugin = null,
         Func<string, nint, IReadOnlyDictionary<string, object?>, Action<RunIdentity>?, CancellationToken, Task<RunIdentity>>? start = null,
         Func<Guid, Task>? stop = null, Func<Guid, bool>? pause = null, Func<Guid, bool>? resume = null,
-        TimeProvider? clock = null, IPluginAuthorization? authorization = null, Func<Task>? waitForDispatch = null, Func<Guid, Guid, CancellationToken, Task<RecoveryResult>>? verifyRecovery = null)
+        TimeProvider? clock = null, IPluginAuthorization? authorization = null, Func<Task>? waitForDispatch = null, Func<Guid, Guid, DateTimeOffset, CancellationToken, Task<RecoveryResult>>? verifyRecovery = null)
     {
         _logger = logger; _permissions = permissions ?? new ManifestAutomationPermissionChecker();
         _getPlugin = getPlugin; _start = start; _stop = stop; _pause = pause; _resume = resume;
@@ -380,7 +380,7 @@ public sealed class AutomationGateway : IAutomationGateway
                 return await _start!(caller.PluginId, caller.StartHwnd, inputs, caller.OnReady, token).ConfigureAwait(false);
             case AutomationOperation.VerifyRecovery:
                 if (_verifyRecovery is null) throw new GatewayRejectedException(OperationError.UnsupportedOperation);
-                return await _verifyRecovery(run!.Identity.InstanceId, request.Parameters.GetProperty("recoveryId").GetGuid(), token).ConfigureAwait(false);
+                return await _verifyRecovery(run!.Identity.InstanceId, request.Parameters.GetProperty("recoveryId").GetGuid(), request.Deadline, token).ConfigureAwait(false);
             case AutomationOperation.Stop:
                 if (_stop is null) throw new GatewayRejectedException(OperationError.UnsupportedOperation);
                 await _stop(run!.Identity.InstanceId).ConfigureAwait(false);

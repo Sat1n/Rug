@@ -356,11 +356,11 @@ public sealed class TaskScheduler : ITaskScheduler
         await context.Completion.ConfigureAwait(false);
     }
 
-    private Task<RecoveryResult> VerifyRecoveryAsync(Guid instanceId, Guid recoveryId, CancellationToken token)
+    private Task<RecoveryResult> VerifyRecoveryAsync(Guid instanceId, Guid recoveryId, DateTimeOffset deadline, CancellationToken token)
     {
         if (!_instances.TryGetValue(instanceId, out var context))
             throw new AutomationGateway.GatewayRejectedException(OperationError.InstanceNotFound);
-        return _recovery.VerifyAndContinueAsync(context, recoveryId, token);
+        return _recovery.VerifyAndContinueAsync(context, recoveryId, token, deadline);
     }
 
     private async Task StopInputRunsAsync()
@@ -406,6 +406,7 @@ public sealed class TaskScheduler : ITaskScheduler
                 await Task.Delay(_tickInterval, token).ConfigureAwait(false);
             }
         }
+        catch (TaskExecutionContext.HostStopWakeCancellation) when (context.IsBusinessClosed) { }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch (Exception ex)
         {

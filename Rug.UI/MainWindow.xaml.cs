@@ -296,21 +296,7 @@ public sealed partial class MainWindow : WindowEx
         LifecycleSnapshot? snapshot = _selectedInstanceId is { } id ? _scheduler?.GetLifecycle(id) : null;
         if (snapshot is not null && !string.Equals(snapshot.Identity.PluginId, _activePlugin, StringComparison.OrdinalIgnoreCase))
             snapshot = null;
-        LifecycleStatus.Text = snapshot switch
-        {
-            { Recovery.Phase: RecoveryPhase.Validating } => "正在验证",
-            { Status: AutomationTaskStatus.Recovering } => "恢复处理中",
-            { Status: AutomationTaskStatus.AwaitingHuman } => "等待人工",
-            { Status: AutomationTaskStatus.Stopping } => "正在停止",
-            { Status: AutomationTaskStatus.Paused, ResumeRequested: true } => "正在恢复",
-            { Status: AutomationTaskStatus.Paused } => "已暂停",
-            { PauseRequested: true } => "正在暂停",
-            { Status: AutomationTaskStatus.Starting } => "正在启动",
-            { Status: AutomationTaskStatus.Running } => "运行中",
-            { Status: AutomationTaskStatus.Faulted } => "运行故障",
-            { Status: AutomationTaskStatus.Stopped } => "已停止",
-            _ => "无运行实例"
-        };
+        LifecycleStatus.Text = Rug.UI.Helpers.LifecyclePresentation.Caption(snapshot);
         if (snapshot?.Recovery is { } recovery && snapshot.Status is AutomationTaskStatus.Recovering or AutomationTaskStatus.AwaitingHuman)
             LifecycleStatus.Text += " · " + recovery.Reason;
         VerifyRecoveryButton.IsEnabled = snapshot is { Status: AutomationTaskStatus.AwaitingHuman };

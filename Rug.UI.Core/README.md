@@ -89,9 +89,9 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 * Live `agent` grants admit bounded `rug.agent.resolve_anomaly(reason, contextString)`.
   [Recovery contract](Recovery.md) defines the injected coordinator/executor/validator,
   Recovering/AwaitingHuman states, preserved coroutine and Stop precedence.
-* Default production waits for explicit human verification. Only a trusted
-  installation/scenario validator can resume the original coroutine, with a Lua
-  `{status="resolved",recoveryId,reason,error}` table. No ordinary Resume bypass.
+* Production waits for human verification. Trusted installation/scenario validation
+  returns Lua `{status="resolved",recoveryId,reason,error}`. Commit checks identity,
+  cancellation and deadlines under the Stop transition lock. No Resume bypass.
 * `AnomalyLogger` writes fresh BGRA→PNG and same-basename JSON in `./logs/anomalies/`:
   UTC time, plugin/run/recovery IDs, bounded business context (no VM traceback),
   relative screenshot, null `agent_resolution` and typed verification summary.

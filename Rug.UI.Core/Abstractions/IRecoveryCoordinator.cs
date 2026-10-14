@@ -7,7 +7,8 @@ namespace Rug.UI.Core.Abstractions;
 public interface IRecoveryCoordinator
 {
     Task<RecoveryResult> RequestAsync(TaskExecutionContext context, string reason, string detail);
-    Task<RecoveryResult> VerifyAndContinueAsync(TaskExecutionContext context, Guid recoveryId, CancellationToken cancellationToken = default);
+    Task<RecoveryResult> VerifyAndContinueAsync(TaskExecutionContext context, Guid recoveryId,
+        CancellationToken cancellationToken = default, DateTimeOffset? requestDeadline = null);
 }
 /// <summary>Bounded local suggestion only: no input/capture/services exposed.</summary>
 public interface IRecoveryExecutor

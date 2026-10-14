@@ -28,6 +28,8 @@ internal static class LifecycleTests
         await InputBoundaryAsync(); await QueuedInputAsync(); await TimeoutStopAsync();
         await StartingStopAsync(); await StartupPauseTransitionAsync(); await IndependentRunsAsync(); await LostAuthorityAsync();
         await CleanupFailureAsync(); await AnomalyDrainAsync();
+        foreach (string mode in new[] { "stop", "resume-fault", "resume-stop" }) await PausedWakeBoundaryAsync(mode);
+        await PausedHostStopAsync();
         foreach (string mode in new[] { "closed", "denied", "archive-failure" }) await AnomalyAdmissionStopAsync(mode);
         Console.WriteLine("Direct anomaly admission passed: host Stop cancels before capture; permission denial and real archive IO failure remain faults");
         await StopAdmissionAsync(bridgeQueue: true); await StopAdmissionAsync(bridgeQueue: false);
@@ -41,6 +43,60 @@ internal static class LifecycleTests
         Console.WriteLine("Repeated Gateway Stop passed: pending work/cleanup, timed-out replay, validated identity/policy, shared completion and registry cleanup");
         Console.WriteLine("Stop admission barriers passed with uncancelled tokens: adapters, bridge/arbiter/dispatch queues, composite steps, releases, late Resume and terminal states");
         Console.WriteLine("Lifecycle barriers passed: init/tick, sleep/vision, actual input/releases, queued input, late work, stop priority, resume validation and cleanup");
+    }
+    private static async Task PausedWakeBoundaryAsync(string mode)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var capture = new GateCapture(); var input = new InputArbitrationTests.ControlledInput();
+        await using var runtime = new LuaRuntime(capture, new GateOcr(), input, NullLogger<LuaRuntime>.Instance);
+        var c = new TaskExecutionContext(new("paused-wake", Guid.NewGuid(), 1, null, 0), cancellation, runtime, capture, input);
+        c.SetStatus(AutomationTaskStatus.Running); Check(c.Pause(), "pause request rejected");
+        int validations = 0;
+        using var release = new ManualResetEventSlim(); var entered = Signal();
+        c.ValidateResume = () =>
+        {
+            int call = Interlocked.Increment(ref validations);
+            if (mode == "stop") throw new InputUnavailableException("TakingOver");
+            if (call == 2)
+            {
+                if (mode == "resume-fault") throw new IOException("genuine resume validation failure");
+                entered.TrySetResult(); release.Wait(); throw new InputUnavailableException("TakingOver");
+            }
+        };
+        var boundary = c.WaitIfPausedAsync(cancellation.Token);
+        try
+        {
+            Check(c.TaskStatus == AutomationTaskStatus.Paused, "pause not confirmed");
+            if (mode == "stop") c.SetStatus(AutomationTaskStatus.Stopping);
+            else
+            {
+                Check(c.Resume(), "explicit resume not accepted");
+                if (mode == "resume-stop")
+                { await Bound(entered.Task); c.SetStatus(AutomationTaskStatus.Stopping); release.Set(); }
+            }
+            try { await Bound(boundary); throw new Exception("pause wake incorrectly continued"); }
+            catch (TaskExecutionContext.HostStopWakeCancellation) when (mode != "resume-fault") { }
+            catch (IOException error) when (mode == "resume-fault" && error.Message.Contains("genuine")) { }
+            Check(!cancellation.IsCancellationRequested && validations == (mode == "stop" ? 0 : 2),
+                "stop wake depended on cancellation or performed implicit resume validation");
+            Console.WriteLine("Paused wake boundary PASS: " + mode + "; token propagation held");
+        }
+        finally { release.Set(); c.Cancel(); }
+    }
+    private static async Task PausedHostStopAsync()
+    {
+        await using var f = await Fixture.CreateAsync("function on_tick() rug.sleep(60000); rug.press_key(66,1) end function on_stop() rug.log('stop_once') end",
+            [Permission.ControlInput, Permission.Timer]);
+        var c = await f.StartAsync(); await Until(() => c.TaskStatus == AutomationTaskStatus.Running);
+        Check(c.Pause(), "host pause rejected"); await Until(() => c.TaskStatus == AutomationTaskStatus.Paused);
+        int checks = 0;
+        c.ValidateResume = () => { Interlocked.Increment(ref checks); throw new InputUnavailableException("TakingOver"); };
+        c.SetStatus(AutomationTaskStatus.Stopping); // No Cancel call; the paused driver wakes on lifecycle state alone.
+        await Bound(c.Completion);
+        Check(c.TaskStatus == AutomationTaskStatus.Stopped && c.LastError is null && checks == 0 &&
+            f.Input.PressCalls == 0 && f.Logger.StopCalls == 1 && f.Capture.Disposed && f.Input.Disposed,
+            "paused host Stop became Faulted, sent input or skipped real cleanup");
+        Console.WriteLine("Paused host Stop PASS: actual Lua, no resume check/input, normal Stopped and one on_stop");
     }
 
     private static async Task StopAdmissionAsync(bool bridgeQueue)

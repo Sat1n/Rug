@@ -21,6 +21,11 @@ actual WinUI consent/crosshair/selection/Verify/Stop automation via
 Green validation must succeed in one request, without host retry loops. Fake
 monotonic clock/barriers cover red/red/green, bounded persistent-red rejection,
 cancel/Stop/deadline, capture faults, late green frames and retained deduplication.
+Final-registry barriers test cancellation, validation/request expiry without timer
+propagation, Stop, validator replacement, real lookup failure and successful commit
+against actual Lua/Fake input. Cancelled commitments send zero keys and retain
+needs_human metadata. Paused-wake barriers separate Stop from explicit resume and
+retain genuine failures; the actual scheduler stops once without resume validation.
 See [commands, contracts and exact human steps](../../Rug.UI.Core/Recovery.md).
 Frozen reversal binaries/records are unchanged. Independent Hook gap stays open.
 

@@ -12,6 +12,7 @@ public enum AutomationTaskStatus { Starting, Running, Paused, Recovering, Awaiti
 /// @source services: Services/TaskScheduler.cs#class:TaskScheduler</summary>
 public sealed class TaskExecutionContext
 {
+    internal sealed class HostStopWakeCancellation : OperationCanceledException;
     private readonly object _gate = new();
     private TaskCompletionSource _resume = Completed(), _activation = Signal(), _pauseSignal = Signal();
     private TaskCompletionSource _inputDrained = Completed(), _segmentsDrained = Completed(), _workDrained = Completed();
@@ -154,9 +155,17 @@ public sealed class TaskExecutionContext
         }
         Notify();
         await resume.WaitAsync(token).ConfigureAwait(false);
-        ValidateResume?.Invoke();
         lock (_gate)
         {
+            if (IsTerminalLocked()) throw new HostStopWakeCancellation();
+            token.ThrowIfCancellationRequested();
+            if (_status != AutomationTaskStatus.Paused || !_resumeRequested) return;
+        }
+        try { ValidateResume?.Invoke(); } // Explicit resume only, outside the transition lock.
+        catch (InputUnavailableException) when (IsBusinessClosed) { throw new HostStopWakeCancellation(); }
+        lock (_gate)
+        {
+            if (IsTerminalLocked()) throw new HostStopWakeCancellation();
             token.ThrowIfCancellationRequested();
             if (_status != AutomationTaskStatus.Paused || !_resumeRequested) return;
             _pauseRequested = _resumeRequested = false;
@@ -268,14 +277,25 @@ public sealed class TaskExecutionContext
         }
         Notify(); // Never reopen Stopping merely to describe a late real resource failure.
     }
-    internal bool ResolveRecovery(Guid id, RecoveryResult result)
+    /// <summary>Commit linearizes at the in-lock token/deadline check; Stop shares this lock.
+    /// Only immutable identity checks and asynchronous TCS publication run here, never services/observers.</summary>
+    internal bool ResolveRecovery(RecoveryRequest request, RecoveryResult result, long validationGeneration,
+        CancellationToken token, DateTimeOffset expiresAt, TimeProvider clock, TaskCompletionSource<RecoveryResult> completion)
     {
         lock (_gate)
         {
             if (_status is not (AutomationTaskStatus.Recovering or AutomationTaskStatus.AwaitingHuman) ||
-                Cancellation.IsCancellationRequested || LastError is not null || _recovery?.RecoveryId != id) return false;
+                Cancellation.IsCancellationRequested || LastError is not null ||
+                request.PluginId != PluginId || request.InstanceId != InstanceId || request.RunGeneration != RunGeneration ||
+                request.TargetBindingId != TargetBindingId || RecoveryAuthorization?.Installation != request.Installation ||
+                _recovery?.RecoveryId != request.RecoveryId ||
+                _recovery.Generation != request.RecoveryGeneration || _recovery.ValidationGeneration != validationGeneration ||
+                _recovery.Phase != RecoveryPhase.Validating) return false;
+            token.ThrowIfCancellationRequested();
+            if (clock.GetUtcNow() >= expiresAt) throw new OperationCanceledException("Recovery verification deadline exceeded.");
             _recovery = _recovery with { Phase = RecoveryPhase.Resolved, Result = result };
             _status = _beforeRecovery; _preservedForHuman = false; _revision++; PulseActivation();
+            completion.TrySetResult(result); // RunContinuationsAsynchronously; inseparable from state commitment.
         }
         Notify(); return true;
     }

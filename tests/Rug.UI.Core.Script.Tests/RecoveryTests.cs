@@ -41,7 +41,88 @@ internal static class RecoveryTests
         await TimeoutAsync(); await NativeTimeoutAsync(); await CallerCancellationAsync(); await RepetitionAsync();
         foreach (string scenario in new[] { "settles", "red", "cancel", "stop", "capture-fault", "deadline", "late-green" })
             await FreshPanelAsync(scenario);
+        foreach (string mode in new[] { "caller", "validation-deadline", "request-deadline", "stop", "changed", "fault", "success" })
+            await CommitBoundaryAsync(mode);
         Console.WriteLine("Recovery PASS: real Lua init/tick locals, explicit tables, frozen mainline, trusted validation, dedup, Stop/late work, grants/identity, planned handoff and epoch isolation");
+    }
+    private sealed class CommitClock : TimeProvider
+    {
+        private readonly DateTimeOffset _start = DateTimeOffset.UtcNow;
+        private long _ticks;
+        public override DateTimeOffset GetUtcNow() => _start + TimeSpan.FromTicks(Interlocked.Read(ref _ticks));
+        public void Advance(TimeSpan duration) => Interlocked.Add(ref _ticks, duration.Ticks);
+    }
+    private sealed class CommitRegistry(RecoveryValidatorRegistry inner) : IRecoveryValidatorRegistry, IDisposable
+    {
+        public readonly TaskCompletionSource Entered = Signal();
+        public readonly ManualResetEventSlim Release = new();
+        public bool Missing, Fail;
+        private int _calls;
+        public IRecoveryValidator? Find(PluginInstallation installation, string scenario)
+        {
+            if (Interlocked.Increment(ref _calls) == 2) { Entered.TrySetResult(); Release.Wait(); }
+            if (Fail) throw new IOException("genuine registry failure");
+            return Missing ? null : inner.Find(installation, scenario);
+        }
+        public void Dispose() { Release.Set(); Release.Dispose(); }
+    }
+    private static async Task CommitBoundaryAsync(string mode)
+    {
+        var clock = new CommitClock(); CommitRegistry registry = null!;
+        string script = Script(true).Replace("rug.set_state('after',", "rug.press_key(66,1); rug.set_state('after',");
+        await using var f = await Fixture.CreateAsync(script, input: true, clock: clock,
+            options: new(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(60)), wrapRegistry: r => registry = new(r));
+        using (registry)
+        {
+            var c = await f.StartAsync(); await Until(() => c.TaskStatus == AutomationTaskStatus.AwaitingHuman);
+            var validator = new Validator(); using var registration = f.Registry.Register(f.Installation, "controlled-ready", validator);
+            f.Arbiter.ReturnControl();
+            var caller = await f.Caller(c);
+            var request = f.Request(c, AutomationOperation.VerifyRecovery, new { recoveryId = c.Snapshot.Recovery!.RecoveryId });
+            using var cancellation = new CancellationTokenSource();
+            var verify = f.Scheduler.Gateway.ExecuteAsync(caller, request, cancellation.Token);
+            try
+            {
+                await Bound(registry.Entered.Task); // After the old last-token check, before state/result commitment.
+                Check(c.Snapshot.Recovery is { Phase: RecoveryPhase.Validating } && f.Inputs[0].KeyDownCalls == 0,
+                    "commit barrier did not hold the mainline");
+                if (mode == "caller") { cancellation.Cancel(); Check((await verify).Status == OperationStatus.Cancelled, "Gateway did not observe caller cancellation"); }
+                if (mode == "stop") await Bound(f.Scheduler.StopTaskAsync(c.InstanceId));
+                if (mode == "validation-deadline") clock.Advance(TimeSpan.FromSeconds(61));
+                if (mode == "request-deadline") clock.Advance(TimeSpan.FromSeconds(11)); // Request expires before the 60s validator budget, without timer propagation.
+                if (mode == "changed") registry.Missing = true;
+                if (mode == "fault") registry.Fail = true;
+                registry.Release.Set();
+                var result = await verify;
+                await Until(() => f.Scheduler.Gateway.ActiveWorkCount == 0);
+                if (mode == "success")
+                {
+                    await Until(() => f.Read(c, "after") == 1);
+                    Check(result.Value is RecoveryResult { Status: RecoveryStatus.Resolved } && f.Inputs[0].KeyDownCalls == 1 &&
+                        f.Inputs[0].KeyUpCalls == 1, "successful commitment failed or repeated input");
+                }
+                else if (mode == "stop")
+                    Check(c.TaskStatus == AutomationTaskStatus.Stopped && c.LastError is null && f.Logger.Stops == 1 &&
+                        f.Inputs[0].KeyDownCalls == 0 && f.Read(c, "after") == 0, "late commit revived or faulted host Stop");
+                else if (mode == "fault")
+                { await Bound(c.Completion); Check(c.TaskStatus == AutomationTaskStatus.Faulted && c.LastError is IOException, "real registry failure became cancellation"); }
+                else
+                {
+                    await Until(() => c.TaskStatus == AutomationTaskStatus.AwaitingHuman);
+                    Check(c.LastError is null && c.Snapshot.Recovery!.Phase != RecoveryPhase.Resolved && f.Read(c, "after") == 0 &&
+                        f.Inputs[0].KeyDownCalls == 0 && f.Inputs[0].KeyUpCalls == 0 && f.Monitor.Snapshot.Sessions == 0,
+                        "cancelled/expired/replaced verification committed Lua or retained input session");
+                    Check(f.Archive.Summary?.Status == "needs_human", "cancelled commitment left provisional resolved archive metadata");
+                    if (mode.EndsWith("deadline")) Check(result.Value is RecoveryResult { Error: RecoveryError.ValidationTimedOut }, "commit lost deadline result");
+                }
+                int calls = validator.Calls;
+                var repeated = await f.Scheduler.Gateway.ExecuteAsync(caller, request);
+                Check(validator.Calls == calls && (mode is "fault" or "stop" ? repeated.Status != OperationStatus.Success : repeated == result),
+                    "cancelled/expired commit replayed a duplicate operation");
+                Console.WriteLine("Recovery commit boundary PASS: " + mode);
+            }
+            finally { registry.Release.Set(); }
+        }
     }
     private sealed class PanelClock : TimeProvider
     {
@@ -421,6 +502,9 @@ internal static class RecoveryTests
     private sealed class Archive : IAnomalyLogger
     {
         public bool Fail;
+        public RecoveryVerificationSummary? Summary;
+        public Task UpdateRecoveryAsync(string recordPath, RecoveryVerificationSummary summary)
+        { Summary = summary; return Task.CompletedTask; }
         public async Task<string> LogAnomalyAsync(TaskExecutionContext context, string reason, string detail)
         { if (Fail) throw new IOException("archive failed"); await context.Capture.GrabFrameAsync(); return "test-only.json"; }
     }
@@ -445,7 +529,8 @@ internal static class RecoveryTests
         public readonly InputInterventionTests.Source Source = new();
         public readonly List<Capture> Captures = []; public readonly List<FakeInput> Inputs = [];
         public PluginInstallation Installation => new("recovery", Path.Combine(Root, "recovery"));
-        public static async Task<Fixture> CreateAsync(string script, bool input = false, IRecoveryExecutor? executor = null, RecoveryOptions? options = null, bool agent = true)
+        public static async Task<Fixture> CreateAsync(string script, bool input = false, IRecoveryExecutor? executor = null, RecoveryOptions? options = null, bool agent = true,
+            Func<RecoveryValidatorRegistry, IRecoveryValidatorRegistry>? wrapRegistry = null, TimeProvider? clock = null)
         {
             var f = new Fixture { Root = Path.Combine(AppContext.BaseDirectory, "recovery-" + Guid.NewGuid().ToString("N")), Bus = null!, Scheduler = null!, Coordinator = null!, Arbiter = null!, Monitor = null! };
             string directory = Path.Combine(f.Root, "recovery"); Directory.CreateDirectory(directory);
@@ -455,7 +540,7 @@ internal static class RecoveryTests
             TestAuthorizationHost.ApproveCatalog(f.Auth, f.Root);
             f.Bus = new(f.Store); f.Arbiter = new(f.Windows); f.Monitor = new(f.Source, f.Arbiter, NullLogger<InputInterventionCoordinator>.Instance);
             await f.Monitor.StartAsync();
-            f.Coordinator = new(f.Archive, f.Auth, f.Registry, executor, options);
+            f.Coordinator = new(f.Archive, f.Auth, wrapRegistry?.Invoke(f.Registry) ?? f.Registry, executor, options, clock: clock);
             f.Scheduler = new(new PluginManager(NullLogger<PluginManager>.Instance), f.Root,
                 () => { var capture = new Capture(); f.Captures.Add(capture); return capture; },
                 () => { var service = new FakeInput(); f.Inputs.Add(service); return service; },

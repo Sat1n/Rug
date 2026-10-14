@@ -64,3 +64,5 @@ trusted test panel change do not prove human recovery; use `--recovery-manual`.
 Green verification must finish after one Verify invocation; the smoke test has no
 retry-until-success loop. See [recovery acceptance](../Rug.UI.Core/Recovery.md).
 No production approval switch.
+The noninteractive suite compiles the actual LifecyclePresentation helper and
+asserts that retained Validating snapshots cannot hide Stopping/Faulted/Stopped.

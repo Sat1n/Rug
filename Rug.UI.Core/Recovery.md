@@ -32,6 +32,18 @@ Stop wins result application; identity/id/generation/state/grants/target are che
 again before any continuation. Revision/state publication use the existing run
 transition lock, and delayed UI notifications re-query the selected run.
 
+The final commit follows all service/registry lookups. Under the run transition
+lock it checks full identity/installation, recovery and validation generations,
+current phase, failure/Stop, request cancellation, and the earlier of the Gateway
+request deadline or validator deadline. The successful check is the commit
+linearization point: state and asynchronous Lua result publication form one
+decision. Cancellation/deadline observed before this point leaves AwaitingHuman
+and cannot publish resolved; cancellation after commit cannot undo that decision.
+No registry, service, UI observer or token cancellation runs under this lock.
+Cancelled commitment also corrects provisional archive verification to needs_human.
+Gateway passes the original deadline, so expiry does not depend on timer callback
+propagation. Duplicate requests keep their original outcomes.
+
 ## Input and cancellation boundaries
 
 Recovery closes ordinary business admission before draining the current Lua
@@ -194,3 +206,22 @@ PASS: real production Raw/WGC/InputService native recovery and actual WinUI
 recovery UIA, each requiring one green Verify request and final B=(2,2).
 NOT RUN: post-fix human single-click green observation; previous user-confirmed
 main-loop/control semantics stand. No frozen binary or Hook reversal was rebuilt.
+
+### Commit and paused-stop race follow-up (2026-10-14)
+
+Deterministic final-registry barriers cover caller cancellation, both request and
+validator expiry without timer propagation, Stop, validator replacement, genuine
+lookup failure and one successful actual-Lua/Fake-input commit. Cancelled/expired
+requests retain AwaitingHuman with zero subsequent key down/up, corrected archive
+status and no replay on duplicate IDs. Stop remains terminal; real failures fault.
+Paused-wake barriers hold cancellation propagation and distinguish Stop, genuine
+resume failure and Stop during explicit resume checking. The actual scheduler
+stops a paused Lua run normally with zero resume checks/input and one on_stop.
+UI lifecycle presentation tests cover stale Validating metadata with terminal
+statuses; the WinUI composition root has one recovery registry/coordinator.
+PASS: `--recovery-tests`, `--lifecycle-tests`, two consecutive complete script
+regressions, Schema/state/hot reload and actual `--lifecycle-ui` automation.
+PASS: Debug/x64 Core/script/UI-test/WinUI builds, 0 warnings/errors. The sandboxed
+WinUI launch failed; the actual-desktop UI run passed. NOT RUN this follow-up:
+human recovery and the red/green native recovery fixture; no claim of new human
+acceptance or whole-unit approval is made.
