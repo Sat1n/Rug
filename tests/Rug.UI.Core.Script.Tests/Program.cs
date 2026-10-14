@@ -16,6 +16,8 @@ using Rug.UI.Core.Security;
 using Rug.UI.Core.Schema;
 using RugTaskScheduler = Rug.UI.Core.Services.TaskScheduler;
 
+if (args.Contains("--recovery-ui")) { await ManualRecovery.RunAsync(automated: true); return; }
+if (args.Contains("--recovery-manual")) { await ManualRecovery.RunAsync(); return; }
 if (args.Contains("--intervention-manual")) { await ManualInputIntervention.RunAsync(); return; }
 
 if (args.Contains("--hook-observer"))
@@ -61,6 +63,8 @@ if (args.Contains("--raw-input-self-test") || args.Contains("--raw-input-diagnos
 
 if (args.Contains("--raw-input-tests")) { await RawInputTests.RunAsync(); return; }
 if (args.Contains("--intervention-tests")) { await InputInterventionTests.RunAsync(); return; }
+if (args.Contains("--recovery-native")) { await NativeRecoveryTests.RunAsync(); return; }
+if (args.Contains("--recovery-tests")) { await RecoveryTests.RunAsync(); return; }
 if (args.Contains("--lifecycle-tests")) { await LifecycleTests.RunAsync(); return; }
 if (args.Contains("--observer-tests")) { await ExternalHookObserverTests.RunAsync(); return; }
 if (args.Contains("--manual-hook-tests")) { await ManualHookInstallTests.RunAsync(); return; }
@@ -706,8 +710,10 @@ try
 
     Guid anomaly = await scheduler.StartTaskAsync("anomaly", 306);
     TaskExecutionContext anomalyContext = scheduler.Instances.Single(c => c.InstanceId == anomaly);
-    await WaitUntilAsync(() => anomalyContext.TaskStatus == AutomationTaskStatus.Faulted &&
+    await WaitUntilAsync(() => anomalyContext.TaskStatus == AutomationTaskStatus.AwaitingHuman &&
         Directory.Exists(anomalyDirectory) && Directory.GetFiles(anomalyDirectory, "*.json").Length == 1);
+    Check(!events.Contains("Lua: must_not_resume"), "human wait returned to mainline");
+    await scheduler.StopTaskAsync(anomaly);
     await WaitUntilAsync(() => !scheduler.Instances.Any(c => c.InstanceId == anomaly));
     string jsonPath = Directory.GetFiles(anomalyDirectory, "*.json").Single();
     using (JsonDocument document = JsonDocument.Parse(await File.ReadAllTextAsync(jsonPath)))
@@ -718,7 +724,8 @@ try
               record.GetProperty("reason").GetString() == "界面未响应" &&
               record.GetProperty("timestamp").GetDateTime().Kind == DateTimeKind.Utc &&
               record.GetProperty("scriptContext").GetString()!.Contains("超时3秒") &&
-              record.GetProperty("scriptContext").GetString()!.Contains("on_tick") &&
+              !record.GetProperty("scriptContext").GetString()!.Contains("on_tick") &&
+              record.GetProperty("recoveryId").GetGuid() == anomalyContext.Snapshot.Recovery!.RecoveryId &&
               record.GetProperty("agent_resolution").ValueKind == JsonValueKind.Null,
               "anomaly metadata is incomplete");
         string screenshotName = record.GetProperty("screenshotPath").GetString()!;
@@ -737,10 +744,10 @@ try
         Check(pixels.ToArray().SequenceEqual(new byte[] { 0, 30, 20, 10, 255 }),
               "anomaly PNG did not encode the captured BGRA pixel");
     }
-    Check(anomalyContext.LastError?.Message.Contains(jsonPath) == true &&
+    Check(anomalyContext.LastError is null && anomalyContext.TaskStatus == AutomationTaskStatus.Stopped &&
           events.Any(e => e.Contains("[Anomaly Detected]")) &&
           events.Contains("Lua: anomaly_stop") && !events.Contains("Lua: must_not_resume") &&
-          events.Contains("capture-stop:306"), "anomaly did not fault and clean up safely");
+          events.Contains("capture-stop:306"), "human wait did not preserve/stop/clean up safely");
 
     var delayedCapture = new FakeCapture
     {
@@ -1097,6 +1104,7 @@ await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new 
         "JSON launch objects retain their nested structure");
 }
 await GatewayTests.RunAsync();
+await RecoveryTests.RunAsync();
 await LifecycleTests.RunAsync();
 await AuthorizationTests.RunAsync();
 await InputArbitrationTests.RunAsync();

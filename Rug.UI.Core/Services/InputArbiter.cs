@@ -198,6 +198,20 @@ public sealed class InputArbiter(IInputWindowValidator? windows = null, int capa
         Notify();
         return result;
     }
+    public Task TakeOverForRecoveryAsync(Action prepare)
+    {
+        Task result;
+        lock (_gate)
+        {
+            CheckAvailable();
+            if (_epoch.IsCancellationRequested) throw new InputUnavailableException("Input epoch is cancelled.");
+            prepare(); // Pure trusted lifecycle mutation, not a cancellation/notification callback.
+            _state = InputControlState.TakingOver; _revision++;
+            var stops = _stops.ToArray(); var epoch = _epoch;
+            result = _takeover = Task.Run(() => FinishTakeoverAsync(epoch, stops));
+        }
+        Notify(); return result;
+    }
     private async Task FinishTakeoverAsync(CancellationTokenSource epoch, Func<Task>[] stops)
     {
         try

@@ -20,6 +20,7 @@ public interface IScriptRuntime : IAsyncDisposable
     /// <summary>Bind the owning task's black-box handler before execution begins.</summary>
     void ConfigureAnomalyHandler(Func<string, string, Task<string>> handler);
     /// <summary>Switch from one-shot execution to on_init/on_tick lifecycle mode before StepAsync.</summary>
+    void ConfigureRecoveryHandler(Func<string, string, Task<RecoveryResult>> handler) { }
     Task PrepareLifecycleAsync();
     /// <summary>Create the next on_tick coroutine after the previous hook completes.</summary>
     Task BeginTickAsync();

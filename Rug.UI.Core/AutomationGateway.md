@@ -75,8 +75,11 @@ restrict admission; it cannot relax those existing service checks.
 * `wait_image` is still Lua composition, with every capture/match/sleep request
   admitted separately. Lua requests receive a ten-minute maximum operation
   deadline; UI lifecycle requests receive thirty seconds.
-* State/config/log keep their existing scope rules. `resolve_anomaly` retains
-  its current permission-gated incident capture/fault behavior, outside Gateway.
+* State/config/log keep their scope rules. Explicit `resolve_anomaly` uses
+  [verified recovery](Recovery.md) outside ordinary Gateway business dispatch.
+  `VerifyRecovery {recoveryId}` is a trusted PluginUI-only Gateway control, with
+  normal identity/install/grant/deadline/dedup checks. Lua/Agent/MCP cannot approve.
+  Recovering/AwaitingHuman reject ordinary business/Pause/Resume; Stop remains open.
   DevTools host diagnostics remain outside plugin automation.
 
 ## Results, cancellation and deduplication

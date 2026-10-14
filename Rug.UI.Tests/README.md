@@ -53,3 +53,12 @@ is user-confirmed passed via the script harness `--intervention-manual`; see
 [isolated target steps](../Rug.UI.Core/InputIntervention.md). The host UI owns
 permission confirmation and target binding; no automatic approval/test bypass
 is added. Existing generic-instance/demo/hot-reload regressions remain enabled.
+
+06B-01 recovery UI automation is hosted by the script harness `--recovery-ui`
+with an isolated target and temporary explicitly-authorized plugin.
+`RecoveryUiSmoke.ps1` receives only the fixture-owned UI PID/HWND: it binds via
+the actual DevTools crosshair before input session startup, invokes consent,
+checks AwaitingHuman/ManualControl, selection re-query, no ordinary Resume,
+Return without continuation, fresh WGC Verify and terminal controls. UIA plus a
+trusted test panel change do not prove human recovery; use `--recovery-manual`.
+See [recovery acceptance](../Rug.UI.Core/Recovery.md). No production approval switch.

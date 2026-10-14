@@ -48,6 +48,7 @@ public sealed class AutomationGateway : IAutomationGateway
     private readonly Func<string, nint, IReadOnlyDictionary<string, object?>, Action<RunIdentity>?, CancellationToken, Task<RunIdentity>>? _start;
     private readonly Func<Guid, Task>? _stop;
     private readonly Func<Guid, bool>? _pause, _resume;
+    private readonly Func<Guid, Guid, CancellationToken, Task<RecoveryResult>>? _verifyRecovery;
     private int _activeWork;
     private readonly Func<Task>? _waitForDispatch;
     public const int Capacity = 4096;
@@ -59,13 +60,13 @@ public sealed class AutomationGateway : IAutomationGateway
         Func<string, CancellationToken, Task<PluginManifest>>? getPlugin = null,
         Func<string, nint, IReadOnlyDictionary<string, object?>, Action<RunIdentity>?, CancellationToken, Task<RunIdentity>>? start = null,
         Func<Guid, Task>? stop = null, Func<Guid, bool>? pause = null, Func<Guid, bool>? resume = null,
-        TimeProvider? clock = null, IPluginAuthorization? authorization = null, Func<Task>? waitForDispatch = null)
+        TimeProvider? clock = null, IPluginAuthorization? authorization = null, Func<Task>? waitForDispatch = null, Func<Guid, Guid, CancellationToken, Task<RecoveryResult>>? verifyRecovery = null)
     {
         _logger = logger; _permissions = permissions ?? new ManifestAutomationPermissionChecker();
         _getPlugin = getPlugin; _start = start; _stop = stop; _pause = pause; _resume = resume;
         _clock = clock ?? TimeProvider.System;
         Authorization = authorization ?? new PluginAuthorization();
-        _waitForDispatch = waitForDispatch;
+        _waitForDispatch = waitForDispatch; _verifyRecovery = verifyRecovery;
     }
     public IPluginAuthorization Authorization { get; }
     public int RetainedOperationCount { get { lock (_gate) { Prune(); return _entries.Count; } } }
@@ -131,7 +132,7 @@ public sealed class AutomationGateway : IAutomationGateway
     private static bool SamePlugin(string first, string second) => string.Equals(first, second, StringComparison.OrdinalIgnoreCase);
     private IEnumerable<string> Required(AutomationCallContext caller, OperationRequest request)
     {
-        if (request.Operation is AutomationOperation.Start or AutomationOperation.Resume)
+        if (request.Operation is AutomationOperation.Start or AutomationOperation.Resume or AutomationOperation.VerifyRecovery)
             return Authorization.Query(caller.Authorization.Installation).Requested;
         if (ManifestAutomationPermissionChecker.RequiredPermission(request.Operation) is not { } required) return [];
         if (request.Operation == AutomationOperation.FindImage && request.Parameters.TryGetProperty("path", out var path) &&
@@ -186,6 +187,8 @@ public sealed class AutomationGateway : IAutomationGateway
             if (caller.BoundRun is { } bound && bound != run.Identity) return OperationError.InvalidCaller;
             if (caller.Source == AutomationSource.Lua && request.Operation is AutomationOperation.Stop or AutomationOperation.Pause or AutomationOperation.Resume)
                 return OperationError.UnsupportedOperation;
+            if (request.Operation == AutomationOperation.VerifyRecovery && caller.Source != AutomationSource.PluginUI) return OperationError.InvalidCaller;
+            if (request.Operation is not (AutomationOperation.Stop or AutomationOperation.VerifyRecovery) && run.Lifecycle?.TaskStatus is AutomationTaskStatus.Recovering or AutomationTaskStatus.AwaitingHuman) return OperationError.InvalidLifecycleState;
             // Stop remains available for the shared cleanup. Every other request
             // rejects terminal phases even before cancellation callbacks propagate.
             if (request.Operation != AutomationOperation.Stop && run.Lifecycle?.IsBusinessClosed == true)
@@ -270,7 +273,7 @@ public sealed class AutomationGateway : IAutomationGateway
                     linked.Token.ThrowIfCancellationRequested();
                 }
                 if (_activeWork >= ActiveCapacity) throw new GatewayRejectedException(OperationError.CapacityExceeded);
-                bool business = request.Operation is not (AutomationOperation.Start or AutomationOperation.Stop or AutomationOperation.Pause or AutomationOperation.Resume);
+                bool business = request.Operation is not (AutomationOperation.Start or AutomationOperation.Stop or AutomationOperation.Pause or AutomationOperation.Resume or AutomationOperation.VerifyRecovery);
                 if (business && run?.Preparing == true) throw new GatewayRejectedException(OperationError.InvalidLifecycleState);
                 var lifetime = business ? run?.Lifecycle?.EnterOperation(
                     request.Operation is AutomationOperation.Click or AutomationOperation.PressKey) : null;
@@ -353,6 +356,9 @@ public sealed class AutomationGateway : IAutomationGateway
                 request.OperationId, request.CorrelationId, caller.Source, request.Target, request.Operation);
             result = new(OperationStatus.Failed, OperationError.ExecutionFailed, OutcomeUncertain: Volatile.Read(ref started) != 0);
         }
+        if (request.Operation == AutomationOperation.VerifyRecovery && result.Status != OperationStatus.Success &&
+            run?.Lifecycle?.Snapshot.Recovery is { Phase: RecoveryPhase.Failed, Result.Status: RecoveryStatus.Failed } failedRecovery)
+            result = new(OperationStatus.Failed, OperationError.ExecutionFailed, Value: failedRecovery.Result);
         // Rejection describes why the action ended, not whether earlier input had effects.
         // Keep every input failure mapping aligned with the same execution boundary.
         if (request.Operation is AutomationOperation.Click or AutomationOperation.PressKey && result.Status != OperationStatus.Success)
@@ -372,6 +378,9 @@ public sealed class AutomationGateway : IAutomationGateway
             case AutomationOperation.Start:
                 var inputs = request.Parameters.EnumerateObject().ToDictionary(p => p.Name, p => (object?)p.Value.Clone());
                 return await _start!(caller.PluginId, caller.StartHwnd, inputs, caller.OnReady, token).ConfigureAwait(false);
+            case AutomationOperation.VerifyRecovery:
+                if (_verifyRecovery is null) throw new GatewayRejectedException(OperationError.UnsupportedOperation);
+                return await _verifyRecovery(run!.Identity.InstanceId, request.Parameters.GetProperty("recoveryId").GetGuid(), token).ConfigureAwait(false);
             case AutomationOperation.Stop:
                 if (_stop is null) throw new GatewayRejectedException(OperationError.UnsupportedOperation);
                 await _stop(run!.Identity.InstanceId).ConfigureAwait(false);

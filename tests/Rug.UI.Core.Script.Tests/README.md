@@ -8,6 +8,19 @@ tags: [lua, tests, input]
 
 # Lua coroutine bridge tests
 
+Task 3.5-06B-01 adds `--recovery-tests` to the default suite: actual Lua init/tick
+locals and explicit result tables; frozen mainline; missing/false validators;
+Fake suggestions, timeouts/late results; Stop versus advice/validation/native
+work; concurrent/deduplicated continuation; identities/grants/target/reload;
+planned handoff, new epoch and unchanged unexpected takeover; repeated cleanup.
+`--recovery-native` uses real Rug.Core/PostMessage, production RawInputEventSource
+and a self-owned red/green window with fresh WGC validation and PNG/JSON. The host
+changes its panel; this does not count as human acceptance. `--recovery-ui` adds
+actual WinUI consent/crosshair/selection/Verify/Stop automation via
+`Rug.UI.Tests/RecoveryUiSmoke.ps1`; `--recovery-manual` leaves actions to the user.
+See [commands, contracts and exact human steps](../../Rug.UI.Core/Recovery.md).
+Frozen reversal binaries/records are unchanged. Independent Hook gap stays open.
+
 Task 3.5-06A adds `--lifecycle-tests` (also in the normal suite): actual Lua and
 controlled barriers for init/tick, sleep/vision, input/KeyUp, admitted queues,
 late native work after Gateway timeout, Stop priority, independent identities,

@@ -298,6 +298,9 @@ public sealed partial class MainWindow : WindowEx
             snapshot = null;
         LifecycleStatus.Text = snapshot switch
         {
+            { Recovery.Phase: RecoveryPhase.Validating } => "正在验证",
+            { Status: AutomationTaskStatus.Recovering } => "恢复处理中",
+            { Status: AutomationTaskStatus.AwaitingHuman } => "等待人工",
             { Status: AutomationTaskStatus.Stopping } => "正在停止",
             { Status: AutomationTaskStatus.Paused, ResumeRequested: true } => "正在恢复",
             { Status: AutomationTaskStatus.Paused } => "已暂停",
@@ -308,10 +311,31 @@ public sealed partial class MainWindow : WindowEx
             { Status: AutomationTaskStatus.Stopped } => "已停止",
             _ => "无运行实例"
         };
+        if (snapshot?.Recovery is { } recovery && snapshot.Status is AutomationTaskStatus.Recovering or AutomationTaskStatus.AwaitingHuman)
+            LifecycleStatus.Text += " · " + recovery.Reason;
+        VerifyRecoveryButton.IsEnabled = snapshot is { Status: AutomationTaskStatus.AwaitingHuman };
         PauseInstanceButton.IsEnabled = snapshot is { PauseRequested: false,
             Status: AutomationTaskStatus.Starting or AutomationTaskStatus.Running };
         ResumeInstanceButton.IsEnabled = snapshot is { Status: AutomationTaskStatus.Paused, ResumeRequested: false };
-        StopInstanceButton.IsEnabled = snapshot is { Status: AutomationTaskStatus.Starting or AutomationTaskStatus.Running or AutomationTaskStatus.Paused };
+        StopInstanceButton.IsEnabled = snapshot is { Status: AutomationTaskStatus.Starting or AutomationTaskStatus.Running or AutomationTaskStatus.Paused or AutomationTaskStatus.Recovering or AutomationTaskStatus.AwaitingHuman };
+    }
+
+    private async void VerifyRecovery_Click(object sender, RoutedEventArgs args)
+    {
+        if (_scheduler is null || _selectedInstanceId is not { } id || _scheduler.GetLifecycle(id) is not { Recovery: { } recovery } snapshot) return;
+        VerifyRecoveryButton.IsEnabled = false;
+        try
+        {
+            var caller = await _scheduler.Gateway.CreateContextAsync(snapshot.Identity.PluginId, "host-ui", AutomationSource.PluginUI, snapshot.Identity);
+            var request = new OperationRequest(AutomationOperation.VerifyRecovery,
+                JsonSerializer.SerializeToElement(new { recoveryId = recovery.RecoveryId }), Guid.NewGuid(),
+                recovery.RecoveryId.ToString("N"), OperationTarget.ForRun(snapshot.Identity), DateTimeOffset.UtcNow.AddSeconds(30));
+            var result = await _scheduler.Gateway.ExecuteAsync(caller, request);
+            if (result.Status != OperationStatus.Success) ReloadStatus.Text = "验证未完成 · " + result.Error;
+            else if (result.Value is RecoveryResult outcome) ReloadStatus.Text = outcome.Status == RecoveryStatus.Resolved ? "验证通过，原协程继续" : "仍需人工处理 · " + outcome.Error;
+        }
+        catch (Exception error) { ReloadStatus.Text = "验证失败 · " + error.Message; }
+        finally { RefreshLifecycle(); }
     }
 
     private async void PauseInstance_Click(object sender, RoutedEventArgs args) => await LifecycleCommandAsync(AutomationOperation.Pause);

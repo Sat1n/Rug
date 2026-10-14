@@ -84,6 +84,26 @@ public partial class App : Application
             services.AddSingleton<PluginPermissionConsent>();
             services.AddSingleton<IPluginManager, PluginManager>();
             services.AddSingleton<IAnomalyLogger, AnomalyLogger>();
+            services.AddSingleton<RecoveryValidatorRegistry>(_ =>
+            {
+                var registry = new RecoveryValidatorRegistry();
+                // Trusted sample only; arbitrary plugins have no default success validator.
+                registry.Register(new PluginInstallation("recovery_probe", Path.Combine(PluginsRoot, "recovery_probe")),
+                    "controlled-ready", new FreshGreenFrameValidator());
+                return registry;
+            });
+            services.AddSingleton<IRecoveryValidatorRegistry>(p => p.GetRequiredService<RecoveryValidatorRegistry>());
+            services.AddSingleton<IRecoveryCoordinator, RecoveryCoordinator>();
+            services.AddSingleton<RecoveryValidatorRegistry>(_ =>
+            {
+                var registry = new RecoveryValidatorRegistry();
+                // Trusted sample registration only; arbitrary plugins have no default success validator.
+                registry.Register(new PluginInstallation("recovery_probe", Path.Combine(PluginsRoot, "recovery_probe")),
+                    "controlled-ready", new FreshGreenFrameValidator());
+                return registry;
+            });
+            services.AddSingleton<IRecoveryValidatorRegistry>(p => p.GetRequiredService<RecoveryValidatorRegistry>());
+            services.AddSingleton<IRecoveryCoordinator, RecoveryCoordinator>();
             services.AddSingleton<ICommandBus>(provider =>
             {
                 var dispatcher = MainWindow.DispatcherQueue;
@@ -107,7 +127,8 @@ public partial class App : Application
                 commandBus: provider.GetRequiredService<ICommandBus>(),
                 authorization: provider.GetRequiredService<IPluginAuthorization>(),
                 inputArbiter: provider.GetRequiredService<IInputArbiter>(),
-                intervention: provider.GetRequiredService<IInputInterventionCoordinator>()));
+                intervention: provider.GetRequiredService<IInputInterventionCoordinator>(),
+                recovery: provider.GetRequiredService<IRecoveryCoordinator>()));
             services.AddSingleton<IAutomationGateway>(provider => provider.GetRequiredService<ITaskScheduler>().Gateway);
             services.AddSingleton<IHotReloadService>(provider => new HotReloadService(
                 PluginsRoot, provider.GetRequiredService<ITaskScheduler>(),

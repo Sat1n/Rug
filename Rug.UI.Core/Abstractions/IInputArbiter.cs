@@ -34,5 +34,7 @@ public interface IInputArbiter
     /// <summary>Host detector guard; true checks return-control readiness only. Invoked outside arbiter locks.</summary>
     IDisposable RegisterAdmissionGuard(Action<bool> guard);
     Task TakeOverAsync();
+    /// <summary>Trusted atomic planned handoff; prepare performs pure lifecycle mutation only.</summary>
+    Task TakeOverForRecoveryAsync(Action prepare) => throw new NotSupportedException();
     void ReturnControl();
 }

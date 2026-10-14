@@ -5,7 +5,7 @@ using Rug.UI.Core.Services;
 
 namespace Rug.UI.Core.Models;
 
-public enum AutomationTaskStatus { Starting, Running, Paused, Stopping, Stopped, Faulted }
+public enum AutomationTaskStatus { Starting, Running, Paused, Recovering, AwaitingHuman, Stopping, Stopped, Faulted }
 
 /// <summary>Single transition authority and actual-work lifetime for one run.
 /// @shape identity: host RunIdentity; counters: actual Lua segments / service tasks.
@@ -18,8 +18,19 @@ public sealed class TaskExecutionContext
     private readonly TaskCompletionSource _completion = Signal();
     private AutomationTaskStatus _status = AutomationTaskStatus.Starting, _beforePause;
     private bool _pauseRequested, _resumeRequested;
-    private long _revision = 1;
-    private int _inputs, _segments, _work;
+    private long _revision = 1, _recoveryGeneration, _inputVersion;
+    private readonly TaskCompletionSource _stopping = Signal();
+    private RecoverySnapshot? _recovery;
+    private AutomationTaskStatus _beforeRecovery;
+    internal Task StopSignal => _stopping.Task;
+    internal AuthorizationTicket? RecoveryAuthorization { get; set; }
+    internal Action? ValidateRecovery { get; set; }
+    internal Func<Task>? HandoffRecovery { get; set; }
+    internal Func<Task>? AcquireRecoveryInput { get; set; }
+    private bool _preservedForHuman;
+    internal bool PreservedForHuman { get { lock (_gate) return _preservedForHuman; } }
+    private int _inputs, _segments, _work, _recoveryWork;
+    internal bool RecoveryWorkInFlight { get { lock (_gate) return _recoveryWork != 0; } }
 
     internal TaskExecutionContext(RunIdentity identity, CancellationTokenSource cancellation,
         IScriptRuntime runtime, ICaptureService capture, IInputService input)
@@ -56,7 +67,7 @@ public sealed class TaskExecutionContext
     internal bool Prepared { get; set; }
 
     private LifecycleSnapshot SnapshotLocked() => new(Identity, _status, _pauseRequested,
-        _resumeRequested, _revision, LastError is not null);
+        _resumeRequested, _revision, LastError is not null, _recovery);
 
     internal void SetStatus(AutomationTaskStatus status)
     {
@@ -69,7 +80,7 @@ public sealed class TaskExecutionContext
             bool legal = (_status, status) switch
             {
                 (AutomationTaskStatus.Starting, AutomationTaskStatus.Running) => !_pauseRequested,
-                (AutomationTaskStatus.Starting or AutomationTaskStatus.Running or AutomationTaskStatus.Paused,
+                (AutomationTaskStatus.Starting or AutomationTaskStatus.Running or AutomationTaskStatus.Paused or AutomationTaskStatus.Recovering or AutomationTaskStatus.AwaitingHuman,
                     AutomationTaskStatus.Stopping) => true,
                 (AutomationTaskStatus.Stopping, AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted) => true,
                 _ => false
@@ -77,7 +88,7 @@ public sealed class TaskExecutionContext
             if (!legal) return;
             _status = status; _revision++;
             if (status is AutomationTaskStatus.Stopping or AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted)
-            { _pauseRequested = _resumeRequested = false; _resume.TrySetResult(); _pauseSignal.TrySetResult(); PulseActivation(); }
+            { _stopping.TrySetResult(); _preservedForHuman = false; _pauseRequested = _resumeRequested = false; _resume.TrySetResult(); _pauseSignal.TrySetResult(); PulseActivation(); }
         }
         Notify();
     }
@@ -131,12 +142,13 @@ public sealed class TaskExecutionContext
         await boundary.WaitAsync(token).ConfigureAwait(false);
         token.ThrowIfCancellationRequested();
         if (LastError is InputCleanupException error) throw error;
+        lock (_gate) if (!_pauseRequested || _status is AutomationTaskStatus.Recovering or AutomationTaskStatus.AwaitingHuman) return;
         Runtime.Pause();
         Task resume;
         lock (_gate)
         {
             token.ThrowIfCancellationRequested();
-            if (_status is AutomationTaskStatus.Stopping or AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted) return;
+            if (!_pauseRequested || _status is not (AutomationTaskStatus.Starting or AutomationTaskStatus.Running or AutomationTaskStatus.Paused)) return;
             if (_status != AutomationTaskStatus.Paused) { _status = AutomationTaskStatus.Paused; _revision++; }
             resume = _resume.Task;
         }
@@ -205,11 +217,112 @@ public sealed class TaskExecutionContext
     }
     private void ValidateBusinessLocked()
     {
-        if (_status is AutomationTaskStatus.Stopping or AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted)
+        if (_status is AutomationTaskStatus.Stopping or AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted or AutomationTaskStatus.Recovering or AutomationTaskStatus.AwaitingHuman)
             throw new AutomationGateway.GatewayRejectedException(OperationError.InvalidLifecycleState);
     }
+    internal RecoverySnapshot BeginRecovery(string reason)
+    {
+        RecoverySnapshot snapshot;
+        lock (_gate)
+        {
+            ValidateBusinessLocked(); Cancellation.Token.ThrowIfCancellationRequested();
+            if (_status is not (AutomationTaskStatus.Starting or AutomationTaskStatus.Running))
+                throw new AutomationGateway.GatewayRejectedException(OperationError.InvalidLifecycleState);
+            _beforeRecovery = _status;
+            var id = Guid.NewGuid();
+            snapshot = _recovery = new(id, ++_recoveryGeneration, RecoveryPhase.Freezing, reason,
+                new(RecoveryStatus.NeedsHuman, id, reason));
+            _status = AutomationTaskStatus.Recovering; _pauseRequested = _resumeRequested = false;
+            _resume.TrySetResult(); _revision++;
+        }
+        Notify(); return snapshot;
+    }
+    internal void CheckRecovery(Guid id) { lock (_gate) CheckRecoveryLocked(id); }
+    private void CheckRecoveryLocked(Guid id)
+    {
+        if (IsTerminalLocked()) throw new OperationCanceledException("Host stopped recovery.");
+        Cancellation.Token.ThrowIfCancellationRequested();
+        if (_recovery?.RecoveryId != id || _status is not (AutomationTaskStatus.Recovering or AutomationTaskStatus.AwaitingHuman))
+            throw new AutomationGateway.GatewayRejectedException(OperationError.InvalidLifecycleState);
+    }
+    private bool IsTerminalLocked() => _status is AutomationTaskStatus.Stopping or AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted;
+    internal void UpdateRecovery(Guid id, RecoveryPhase phase, RecoveryResult result, long validation = 0)
+    {
+        lock (_gate)
+        {
+            CheckRecoveryLocked(id);
+            _recovery = _recovery! with { Phase = phase, Result = result, ValidationGeneration = validation == 0 ? _recovery.ValidationGeneration : validation };
+            _status = phase == RecoveryPhase.AwaitingHuman ? AutomationTaskStatus.AwaitingHuman : AutomationTaskStatus.Recovering;
+            _revision++;
+        }
+        Notify();
+    }
+    internal void FailRecovery(Guid id, RecoveryError error)
+    {
+        lock (_gate)
+        {
+            if (_recovery?.RecoveryId != id || _status is AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted) return;
+            _recovery = _recovery with { Phase = RecoveryPhase.Failed,
+                Result = new(RecoveryStatus.Failed, id, _recovery.Reason, error) };
+            _revision++;
+        }
+        Notify(); // Never reopen Stopping merely to describe a late real resource failure.
+    }
+    internal bool ResolveRecovery(Guid id, RecoveryResult result)
+    {
+        lock (_gate)
+        {
+            if (_status is not (AutomationTaskStatus.Recovering or AutomationTaskStatus.AwaitingHuman) ||
+                Cancellation.IsCancellationRequested || LastError is not null || _recovery?.RecoveryId != id) return false;
+            _recovery = _recovery with { Phase = RecoveryPhase.Resolved, Result = result };
+            _status = _beforeRecovery; _preservedForHuman = false; _revision++; PulseActivation();
+        }
+        Notify(); return true;
+    }
+    internal Task DrainRecoveryBoundaryAsync() { lock (_gate) return Task.WhenAll(_inputDrained.Task, _segmentsDrained.Task); }
+    internal IDisposable EnterRecoveryWork(Guid id)
+    {
+        lock (_gate)
+        {
+            CheckRecoveryLocked(id);
+            if (_work++ == 0) _workDrained = Signal();
+            _recoveryWork++;
+            return new WorkLease(this, false, false, recovery: true);
+        }
+    }
+    // Pure mutation, called under the arbiter admission lock; no services or notifications.
+    internal void PreserveAndRetireInput(Guid id)
+    {
+        lock (_gate)
+        {
+            CheckRecoveryLocked(id);
+            if (_inputs != 0 || _segments != 0 || LastError is not null)
+                throw new InputUnavailableException("Recovery input boundary is not safe.");
+            _preservedForHuman = true; _inputVersion++; InputEpochToken = default;
+        }
+    }
+    internal void AttachInput(CancellationToken token)
+    {
+        long version;
+        lock (_gate)
+        {
+            if (IsTerminalLocked() || Cancellation.IsCancellationRequested) throw new OperationCanceledException();
+            _preservedForHuman = false; InputEpochToken = token; version = ++_inputVersion;
+        }
+        InputCancellation = token.Register(() =>
+        {
+            lock (_gate)
+            {
+                if (version != _inputVersion || _preservedForHuman || IsTerminalLocked()) return;
+                // Close lifetime admission atomically with the epoch/version test.
+                _status = AutomationTaskStatus.Stopping; _stopping.TrySetResult();
+                _pauseRequested = _resumeRequested = false; _resume.TrySetResult(); _pauseSignal.TrySetResult(); PulseActivation(); _revision++;
+            }
+            Notify(); Cancel();
+        });
+    }
     internal Task DrainOperationsAsync() { lock (_gate) return Task.WhenAll(_workDrained.Task, _segmentsDrained.Task); }
-    private sealed class WorkLease(TaskExecutionContext context, bool segment, bool input) : IDisposable
+    private sealed class WorkLease(TaskExecutionContext context, bool segment, bool input, bool recovery = false) : IDisposable
     {
         private int _disposed;
         public void Dispose()
@@ -220,6 +333,7 @@ public sealed class TaskExecutionContext
                 if (segment) { if (--context._segments == 0) context._segmentsDrained.TrySetResult(); }
                 else
                 {
+                    if (recovery) context._recoveryWork--;
                     if (--context._work == 0) context._workDrained.TrySetResult();
                     if (input && --context._inputs == 0) context._inputDrained.TrySetResult();
                 }

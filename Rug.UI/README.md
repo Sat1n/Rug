@@ -141,3 +141,12 @@ New real-human 06A checks remain NOT RUN by the agent.
 
 * `MainWindow` owns the plugin sidebar, selected dynamic host, hot-reload status and a footer entry for DevTools. The bundled `plugins/demo_arknights` is copied into the app output and seeded into the default local plugin directory only when absent; an explicit `RUG_PLUGINS_ROOT` is never modified.
 * `DemoWorkflowCoordinator` subscribes to `demo.start_selected` and passes the selected task IDs as that run's launch input. Its per-instance state subscription converts `rug.set_state("demo.step_event", json)` into `SchemaStep[]` at the same instance's `demo.steps`; the subscription is released on stop. `MainWindow` supplies a key-specific detached display copy after completion so a card rebuild can still show the timeline, while the stopped InstanceState is evicted. The generic `DynamicUIHost` and `UIFactory` have no demo-specific state key. The demo uses only `timer` permission and simulates wake/OCR steps without controlling an external app.
+
+Task 3.5-06B-01 injects recovery coordinator and exact installation/scenario
+validator registry. Production has no executor; arbitrary plugins have no default
+validator. Only the trusted `recovery_probe` controlled green-window validator is
+registered at the composition root. Footer shows recovery/waiting/verification,
+reason, Verify recovery and Stop; Pause/Resume reject recovery. Verify sends a
+Gateway control with the selected full identity/recoveryId; it never calls Runtime
+Resume. Selection/queued updates re-query current revision. The DevTools crosshair
+has an accessibility name for isolated UI automation. See [recovery/manual contract](../Rug.UI.Core/Recovery.md).

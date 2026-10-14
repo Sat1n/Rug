@@ -36,6 +36,7 @@ public sealed class TaskScheduler : ITaskScheduler
     private readonly IInputArbiter _inputArbiter;
     private readonly IDisposable _inputStopRegistration;
     private readonly IInputInterventionCoordinator? _intervention;
+    private readonly IRecoveryCoordinator _recovery;
 
     public TaskScheduler(IPluginManager plugins, string pluginsRoot,
         Func<ICaptureService> captureFactory, Func<IInputService> inputFactory,
@@ -43,7 +44,8 @@ public sealed class TaskScheduler : ITaskScheduler
         ILogger<TaskScheduler> logger, IAnomalyLogger anomalies, TimeSpan? tickInterval = null,
         TimeSpan? watchdogTimeout = null, ICommandBus? commandBus = null,
         IAutomationPermissionChecker? permissionChecker = null, IPluginAuthorization? authorization = null,
-        IInputArbiter? inputArbiter = null, IInputInterventionCoordinator? intervention = null)
+        IInputArbiter? inputArbiter = null, IInputInterventionCoordinator? intervention = null,
+        IRecoveryCoordinator? recovery = null)
     {
         _plugins = plugins ?? throw new ArgumentNullException(nameof(plugins));
         _anomalies = anomalies ?? throw new ArgumentNullException(nameof(anomalies));
@@ -68,7 +70,8 @@ public sealed class TaskScheduler : ITaskScheduler
                 await StartTaskWithReadyAsync(plugin, hwnd, inputs,
                     identity => { started = identity; ready?.Invoke(identity); }, token).ConfigureAwait(false);
                 return started!;
-            }, stop: StopTaskAsync, pause: PauseTask, resume: ResumeTask, authorization: authorization);
+            }, stop: StopTaskAsync, pause: PauseTask, resume: ResumeTask, authorization: authorization, verifyRecovery: VerifyRecoveryAsync);
+        _recovery = recovery ?? new RecoveryCoordinator(anomalies, Gateway.Authorization, new RecoveryValidatorRegistry());
     }
 
     public AutomationGateway Gateway { get; }
@@ -217,7 +220,7 @@ public sealed class TaskScheduler : ITaskScheduler
             {
                 AuthorizationLease = authorizationLease, AuthorizationCancellation = authorizationCancellation,
                 InputCancellation = inputCancellation, InputEpochToken = inputEpoch,
-                DeclaresInput = declaresInput, InputSession = inputSession
+                DeclaresInput = declaresInput, InputSession = inputSession, RecoveryAuthorization = ticket
             };
             context.ValidateResume = () =>
             {
@@ -226,6 +229,46 @@ public sealed class TaskScheduler : ITaskScheduler
                 admission.Token.ThrowIfCancellationRequested();
                 if (target is not null) _inputArbiter.ValidateTarget(target, declaresInput);
             };
+            context.ValidateRecovery = () =>
+            {
+                cancellation.Token.ThrowIfCancellationRequested();
+                using var admission = Gateway.Authorization.Admit(ticket, source.Permissions);
+                admission.Token.ThrowIfCancellationRequested();
+                if (target is not null)
+                {
+                    try { _inputArbiter.ValidateTarget(target, requireControl: false); }
+                    catch (InputUnavailableException) { throw new RecoveryFailedException(RecoveryError.ResourceUnavailable); }
+                }
+            };
+            if (declaresInput)
+            {
+                inputCancellation.Dispose();
+                context.AttachInput(inputEpoch);
+                context.HandoffRecovery = async () =>
+                {
+                    var recoveryId = context.Snapshot.Recovery!.RecoveryId;
+                    Task takeover = _inputArbiter.TakeOverForRecoveryAsync(() => context.PreserveAndRetireInput(recoveryId));
+                    // Remove detector registration outside both state locks before takeover drains sessions.
+                    context.InputCancellation.Dispose();
+                    context.InputSession?.Dispose(); context.InputSession = null;
+                    await takeover.WaitAsync(cancellation.Token).ConfigureAwait(false);
+                };
+                context.AcquireRecoveryInput = async () =>
+                {
+                    context.CheckRecovery(context.Snapshot.Recovery!.RecoveryId);
+                    context.ValidateResume(); // Must have explicitly returned control and valid target/grants.
+                    if (!context.PreservedForHuman) return;
+                    IInputSession? next = _intervention is null ? null :
+                        await _intervention.BeginSessionAsync(InputOwner.ForRun(identity), cancellation.Token).ConfigureAwait(false);
+                    try
+                    {
+                        context.CheckRecovery(context.Snapshot.Recovery!.RecoveryId);
+                        context.InputSession = next;
+                        context.AttachInput(_inputArbiter.AutomationToken);
+                    }
+                    catch { next?.Dispose(); throw; }
+                };
+            }
             runtime.ConfigureLifecycle(context);
             context.LifecycleChanged += ForwardLifecycle;
             lock (_lifecycleGate)
@@ -248,7 +291,7 @@ public sealed class TaskScheduler : ITaskScheduler
             await runtime.PrepareLifecycleAsync().ConfigureAwait(false);
             context.Prepared = true;
             Gateway.CompleteStartingRun(context.InstanceId);
-            runtime.ConfigureAnomalyHandler((reason, detail) => _anomalies.LogAnomalyAsync(context, reason, detail));
+            runtime.ConfigureRecoveryHandler((reason, detail) => _recovery.RequestAsync(context, reason, detail));
             cancellation.Token.ThrowIfCancellationRequested();
             onReady?.Invoke(identity);
             lock (_lifecycleGate)
@@ -313,12 +356,19 @@ public sealed class TaskScheduler : ITaskScheduler
         await context.Completion.ConfigureAwait(false);
     }
 
+    private Task<RecoveryResult> VerifyRecoveryAsync(Guid instanceId, Guid recoveryId, CancellationToken token)
+    {
+        if (!_instances.TryGetValue(instanceId, out var context))
+            throw new AutomationGateway.GatewayRejectedException(OperationError.InstanceNotFound);
+        return _recovery.VerifyAndContinueAsync(context, recoveryId, token);
+    }
+
     private async Task StopInputRunsAsync()
     {
         Task starts;
         lock (_lifecycleGate) starts = _inputStartsDrained.Task;
         await starts.ConfigureAwait(false);
-        var affected = Instances.Where(c => c.DeclaresInput).ToArray();
+        var affected = Instances.Where(c => c.DeclaresInput && !c.PreservedForHuman).ToArray();
         await Task.WhenAll(affected.Select(c => StopTaskAsync(c.InstanceId))).ConfigureAwait(false);
         if (affected.Any(c => c.LastError is InputCleanupException))
             throw new InputUnavailableException("Input cleanup failed during takeover.");

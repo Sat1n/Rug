@@ -106,8 +106,9 @@ internal static class InputInterventionTests
                     () => { var capture = new FakeCapture(); if (inputStarting) inputCapture = capture; return capture; },
                     () => new FakeInput(), (capture, input) =>
                     {
-                        // Cancellation callbacks run LIFO. Hold propagation to the scheduler/session
-                        // after Lua's direct epoch callback has fired, forcing the original race.
+                        // Cancellation callbacks run LIFO. Hold the earlier epoch/session link
+                        // after the current host-owned epoch registration has closed admission.
+                        // Lua lifetime is now separate so planned recovery can retire this epoch.
                         if (inputStarting && phase != "unexplained")
                             barrier = f.Arbiter.AutomationToken.Register(() => { entered.TrySetResult(); release.Wait(); });
                         var runtime = new LuaRuntime(capture, new FakeOcr(), input,

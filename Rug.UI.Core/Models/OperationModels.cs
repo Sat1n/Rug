@@ -4,7 +4,7 @@ using Rug.UI.Core.Services;
 
 namespace Rug.UI.Core.Models;
 
-public enum AutomationOperation { Start, Stop, Pause, Resume, Sleep, Capture, Ocr, FindImage, Click, PressKey }
+public enum AutomationOperation { Start, Stop, Pause, Resume, Sleep, Capture, Ocr, FindImage, Click, PressKey, VerifyRecovery }
 public enum OperationStatus { Success, Rejected, Cancelled, TimedOut, Failed }
 public enum OperationError { None, InvalidParameters, PermissionDenied, InstanceNotFound, StaleRun,
     BindingMismatch, UnsupportedOperation, DeduplicationConflict, DeadlineExceeded, Cancelled,

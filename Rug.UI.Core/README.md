@@ -19,6 +19,7 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 > Process-local explicit grants and shared input arbitration support host manual takeover.
 > Task 3.5-05B-02 connects production candidate-input monitoring to safe takeover;
 > 05B-02 human UI acceptance is user-confirmed; the independent Hook gap remains incomplete.
+> 06B-01 adds explicit verified recovery with a retained Lua coroutine; human acceptance is pending.
 
 ## Internal Topology
 
@@ -83,24 +84,23 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   `Stop()` cancels its token; the stop hook has its own deadline. The capture and
   input factories must provide distinct service instances for each task.
 
-## Anomaly black box and Agent hook (Task 2.1.4)
+## Anomaly black box and recovery (3.5-06B-01)
 
-* A plugin declaring `agent` and holding a current host grant may call
-  `rug.agent.resolve_anomaly(reason, context)`. The Lua bridge yields immediately,
-  captures a private Lua traceback alongside the supplied context, and dispatches
-  to the owning task's `IAnomalyLogger`. Unauthorized calls raise an audited
-  `PermissionDeniedException` before invoking the logger.
-  Closed-host admission refusal cancels before capture.
-* `AnomalyLogger` captures the owning instance's current BGRA frame and writes a
-  real RGBA PNG plus same-basename JSON under `./logs/anomalies/` by default.
-  The JSON stores a UTC timestamp, plugin/instance IDs, reason, script context,
-  relative screenshot filename, and an explicit null `agent_resolution` field for
-  Phase 4. The service returns the JSON path and emits `[Anomaly Detected]` at
-  warning level. The directory can be overridden by the host or tests.
-* Once the record is written, the runtime returns `Faulted` without resuming the
-  reporting Lua coroutine. The scheduler records the error, runs `on_stop`, and
-  releases the capture session and per-instance resources. A capture or disk
-  failure also faults the task and is surfaced through `LastError`.
+* Live `agent` grants admit bounded `rug.agent.resolve_anomaly(reason, contextString)`.
+  [Recovery contract](Recovery.md) defines the injected coordinator/executor/validator,
+  Recovering/AwaitingHuman states, preserved coroutine and Stop precedence.
+* Default production waits for explicit human verification. Only a trusted
+  installation/scenario validator can resume the original coroutine, with a Lua
+  `{status="resolved",recoveryId,reason,error}` table. No ordinary Resume bypass.
+* `AnomalyLogger` writes fresh BGRA→PNG and same-basename JSON in `./logs/anomalies/`:
+  UTC time, plugin/run/recovery IDs, bounded business context (no VM traceback),
+  relative screenshot, null `agent_resolution` and typed verification summary.
+  IO/permission/Lua/cleanup failures remain faults. Images stay local.
+* Planned input handoff drains releases, retires the input epoch/session and
+  preserves only that registered recovery. Other input runs stop; timer/vision
+  survive. Return control never continues Lua. Explicit Gateway VerifyRecovery
+  rechecks grants/target/detector, acquires a new session and verifies a new frame.
+  No provider, recovery input tools, checkpoint or persistent recovery is added.
 
 ## Native input bridge and coordinates (Task 2.2)
 

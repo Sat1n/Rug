@@ -11,6 +11,7 @@ internal static class OperationParameterValidator
     /// @source parameters: Models/OperationModels.cs#class:OperationRequest</summary>
     public static bool IsValid(AutomationOperation operation, JsonElement parameters) => operation switch
     {
+        AutomationOperation.VerifyRecovery => parameters.TryGetProperty("recoveryId", out var id) && id.ValueKind == JsonValueKind.String && id.TryGetGuid(out var recoveryId) && recoveryId != Guid.Empty,
         AutomationOperation.Sleep => Integer(parameters, "ms", 0, int.MaxValue),
         AutomationOperation.Click => Integer(parameters, "x", 0, int.MaxValue) && Integer(parameters, "y", 0, int.MaxValue) &&
             EnumValue<MouseButton>(parameters, "button") && EnumValue<InputDeliveryMode>(parameters, "mode"),

@@ -52,6 +52,9 @@ public sealed class AnomalyLogger : IAnomalyLogger
             Reason = reason,
             ScriptContext = detail,
             ScreenshotPath = screenshotName,
+            RecoveryId = context.Snapshot.Recovery?.RecoveryId,
+            RecoveryGeneration = context.Snapshot.Recovery?.Generation,
+            RunGeneration = context.RunGeneration, TargetBindingId = context.TargetBindingId,
             AgentResolution = null
         };
 
@@ -70,6 +73,23 @@ public sealed class AnomalyLogger : IAnomalyLogger
         _logger.LogWarning("[Anomaly Detected] Plugin {PluginId}, instance {InstanceId}: {Reason}. Record: {Path}",
             context.PluginId, context.InstanceId, reason, jsonPath);
         return jsonPath;
+    }
+
+    public async Task UpdateRecoveryAsync(string recordPath, RecoveryVerificationSummary summary)
+    {
+        string full = Path.GetFullPath(recordPath);
+        string root = Path.GetFullPath(_directory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("Record is outside anomaly directory.");
+        var record = JsonSerializer.Deserialize<AnomalyLogModel>(await File.ReadAllTextAsync(full).ConfigureAwait(false), JsonOptions)
+            ?? throw new InvalidDataException("Missing anomaly metadata.");
+        if (record.RecoveryId != summary.RecoveryId) throw new InvalidDataException("Recovery record mismatch.");
+        string temporary = full + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(record with { Verification = summary }, JsonOptions)).ConfigureAwait(false);
+            File.Move(temporary, full, overwrite: true);
+        }
+        finally { File.Delete(temporary); }
     }
 
     private static byte[] EncodePng(CapturedFrame frame)

@@ -12,7 +12,7 @@ tags: [lifecycle, pause, cancellation]
 owns transitions, signals and actual-work counters. The scheduler is the single
 Lua driver. [LifecycleSnapshot](Models/LifecycleSnapshot.cs#class:LifecycleSnapshot)
 is immutable: complete `RunIdentity`, status, `PauseRequested`, `ResumeRequested`,
-run-local revision starting at 1, and `HasFailure`. Accepted changes increment
+run-local revision starting at 1, `HasFailure`, and optional detached recovery snapshot. Accepted changes increment
 revision; duplicates do not. Events may arrive late/out of order: match identity
 and re-query the selected live run, or compare its revision. The scheduler retains
 only live contexts, clears subscriptions at completion, and keeps no unbounded
@@ -28,7 +28,7 @@ terminal snapshot cache. A held context retains its final snapshot.
 | Paused | Pause again | Accepted, no change |
 | Paused | Valid Resume | Request accepted; driver returns to pre-pause Starting / Running |
 | Pause pending / active without confirmed pause | Resume | Rejected, `InvalidLifecycleState` |
-| Starting / Running / pause pending / Paused | Stop, grant/input epoch cancellation, execution fault | Stopping |
+| Starting / Running / pause pending / Paused / Recovering / AwaitingHuman | Stop, grant/input epoch cancellation, execution fault | Stopping |
 | Stopping | Real work and cleanup finish | Stopped; Faulted if execution or cleanup failed |
 | Stopping / Stopped / Faulted | Pause / Resume | Rejected, cannot revive |
 | Stopping | Stop again | Same completion/cleanup |
@@ -37,8 +37,8 @@ terminal snapshot cache. A held context retains its final snapshot.
 Starting is visible before capture/runtime setup finishes. Startup failure uses
 the same cleanup authority. Capture still precedes Lua execution. Loading/setup
 is not a pause confirmation: requests await setup and a driver boundary. Stop
-wins over late start, pause and resume callbacks. No Recovering/AwaitingHuman state
-is introduced.
+wins over late start, pause, resume and recovery callbacks. [06B recovery](Recovery.md)
+adds Recovering/AwaitingHuman under this same authority; ordinary Pause/Resume reject there.
 
 Gateway registers a host-only preparing executor with that identity, enabling
 Pause/Stop during setup. Business operations are rejected before initialization;
@@ -132,9 +132,9 @@ control/new startup. Paused input remains an input session and is stopped by
 takeover/revocation. A physical Pause click does not suppress detection.
 
 Hot reload remains stop-old/start-new; it preserves no pause position/checkpoint.
-The new identity's snapshot governs UI refresh. `resolve_anomaly` retains terminal
-incident behavior; it is not recoverable pause. No recovery coordinator/provider
-or checkpoint persistence is added; these boundaries precede 06B/06C.
+The new identity's snapshot governs UI refresh. Explicit `resolve_anomaly` now uses
+[06B verified recovery](Recovery.md), not ordinary pause. Uncaught Lua errors still
+fault. Hot reload stops recovery and creates a new identity; no checkpoint is added.
 
 ## Verification
 

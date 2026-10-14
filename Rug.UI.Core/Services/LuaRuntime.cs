@@ -128,6 +128,7 @@ public sealed class LuaRuntime : IScriptRuntime
     private LuaFunction? _beginTick;
     private LuaFunction? _beginStop;
     private Guid? _pendingId;
+    private Func<string, string, Task<RecoveryResult>>? _recoveryHandler;
     private Guid? _pendingAnomalyId;
     private string? _pendingAnomalyReason;
     private Func<string, string, Task<string>>? _anomalyHandler;
@@ -202,6 +203,14 @@ public sealed class LuaRuntime : IScriptRuntime
         _anomalyHandler = handler;
     }
 
+    public void ConfigureRecoveryHandler(Func<string, string, Task<RecoveryResult>> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        if (_disposed || State is ScriptState.Running or ScriptState.Yielded or ScriptState.Paused or ScriptState.Stopped)
+            throw new InvalidOperationException("Recovery handler must be bound before execution.");
+        _recoveryHandler = handler;
+    }
+
     public async Task InitializeAsync(string scriptPath, PluginManifest manifest, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(manifest);
@@ -218,7 +227,7 @@ public sealed class LuaRuntime : IScriptRuntime
             authorization: _authorization);
         _caller = _gateway.BindContext(gatewayManifest, "lua:" + _identity.InstanceId, AutomationSource.Lua, _identity);
         _authorizationLease = _gateway.Authorization.Admit(_caller.Authorization, manifest.Permissions);
-        _lifetime = manifest.Permissions.Contains(Permission.ControlInput)
+        _lifetime = _context is null && manifest.Permissions.Contains(Permission.ControlInput)
             ? CancellationTokenSource.CreateLinkedTokenSource(ct, _authorizationLease.Token, _inputArbiter.AutomationToken)
             : CancellationTokenSource.CreateLinkedTokenSource(ct, _authorizationLease.Token);
         _permissions = new PermissionInterceptor(manifest, _logger, _gateway.Authorization, _caller.Authorization);
@@ -532,7 +541,7 @@ public sealed class LuaRuntime : IScriptRuntime
         Guid id = Guid.NewGuid();
         _operations.Add(id, task);
         _pendingId = id;
-        if (operation == "resolve_anomaly")
+        if (operation == "resolve_anomaly" && _recoveryHandler is null)
         {
             _pendingAnomalyId = id;
             _pendingAnomalyReason = Convert.ToString(values[4], CultureInfo.InvariantCulture);
@@ -705,6 +714,18 @@ public sealed class LuaRuntime : IScriptRuntime
 
     private async Task<object?> ResolveAnomalyAsync(LuaTable args)
     {
+        if (_recoveryHandler is not null)
+        {
+            if (args[4] is not string recoveryReason || string.IsNullOrWhiteSpace(recoveryReason) || recoveryReason.Length > 256 ||
+                args[5] is not string recoveryDetail || recoveryDetail.Length > 2048)
+                throw new ArgumentException("Recovery requires bounded reason and context strings.");
+            try { return await _recoveryHandler(recoveryReason, recoveryDetail).ConfigureAwait(false); }
+            catch (AutomationGateway.GatewayRejectedException e) when
+                (e.Error == OperationError.InvalidLifecycleState && _context!.IsBusinessClosed)
+            { throw new HostStopAdmissionCancellation(); }
+            catch (OperationCanceledException) when (_context!.IsBusinessClosed)
+            { throw new HostStopAdmissionCancellation(); }
+        }
         IDisposable? work;
         try { work = _context?.EnterOperation(input: false); }
         catch (AutomationGateway.GatewayRejectedException error) when
@@ -781,6 +802,14 @@ public sealed class LuaRuntime : IScriptRuntime
 
     private object? ToLuaValue(object? value)
     {
+        if (value is RecoveryResult recovery)
+        {
+            LuaTable table = NewTable();
+            table["status"] = recovery.Status switch { RecoveryStatus.Resolved => "resolved", RecoveryStatus.NeedsHuman => "needs_human", _ => "failed" };
+            table["recoveryId"] = recovery.RecoveryId.ToString();
+            table["reason"] = recovery.Reason; table["error"] = recovery.Error.ToString();
+            return table;
+        }
         if (value is CapturedFrameMetadata frame)
         {
             LuaTable table = NewTable();

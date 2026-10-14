@@ -184,3 +184,16 @@ is retained separately. Its Hook discrepancy remains INCOMPLETE; frozen reversal
 artifacts are unchanged. This unit does not extend the root-cause investigation
 or claim that absence of a Rug marker authenticates a real person, virtual HID
 or every remote-session input source.
+
+## Planned recovery exception (06B-01)
+
+[Explicit recovery](Recovery.md) can preserve a coroutine only after registering
+its recovery identity and draining input/Lua. `TakeOverForRecoveryAsync` atomically
+retires that context's old epoch while closing arbiter admission; registration
+and detector-session disposal happen outside locks. Other input runs still stop.
+Run lifetime is independent of replaceable input epochs. Each epoch cancellation
+callback checks its version and closes Stop admission atomically; delayed old
+callbacks cannot cancel a new session. AwaitingHuman has no active input session.
+Unexpected intervention during attempts/verification still stops the run.
+Return control alone never resumes Lua; explicit verification reacquires a fresh
+monitored session. Detection stays active, including held-key/session boundaries.

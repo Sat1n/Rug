@@ -61,6 +61,8 @@
                             IsEnabled="False" Click="PauseInstance_Click"/>
                     <Button x:Name="ResumeInstanceButton" Content="恢复" AutomationProperties.Name="Resume instance"
                             IsEnabled="False" Click="ResumeInstance_Click"/>
+                    <Button x:Name="VerifyRecoveryButton" Content="验证并继续" AutomationProperties.Name="Verify recovery"
+                            IsEnabled="False" Click="VerifyRecovery_Click"/>
                     <Button x:Name="StopInstanceButton" Content="停止" AutomationProperties.Name="Stop instance"
                             IsEnabled="False" Click="StopInstance_Click"/>
                 </StackPanel>
