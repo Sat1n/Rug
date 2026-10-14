@@ -59,6 +59,10 @@ public sealed class LuaRuntime : IScriptRuntime
         function rug.click(x, y, button, mode) return luaYield('__rug', 'click', x, y, button, mode) end
         function rug.press_key(key, duration_ms) return luaYield('__rug', 'press_key', key, duration_ms) end
         rug.agent = {}
+        rug.checkpoint = {}
+        function rug.checkpoint.commit(nodeId, stateJson, actionIdsJson)
+          return luaYield('__rug', 'checkpoint', nodeId, stateJson, actionIdsJson)
+        end
         function rug.agent.resolve_anomaly(reason, context)
           return luaYield('__rug', 'resolve_anomaly', reason, context, traceback('', 2))
         end
@@ -129,6 +133,14 @@ public sealed class LuaRuntime : IScriptRuntime
     private LuaFunction? _beginStop;
     private Guid? _pendingId;
     private Func<string, string, Task<RecoveryResult>>? _recoveryHandler;
+    private Func<string, string, string, Task<CheckpointResult>>? _checkpointHandler;
+    public LoadedScriptContent? LoadedCode { get; private set; }
+    public void ConfigureCheckpointHandler(Func<string, string, string, Task<CheckpointResult>> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        if (_disposed || State is not (ScriptState.Uninitialized or ScriptState.Ready)) throw new InvalidOperationException("Checkpoint handler must bind before execution.");
+        _checkpointHandler = handler;
+    }
     private Guid? _pendingAnomalyId;
     private string? _pendingAnomalyReason;
     private Func<string, string, Task<string>>? _anomalyHandler;
@@ -218,6 +230,7 @@ public sealed class LuaRuntime : IScriptRuntime
         ArgumentException.ThrowIfNullOrWhiteSpace(scriptPath);
         if (State != ScriptState.Uninitialized) throw new InvalidOperationException("Runtime is already initialized.");
         string source = await File.ReadAllTextAsync(scriptPath, ct).ConfigureAwait(false);
+        LoadedCode = CheckpointJson.Loaded(manifest.Entry, source);
         _manifest = manifest;
         _identity ??= new RunIdentity(manifest.Id, _instanceScope.InstanceId, 1,
             manifest.TargetWindow == 0 ? null : Guid.NewGuid(), manifest.TargetWindow);
@@ -237,7 +250,7 @@ public sealed class LuaRuntime : IScriptRuntime
             {
                 // Recheck after bridge/arbiter queues and between composite steps.
                 // Mandatory releases bypass this business check.
-                _context?.ValidateBusiness();
+                _context?.ValidateInputBusiness();
                 _lifetime.Token.ThrowIfCancellationRequested();
             });
         if (manifest.Permissions.Contains(Permission.ControlInput))
@@ -554,6 +567,11 @@ public sealed class LuaRuntime : IScriptRuntime
     /// @source args: LuaRuntime.ResumeLua</summary>
     private Task<object?> BeginOperation(string operation, LuaTable args, CancellationToken ct)
     {
+        if (operation == "checkpoint")
+        {
+            _permissions!.Demand(Permission.Checkpoint, "rug.checkpoint.commit");
+            return CommitCheckpointAsync(HostString(args[4]), HostString(args[5]), HostString(args[6]));
+        }
         if (operation == "resolve_anomaly")
         {
             _permissions!.Demand(Permission.Agent, "rug.agent.resolve_anomaly");
@@ -747,6 +765,13 @@ public sealed class LuaRuntime : IScriptRuntime
         await Task.Delay(ms, ct).ConfigureAwait(false);
         return true;
     }
+    private async Task<object?> CommitCheckpointAsync(string node, string state, string actions)
+    {
+        try { return await (_checkpointHandler ?? throw new InvalidOperationException("Checkpoint service is not configured."))(node, state, actions).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (_context?.IsBusinessClosed == true) { throw new HostStopAdmissionCancellation(); }
+        catch (AutomationGateway.GatewayRejectedException error) when (error.Error == OperationError.InvalidLifecycleState && _context?.IsBusinessClosed == true)
+        { throw new HostStopAdmissionCancellation(); }
+    }
 
     private async Task<object?> CaptureAsync(CancellationToken ct)
     {
@@ -802,6 +827,12 @@ public sealed class LuaRuntime : IScriptRuntime
 
     private object? ToLuaValue(object? value)
     {
+        if (value is CheckpointResult checkpoint)
+        {
+            LuaTable table = NewTable(); table["status"] = checkpoint.Status; table["error"] = checkpoint.Error.ToString();
+            table["checkpointId"] = checkpoint.CheckpointId?.ToString(); table["submissionSequence"] = checkpoint.SubmissionSequence;
+            return table;
+        }
         if (value is RecoveryResult recovery)
         {
             LuaTable table = NewTable();

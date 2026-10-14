@@ -8,6 +8,15 @@ tags: [lua, tests, input]
 
 # Lua coroutine bridge tests
 
+06C-01 adds `--checkpoint-tests` and the default full suite: actual Lua, trusted
+Fake observation, real filesystem first-create/replace/integrity and separate
+same-process/child-process reopen evidence. Controlled barriers check Stop before
+and after publish, noncooperative capture/IO, genuine faults, old-record retention,
+cancel/timeout and late results. Source/install/config/code identities, quota,
+corruption/partial/temp/version/JSON tests and shipped exact-code node are included.
+See [checkpoint contract and commands](../../Rug.UI.Core/Checkpoints.md).
+No new-instance checkpoint startup, human input or Hook-gap resolution is claimed.
+
 Task 3.5-06B-01 adds `--recovery-tests` to the default suite: actual Lua init/tick
 locals and explicit result tables; frozen mainline; missing/false validators;
 Fake suggestions, timeouts/late results; Stop versus advice/validation/native

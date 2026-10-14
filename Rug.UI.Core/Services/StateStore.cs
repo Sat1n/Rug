@@ -87,6 +87,12 @@ public sealed class StateStore
         lock (bucket.Gate)
             return bucket.Values.ToDictionary(pair => pair.Key, pair => Decode(pair.Value), StringComparer.Ordinal);
     }
+    internal (long Revision, IReadOnlyDictionary<string, object?> Values) SnapshotWithRevision(StateScope scope)
+    {
+        ValidateScope(scope);
+        if (!_buckets.TryGetValue(scope, out var bucket)) return (0, new Dictionary<string, object?>());
+        lock (bucket.Gate) return (bucket.Revision, bucket.Values.ToDictionary(p => p.Key, p => Decode(p.Value), StringComparer.Ordinal));
+    }
 
     /// <summary>Open the state partition for a fresh run before its first write.</summary>
     public void OpenInstance(StateScope scope)

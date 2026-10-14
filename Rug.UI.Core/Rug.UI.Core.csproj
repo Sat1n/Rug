@@ -17,4 +17,7 @@
     <PackageReference Include="NLua" Version="1.7.9" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.2" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="..\plugins\checkpoint_probe\main.lua" LogicalName="Rug.CheckpointProbe.lua" />
+  </ItemGroup>
 </Project>

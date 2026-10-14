@@ -43,7 +43,7 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 | `Abstractions/IInputArbiter.cs` · `Models/InputOwnership.cs` · `Services/InputArbiter.cs` · `Services/InputWindowValidator.cs` · `Services/InputExecutionBoundary.cs` | Host owners, window lifetimes, bounded conflict-FIFO input queue, manual takeover and Gateway focus/input-progress outcome boundary; [contract](InputArbitration.md) |
 | `Abstractions/IInputEventSource.cs` · `Models/InputEvents.cs` · `Services/RawInputEventSource.cs` · `Native/WindowsRawInputReceiver.cs` | Explicit host-owned Raw Input receiver, bounded detached events and diagnostics; [contract and acceptance](RawInputEvents.md) |
 | `Abstractions/IInputInterventionCoordinator.cs` · `Services/InputInterventionCoordinator.cs` | Host input sessions, readiness guards and global candidate takeover; [contract](InputIntervention.md) |
-| `Services/CaptureService.cs` | Async WGC capture (Task.Run / MTA): start/stop a native capturer, copy each frame to managed BGRA8, free the native buffer |
+| `Services/CaptureService.cs` | Async WGC: owned BGRA copies, explicit resource/layout errors; ambiguous no-frame status polls, never validates |
 | `Services/WindowSpyService.cs` | Resolve the window under the cursor or enumerate visible top-level windows → `WindowInfo` (incl. monitor via `MonitorFromWindow`); inspect a given HWND, check foreground state, query client size and pick client points. All physical pixels (PMv2-aware host) |
 | `Abstractions/IScriptRuntime.cs` · `Models/ScriptExecutionResult.cs` | Script lifecycle/state contract |
 | `Models/PluginManifest.cs` · `Models/PluginConfigSchema.cs` · `Models/Permission.cs` | Plugin identity/entry/permission declarations, UI control schema and typed defaults, exact permission names |
@@ -92,15 +92,16 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 * Production waits for human verification. Trusted installation/scenario validation
   returns Lua `{status="resolved",recoveryId,reason,error}`. Commit checks identity,
   cancellation and deadlines under the Stop transition lock. No Resume bypass.
-* `AnomalyLogger` writes fresh BGRA→PNG and same-basename JSON in `./logs/anomalies/`:
-  UTC time, plugin/run/recovery IDs, bounded business context (no VM traceback),
-  relative screenshot, null `agent_resolution` and typed verification summary.
-  IO/permission/Lua/cleanup failures remain faults. Images stay local.
+* `AnomalyLogger` saves local PNG/JSON with run/recovery identity and verification.
+  Bounded context excludes VM stacks; permission/IO/Lua/cleanup errors still fault.
 * Planned input handoff drains releases, retires the input epoch/session and
   preserves only that registered recovery. Other input runs stop; timer/vision
   survive. Return control never continues Lua. Explicit Gateway VerifyRecovery
   rechecks grants/target/detector, acquires a new session and bounds fresh-frame observation.
-  No provider, recovery input tools, checkpoint or persistent recovery is added.
+  No provider or recovery input tools are added.
+* [06C checkpoint contract](Checkpoints.md) defines explicit Lua business submits,
+  exact-code nodes, fresh validation, startup config/code hashes, bounded atomic
+  storage and compatible detached reads. New-instance checkpoint startup is pending.
 
 ## Native input bridge and coordinates (Task 2.2)
 
@@ -189,7 +190,7 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   installation binding, revocation and reload rules. A missing grant throws
   `PermissionDeniedException`, logs plugin/API/
   permission details, and puts the runtime in `Faulted` state. Defined names:
-  `timer`, `vision.capture`, `vision.match`, `vision.ocr`, `input`, `network`, `filesystem`, `agent`.
+  `timer`, `vision.capture`, `vision.match`, `vision.ocr`, `input`, `network`, `filesystem`, `agent`, `checkpoint`.
 
 ## Lua coroutine contract (Task 2.1.1)
 

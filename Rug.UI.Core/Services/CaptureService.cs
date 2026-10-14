@@ -50,12 +50,13 @@ public sealed class CaptureService : ICaptureService
         if (capturer is null || capturer.IsInvalid || capturer.IsClosed) return null;
 
         int rc = RugCoreNative.Rug_GrabFrame(capturer.DangerousGetHandle(), out RugFrame frame);
-        if (rc != RugStatus.Ok || frame.Data == 0) return null;
+        if (!HasFrame(rc)) return null;
+        if (frame.Data == 0) throw new InvalidDataException("Native capture reported success without frame data.");
 
         try
         {
             if (frame.Format != RugPixelFormat.Bgra8 || frame.Width <= 0 || frame.Height <= 0)
-                return null;
+                throw new InvalidDataException("Native capture frame layout is invalid.");
 
             int bytes = (int)frame.DataLength;
             var pixels = new byte[bytes];
@@ -66,6 +67,12 @@ public sealed class CaptureService : ICaptureService
         {
             RugCoreNative.Rug_FreeBuffer(frame.Data);  // native new[] buffer
         }
+    }
+    internal static bool HasFrame(int status)
+    {
+        if (status == RugStatus.ErrCaptureFailed) return false; // ABI also uses this code for no available frame.
+        if (status != RugStatus.Ok) throw new RugNativeException(nameof(RugCoreNative.Rug_GrabFrame), status);
+        return true;
     }
 
     public Task StopAsync()

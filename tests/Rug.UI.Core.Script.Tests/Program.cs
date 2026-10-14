@@ -16,6 +16,9 @@ using Rug.UI.Core.Security;
 using Rug.UI.Core.Schema;
 using RugTaskScheduler = Rug.UI.Core.Services.TaskScheduler;
 
+if (args.Contains("--checkpoint-child-read")) { await CheckpointTests.ChildReadAsync(args); return; }
+if (args.Contains("--checkpoint-tests")) { await CheckpointTests.RunAsync(); return; }
+
 if (args.Contains("--recovery-ui")) { await ManualRecovery.RunAsync(automated: true); return; }
 if (args.Contains("--recovery-manual")) { await ManualRecovery.RunAsync(); return; }
 if (args.Contains("--intervention-manual")) { await ManualInputIntervention.RunAsync(); return; }
@@ -1105,6 +1108,7 @@ await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new 
 }
 await GatewayTests.RunAsync();
 await RecoveryTests.RunAsync();
+await CheckpointTests.RunAsync();
 await LifecycleTests.RunAsync();
 await AuthorizationTests.RunAsync();
 await InputArbitrationTests.RunAsync();

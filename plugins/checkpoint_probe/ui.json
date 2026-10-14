@@ -1,0 +1,1 @@
+{"type":"Page","id":"checkpoint-page","title":"检查点受控示例","children":[{"type":"InfoBanner","id":"checkpoint-help","title":"绑定受控绿色画面后运行","message":"此示例只验证并保存 panel-ready 业务节点，不从检查点启动任务。需要显式授予 checkpoint 与截图权限。","severity":"Informational"}]}

@@ -37,6 +37,7 @@ public sealed class TaskScheduler : ITaskScheduler
     private readonly IDisposable _inputStopRegistration;
     private readonly IInputInterventionCoordinator? _intervention;
     private readonly IRecoveryCoordinator _recovery;
+    private readonly ICheckpointCoordinator? _checkpoints;
 
     public TaskScheduler(IPluginManager plugins, string pluginsRoot,
         Func<ICaptureService> captureFactory, Func<IInputService> inputFactory,
@@ -45,7 +46,7 @@ public sealed class TaskScheduler : ITaskScheduler
         TimeSpan? watchdogTimeout = null, ICommandBus? commandBus = null,
         IAutomationPermissionChecker? permissionChecker = null, IPluginAuthorization? authorization = null,
         IInputArbiter? inputArbiter = null, IInputInterventionCoordinator? intervention = null,
-        IRecoveryCoordinator? recovery = null)
+        IRecoveryCoordinator? recovery = null, ICheckpointCoordinator? checkpoints = null)
     {
         _plugins = plugins ?? throw new ArgumentNullException(nameof(plugins));
         _anomalies = anomalies ?? throw new ArgumentNullException(nameof(anomalies));
@@ -72,6 +73,7 @@ public sealed class TaskScheduler : ITaskScheduler
                 return started!;
             }, stop: StopTaskAsync, pause: PauseTask, resume: ResumeTask, authorization: authorization, verifyRecovery: VerifyRecoveryAsync);
         _recovery = recovery ?? new RecoveryCoordinator(anomalies, Gateway.Authorization, new RecoveryValidatorRegistry());
+        _checkpoints = checkpoints;
     }
 
     public AutomationGateway Gateway { get; }
@@ -205,9 +207,15 @@ public sealed class TaskScheduler : ITaskScheduler
             var configuration = source.Configuration is null
                 ? new Dictionary<string, object?>(StringComparer.Ordinal)
                 : new Dictionary<string, object?>(source.Configuration, StringComparer.Ordinal);
+            long configRevision = 0;
             if (_commandBus is not null)
-                foreach (var pair in _commandBus.Snapshot(StateScope.Plugin(source.Id)))
+            {
+                var configSnapshot = _commandBus.SnapshotWithRevision(StateScope.Plugin(source.Id));
+                configRevision = configSnapshot.Revision;
+                foreach (var pair in configSnapshot.Values)
                     configuration[pair.Key] = pair.Value;
+            }
+            configuration = configuration.ToDictionary(p => p.Key, p => StateStore.CloneValue(p.Value), StringComparer.Ordinal);
             capture = _captureFactory() ?? throw new InvalidOperationException("Capture factory returned null.");
             input = _inputFactory() ?? throw new InvalidOperationException("Input factory returned null.");
             runtime = _runtimeFactory(capture, input) ?? throw new InvalidOperationException("Runtime factory returned null.");
@@ -287,6 +295,15 @@ public sealed class TaskScheduler : ITaskScheduler
             cancellation.Token.ThrowIfCancellationRequested();
             await runtime.InitializeAsync(Path.Combine(source.PluginDirectory, source.Entry),
                 manifest, cancellation.Token).ConfigureAwait(false);
+            if (source.Permissions.Contains(Permission.Checkpoint))
+            {
+                if (source.Version.Length > 128) throw new InvalidDataException("Checkpoint plugin version exceeds 128 characters.");
+                var code = runtime.LoadedCode ?? throw new InvalidOperationException("Runtime lacks immutable code snapshot.");
+                context.CheckpointMetadata = new(ticket.Installation, CheckpointJson.InstallationId(ticket.Installation), source.Version,
+                    code, configRevision, CheckpointJson.ConfigHash(configuration));
+                runtime.ConfigureCheckpointHandler((node, state, actions) =>
+                    (_checkpoints ?? throw new InvalidOperationException("Host checkpoint coordinator is not configured.")).CommitAsync(context, node, state, actions));
+            }
             cancellation.Token.ThrowIfCancellationRequested();
             await runtime.PrepareLifecycleAsync().ConfigureAwait(false);
             context.Prepared = true;

@@ -88,6 +88,7 @@ public sealed class PluginPermissionConsent(IPluginAuthorization authorization, 
         Permission.FileSystem => "访问插件目录之外的模板文件",
         Permission.Network => "访问网络",
         Permission.Agent => "记录异常并挂起任务",
+        Permission.Checkpoint => "验证业务节点并保存检查点",
         _ => "未知权限，无法授权"
     };
     private static Task<T> OnUIAsync<T>(Func<Task<T>> action)

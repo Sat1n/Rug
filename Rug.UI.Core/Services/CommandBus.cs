@@ -69,6 +69,8 @@ public sealed class CommandBus : ICommandBus
         ThrowIfDisposed();
         return _store.Snapshot(scope);
     }
+    public (long Revision, IReadOnlyDictionary<string, object?> Values) SnapshotWithRevision(StateScope scope)
+    { ThrowIfDisposed(); return _store.SnapshotWithRevision(scope); }
 
     public void CloseInstance(StateScope scope)
     {

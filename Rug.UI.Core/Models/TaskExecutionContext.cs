@@ -29,13 +29,23 @@ public sealed class TaskExecutionContext
     internal Func<Task>? HandoffRecovery { get; set; }
     internal Func<Task>? AcquireRecoveryInput { get; set; }
     private bool _preservedForHuman;
+    private bool _checkpointPending;
+    private TaskCompletionSource _checkpointFinished = Completed();
+    private long _checkpointSequence;
+    private int _checkpointObservations;
+    private TaskCompletionSource _checkpointObservationsDrained = Completed();
+    internal bool CheckpointObservationInFlight { get { lock (_gate) return _checkpointObservations != 0; } }
+    internal CheckpointRunMetadata? CheckpointMetadata { get; set; }
+    internal SemaphoreSlim CheckpointGate { get; } = new(1);
+    internal int CheckpointWaiters;
     internal bool PreservedForHuman { get { lock (_gate) return _preservedForHuman; } }
     private int _inputs, _segments, _work, _recoveryWork;
     internal bool RecoveryWorkInFlight { get { lock (_gate) return _recoveryWork != 0; } }
 
     internal TaskExecutionContext(RunIdentity identity, CancellationTokenSource cancellation,
         IScriptRuntime runtime, ICaptureService capture, IInputService input)
-    { Identity = identity; Cancellation = cancellation; Runtime = runtime; Capture = capture; Input = input; }
+    { Identity = identity; Cancellation = cancellation; LifetimeToken = cancellation.Token; Runtime = runtime; Capture = capture; Input = input; }
+    internal CancellationToken LifetimeToken { get; }
 
     public RunIdentity Identity { get; }
     public Guid InstanceId => Identity.InstanceId;
@@ -137,6 +147,9 @@ public sealed class TaskExecutionContext
     /// @source runtime: Services/LuaRuntime.cs#class:LuaRuntime</summary>
     internal async Task WaitIfPausedAsync(CancellationToken token)
     {
+        Task checkpoint;
+        lock (_gate) checkpoint = _checkpointFinished.Task;
+        await checkpoint.WaitAsync(token).ConfigureAwait(false);
         if (!PauseRequested) { token.ThrowIfCancellationRequested(); return; }
         Task boundary;
         lock (_gate) boundary = Task.WhenAll(_inputDrained.Task, _segmentsDrained.Task);
@@ -207,8 +220,9 @@ public sealed class TaskExecutionContext
         lock (_gate)
         {
             ValidateBusinessLocked();
+            if (_checkpointPending) throw new AutomationGateway.GatewayRejectedException(OperationError.InvalidLifecycleState);
             Cancellation.Token.ThrowIfCancellationRequested();
-            if (input && _pauseRequested) throw new AutomationGateway.GatewayRejectedException(OperationError.InvalidLifecycleState);
+            if (input && (_pauseRequested || _checkpointPending)) throw new AutomationGateway.GatewayRejectedException(OperationError.InvalidLifecycleState);
             if (_work++ == 0) _workDrained = Signal();
             if (input && _inputs++ == 0) _inputDrained = Signal();
             return new WorkLease(this, segment: false, input);
@@ -224,10 +238,62 @@ public sealed class TaskExecutionContext
     {
         lock (_gate) ValidateBusinessLocked();
     }
+    internal void ValidateInputBusiness()
+    {
+        lock (_gate)
+        { ValidateBusinessLocked(); if (_checkpointPending) throw new AutomationGateway.GatewayRejectedException(OperationError.InvalidLifecycleState); }
+    }
     private void ValidateBusinessLocked()
     {
         if (_status is AutomationTaskStatus.Stopping or AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted or AutomationTaskStatus.Recovering or AutomationTaskStatus.AwaitingHuman)
             throw new AutomationGateway.GatewayRejectedException(OperationError.InvalidLifecycleState);
+    }
+    internal (IDisposable Work, long Sequence) EnterCheckpoint()
+    {
+        lock (_gate)
+        {
+            ValidateBusinessLocked(); Cancellation.Token.ThrowIfCancellationRequested();
+            if (_checkpointPending) throw new AutomationGateway.GatewayRejectedException(OperationError.InvalidLifecycleState);
+            long sequence = checked(_checkpointSequence + 1);
+            _checkpointPending = true; _checkpointFinished = Signal();
+            if (_work++ == 0) _workDrained = Signal();
+            _checkpointSequence = sequence;
+            return (new CheckpointLease(this), sequence);
+        }
+    }
+    internal void CheckCheckpoint()
+    {
+        lock (_gate)
+        {
+            if (IsTerminalLocked()) throw new HostStopWakeCancellation();
+            Cancellation.Token.ThrowIfCancellationRequested();
+            if (!_checkpointPending || _status is not (AutomationTaskStatus.Starting or AutomationTaskStatus.Running or AutomationTaskStatus.Paused))
+                throw new AutomationGateway.GatewayRejectedException(OperationError.InvalidLifecycleState);
+        }
+    }
+    internal bool BeginCheckpointPublish(CheckpointRunMetadata metadata, CancellationToken token, DateTimeOffset deadline)
+    {
+        lock (_gate)
+        {
+            if (IsTerminalLocked() || !_checkpointPending || !ReferenceEquals(CheckpointMetadata, metadata) || Cancellation.IsCancellationRequested || LastError is not null)
+                return false;
+            token.ThrowIfCancellationRequested();
+            return DateTimeOffset.UtcNow < deadline;
+        }
+    }
+    internal IDisposable EnterCheckpointObservation()
+    { lock (_gate) { CheckCheckpoint(); if (_work++ == 0) _workDrained = Signal(); if (_checkpointObservations++ == 0) _checkpointObservationsDrained = Signal(); return new WorkLease(this, false, false, checkpointObservation: true); } }
+    internal Task DrainCheckpointObservationsAsync() { lock (_gate) return _checkpointObservationsDrained.Task; }
+    internal Task DrainCheckpointBoundaryAsync() { lock (_gate) return Task.WhenAll(_inputDrained.Task, _segmentsDrained.Task); }
+    private sealed class CheckpointLease(TaskExecutionContext context) : IDisposable
+    {
+        private int _disposed;
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            lock (context._gate)
+            { context._checkpointPending = false; context._checkpointFinished.TrySetResult(); if (--context._work == 0) context._workDrained.TrySetResult(); }
+        }
     }
     internal RecoverySnapshot BeginRecovery(string reason)
     {
@@ -342,7 +408,7 @@ public sealed class TaskExecutionContext
         });
     }
     internal Task DrainOperationsAsync() { lock (_gate) return Task.WhenAll(_workDrained.Task, _segmentsDrained.Task); }
-    private sealed class WorkLease(TaskExecutionContext context, bool segment, bool input, bool recovery = false) : IDisposable
+    private sealed class WorkLease(TaskExecutionContext context, bool segment, bool input, bool recovery = false, bool checkpointObservation = false) : IDisposable
     {
         private int _disposed;
         public void Dispose()
@@ -354,6 +420,7 @@ public sealed class TaskExecutionContext
                 else
                 {
                     if (recovery) context._recoveryWork--;
+                    if (checkpointObservation && --context._checkpointObservations == 0) context._checkpointObservationsDrained.TrySetResult();
                     if (--context._work == 0) context._workDrained.TrySetResult();
                     if (input && --context._inputs == 0) context._inputDrained.TrySetResult();
                 }

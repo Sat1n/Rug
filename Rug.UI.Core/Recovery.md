@@ -139,7 +139,12 @@ UIA consent/selection/verification is separately reported by `--recovery-ui`.
 Existing lifecycle/Gateway/grants/arbitration/intervention/cache/state/hot-reload
 regressions remain enabled. Frozen reversal records/binaries are not rebuilt.
 
-## Human acceptance — main loop user-confirmed; red/Stop checks pending
+## Human acceptance — user-confirmed
+
+06B-01 was accepted by the user after dabceb2. The user explicitly confirmed
+single-click green verification/continuation, persistent-red rejection and Stop
+while AwaitingHuman. This is human evidence, separate from agent UIA/Fake/native
+automation. The independent Hook observation gap is unchanged.
 
 Use **one command**, not two parallel terminal processes:
 
@@ -188,8 +193,8 @@ explicit validation resumes the original on_init, B=(1,1)→(2,2); later human i
 stops that run, timer/vision survive, and Return does not revive it. The user also
 reported that green sometimes required another Verify request; the single-frame
 controlled validator is now replaced by bounded fresh-frame observation. The
-updated manual green transition and red-rejection/Stop checks remain NOT RUN by
-the agent / pending user confirmation. Existing 05B-02 and independent Hook-gap
+updated manual green transition and red-rejection/Stop checks were NOT RUN by
+the agent; the user has now confirmed all three. Existing 05B-02 and independent Hook-gap
 records remain unchanged. Native/UI automation now requires one green Verify
 request, removing the earlier retry-until-success test behavior.
 NuGet audit initially lacked sandbox network access; forced normal restore outside
@@ -204,7 +209,7 @@ late green. Mainline/dedup/work permits remain correct; faults are not hidden.
 PASS: complete script regression and Debug/x64 WinUI build, 0 warnings/errors.
 PASS: real production Raw/WGC/InputService native recovery and actual WinUI
 recovery UIA, each requiring one green Verify request and final B=(2,2).
-NOT RUN: post-fix human single-click green observation; previous user-confirmed
+Agent NOT RUN: post-fix human single-click green observation (subsequently user-confirmed); previous user-confirmed
 main-loop/control semantics stand. No frozen binary or Hook reversal was rebuilt.
 
 ### Commit and paused-stop race follow-up (2026-10-14)

@@ -1,0 +1,1 @@
+{"id":"checkpoint_probe","name":"Checkpoint controlled panel","version":"1.0.0","entry":"main.lua","targetProcess":"controlled-panel","permissions":["checkpoint","vision.capture","timer"]}

@@ -12,6 +12,8 @@ public interface IScriptRuntime : IAsyncDisposable
     /// <summary>Trusted scheduler-owned lifecycle gate, never an adapter parameter.</summary>
     void ConfigureLifecycle(TaskExecutionContext context) { }
     ScriptState State { get; }
+    LoadedScriptContent? LoadedCode => null;
+    void ConfigureCheckpointHandler(Func<string, string, string, Task<CheckpointResult>> handler) { }
     event EventHandler<ScriptStateChangedEventArgs>? StateChanged;
     /// <summary>Bind structural identity, launch inputs and a plugin config snapshot before initialization.</summary>
     void ConfigureState(RunIdentity identity, IReadOnlyDictionary<string, object?> launchInputs,
