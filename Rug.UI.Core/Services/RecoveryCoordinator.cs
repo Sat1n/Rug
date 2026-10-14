@@ -314,13 +314,45 @@ public sealed class RecoveryValidationContext : IDisposable
     public void Dispose() => Interlocked.Exchange(ref _disposed, 1);
 }
 
-/// <summary>Controlled sample: fresh WGC BGRA image must contain a large green ready panel.</summary>
+/// <summary>Controlled sample: observe fresh WGC images for a bounded green-panel transition.</summary>
 public sealed class FreshGreenFrameValidator : IRecoveryValidator
 {
+    private static readonly TimeSpan ObservationWindow = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(32);
+    private readonly TimeProvider _clock;
+    private readonly Func<TimeSpan, CancellationToken, Task> _delay;
+
+    public FreshGreenFrameValidator() : this(TimeProvider.System) { }
+    internal FreshGreenFrameValidator(TimeProvider clock, Func<TimeSpan, CancellationToken, Task>? delay = null)
+    {
+        _clock = clock;
+        _delay = delay ?? ((duration, token) => Task.Delay(duration, _clock, token));
+    }
+
+    /// <summary>@shape result: true only after an observed green frame; false after bounded red observation.
+    /// @source capture: RecoveryCoordinator.cs#class:RecoveryValidationContext
+    /// A new grab bypasses the managed cache but can still precede presentation of the user's change.
+    /// Keep one verification request active while sampling; never retry input or suppress detection.
+    /// The coordinator's shorter deadline/Stop can cancel every capture and asynchronous delay.</summary>
     public async Task<bool> ValidateAsync(RecoveryValidationContext context, CancellationToken cancellationToken)
     {
-        var frame = await context.CaptureFreshAsync().ConfigureAwait(false);
-        cancellationToken.ThrowIfCancellationRequested();
+        long started = _clock.GetTimestamp();
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var frame = await context.CaptureFreshAsync().ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (IsGreen(frame)) return true;
+            TimeSpan remaining = ObservationWindow - _clock.GetElapsedTime(started);
+            if (remaining <= TimeSpan.Zero) return false;
+            await _delay(remaining < PollInterval ? remaining : PollInterval, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_clock.GetElapsedTime(started) >= ObservationWindow) return false;
+        }
+    }
+
+    private static bool IsGreen(CapturedFrame frame)
+    {
         int green = 0, total = 0;
         for (int y = frame.Height / 4; y < frame.Height * 3 / 4; y++)
             for (int x = frame.Width / 4; x < frame.Width * 3 / 4; x++)

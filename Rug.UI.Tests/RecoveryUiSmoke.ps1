@@ -84,20 +84,8 @@ try {
  $null=[RecoveryUiNative]::GetWindowTextW([IntPtr]$TargetHwnd,$title,256)
  Write-Output "controlled target after ready: $title"
  if(-not $title.ToString().Contains("READY (green)")){throw "Controlled target did not turn green"}
- $verified=$false
- for($attempt=0;$attempt -lt 4;$attempt++) {
-  Invoke 'Verify recovery'
-  $watch=[Diagnostics.Stopwatch]::StartNew()
-  while($watch.Elapsed.TotalSeconds -lt 8) {
-   if($null -ne (Find '验证通过，原协程继续')){$verified=$true;break}
-   if($null -ne (Find '仍需人工处理 · ValidationRejected')){break}
-   Start-Sleep -Milliseconds 25
-  }
-  if($verified){break}
-  $null=Await '等待人工 · controlled-ready'
-  Invoke 'Return control' # An explicit new verification attempt, never automatic Lua continuation.
- }
- if(-not $verified){throw 'Fresh green validation did not succeed'}
+ Invoke 'Verify recovery' # Exactly one request; a transient earlier frame must not require another click.
+ $null=Await '验证通过，原协程继续'
  $null=Await '运行中'
  if((Await 'Verify recovery').Current.IsEnabled){throw 'Completed recovery button still enabled'}
  Invoke 'Stop instance'

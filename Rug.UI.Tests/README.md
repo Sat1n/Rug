@@ -61,4 +61,6 @@ the actual DevTools crosshair before input session startup, invokes consent,
 checks AwaitingHuman/ManualControl, selection re-query, no ordinary Resume,
 Return without continuation, fresh WGC Verify and terminal controls. UIA plus a
 trusted test panel change do not prove human recovery; use `--recovery-manual`.
-See [recovery acceptance](../Rug.UI.Core/Recovery.md). No production approval switch.
+Green verification must finish after one Verify invocation; the smoke test has no
+retry-until-success loop. See [recovery acceptance](../Rug.UI.Core/Recovery.md).
+No production approval switch.

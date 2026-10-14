@@ -19,7 +19,7 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 > Process-local explicit grants and shared input arbitration support host manual takeover.
 > Task 3.5-05B-02 connects production candidate-input monitoring to safe takeover;
 > 05B-02 human UI acceptance is user-confirmed; the independent Hook gap remains incomplete.
-> 06B-01 adds explicit verified recovery with a retained Lua coroutine; human acceptance is pending.
+> 06B-01 retains Lua through verified recovery; the human main loop is user-confirmed.
 
 ## Internal Topology
 
@@ -99,7 +99,7 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 * Planned input handoff drains releases, retires the input epoch/session and
   preserves only that registered recovery. Other input runs stop; timer/vision
   survive. Return control never continues Lua. Explicit Gateway VerifyRecovery
-  rechecks grants/target/detector, acquires a new session and verifies a new frame.
+  rechecks grants/target/detector, acquires a new session and bounds fresh-frame observation.
   No provider, recovery input tools, checkpoint or persistent recovery is added.
 
 ## Native input bridge and coordinates (Task 2.2)

@@ -86,8 +86,16 @@ the validation deadline, never substitute the old VisualEngineBridge cache.
 
 The trusted registry is keyed by normalized installation and exact reason/scenario.
 The shipped `recovery_probe` uses `controlled-ready` and FreshGreenFrameValidator:
-a fresh image must show a large green center panel. This is a controlled sample,
-not a universal verifier. Source registration/held-input tracking never stop for
+a fresh image must show a large green center panel. Within one request, it samples
+with a 1s observation budget (32ms cancellable polling), ending immediately on
+green; sustained red returns ValidationRejected. No further grab starts after
+that budget. An already-started native grab may finish later; the coordinator's
+deadline and counted-work rules still apply, including noncooperative late work.
+A fresh grab bypasses the managed cache but the unchanged C-ABI provides no frame
+presentation timestamp; its first returned image may precede the user's change.
+This bounded observation belongs only to the controlled validator, not a universal
+verification/retry policy. It never repeats input or hides candidate events.
+Source registration/held-input tracking never stop for
 human recovery. No source marker authenticates a human. The independent low-level
 Hook observation gap remains unresolved and is not a production classification verdict.
 
@@ -119,7 +127,7 @@ UIA consent/selection/verification is separately reported by `--recovery-ui`.
 Existing lifecycle/Gateway/grants/arbitration/intervention/cache/state/hot-reload
 regressions remain enabled. Frozen reversal records/binaries are not rebuilt.
 
-## Human acceptance — NOT RUN / awaiting user
+## Human acceptance — main loop user-confirmed; red/Stop checks pending
 
 Use **one command**, not two parallel terminal processes:
 
@@ -163,7 +171,26 @@ PASS: existing instance/grant, lifecycle, manual takeover and demo UI regression
 demo reload 545ms; UI JSON reload 483ms, JSON correction 461ms, Lua correction 499ms.
 Setup mouse actions in recovery UIA are genuine software-tagged test setup before
 session startup, not human evidence. Native input business actions still use Rug.Core.
-Human recovery/normal human takeover of a resumed recovery run: NOT RUN, user
-steps above. Existing 05B-02 human acceptance remains as recorded, not overwritten.
+User confirmed the actual manual main loop: Return alone does not continue;
+explicit validation resumes the original on_init, B=(1,1)→(2,2); later human input
+stops that run, timer/vision survive, and Return does not revive it. The user also
+reported that green sometimes required another Verify request; the single-frame
+controlled validator is now replaced by bounded fresh-frame observation. The
+updated manual green transition and red-rejection/Stop checks remain NOT RUN by
+the agent / pending user confirmation. Existing 05B-02 and independent Hook-gap
+records remain unchanged. Native/UI automation now requires one green Verify
+request, removing the earlier retry-until-success test behavior.
 NuGet audit initially lacked sandbox network access; forced normal restore outside
 the sandbox succeeded without dependency changes. Subsequent builds were clean.
+
+### Green-transition follow-up (2026-10-14)
+
+PASS: seven deterministic actual-Lua scenarios with controlled time/capture:
+red/red/green in one request (3 frames), persistent red (32 frames over 1s), caller
+cancel, Stop, capture IO fault, shorter coordinator deadline, and noncooperative
+late green. Mainline/dedup/work permits remain correct; faults are not hidden.
+PASS: complete script regression and Debug/x64 WinUI build, 0 warnings/errors.
+PASS: real production Raw/WGC/InputService native recovery and actual WinUI
+recovery UIA, each requiring one green Verify request and final B=(2,2).
+NOT RUN: post-fix human single-click green observation; previous user-confirmed
+main-loop/control semantics stand. No frozen binary or Hook reversal was rebuilt.

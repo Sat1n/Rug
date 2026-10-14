@@ -18,6 +18,9 @@ and a self-owned red/green window with fresh WGC validation and PNG/JSON. The ho
 changes its panel; this does not count as human acceptance. `--recovery-ui` adds
 actual WinUI consent/crosshair/selection/Verify/Stop automation via
 `Rug.UI.Tests/RecoveryUiSmoke.ps1`; `--recovery-manual` leaves actions to the user.
+Green validation must succeed in one request, without host retry loops. Fake
+monotonic clock/barriers cover red/red/green, bounded persistent-red rejection,
+cancel/Stop/deadline, capture faults, late green frames and retained deduplication.
 See [commands, contracts and exact human steps](../../Rug.UI.Core/Recovery.md).
 Frozen reversal binaries/records are unchanged. Independent Hook gap stays open.
 

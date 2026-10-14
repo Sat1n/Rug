@@ -58,17 +58,9 @@ internal static class NativeRecoveryTests
                 "red panel incorrectly verified/resumed: " + rejected + "; lifecycle=" + context.Snapshot + "; error=" + context.LastError);
             target.SetReady(true); // Controlled host change, not human acceptance.
             arbiter.ReturnControl();
-            OperationResult verified;
-            using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8)))
-            {
-                do
-                {
-                    verified = await scheduler.Gateway.ExecuteAsync(caller, Request(), timeout.Token);
-                    if (verified.Value is RecoveryResult { Status: RecoveryStatus.Resolved }) break;
-                    RecoveryTests.Check(verified.Value is RecoveryResult { Error: RecoveryError.ValidationRejected }, "real validation failed unexpectedly");
-                    arbiter.ReturnControl();
-                } while (!timeout.IsCancellationRequested);
-            }
+            var verified = await scheduler.Gateway.ExecuteAsync(caller, Request());
+            RecoveryTests.Check(verified.Value is RecoveryResult { Status: RecoveryStatus.Resolved },
+                "one green verification request did not resolve: " + verified);
             await RecoveryTests.Until(() => store.GetState(context.InstanceScope, "steps.after", 0) == 1);
             RecoveryTests.Check(target.KeyCounts == (2, 2) && store.GetState(context.InstanceScope, "steps.before", 0) == 1,
                 "real original coroutine replayed/dropped physical input");

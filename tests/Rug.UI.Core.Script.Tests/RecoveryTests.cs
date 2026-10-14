@@ -39,7 +39,105 @@ internal static class RecoveryTests
         foreach (string failure in new[] { "lua", "permission", "archive", "cleanup", "validator" }) await FaultsAsync(failure);
         await IdentityAsync(); await PlannedOthersAsync(); await PlannedHumanAsync(); await UnexpectedAsync(); await LateEpochAsync();
         await TimeoutAsync(); await NativeTimeoutAsync(); await CallerCancellationAsync(); await RepetitionAsync();
+        foreach (string scenario in new[] { "settles", "red", "cancel", "stop", "capture-fault", "deadline", "late-green" })
+            await FreshPanelAsync(scenario);
         Console.WriteLine("Recovery PASS: real Lua init/tick locals, explicit tables, frozen mainline, trusted validation, dedup, Stop/late work, grants/identity, planned handoff and epoch isolation");
+    }
+    private sealed class PanelClock : TimeProvider
+    {
+        private long _ticks;
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => Interlocked.Read(ref _ticks);
+        public void Advance(TimeSpan duration) => Interlocked.Add(ref _ticks, duration.Ticks);
+    }
+    private static CapturedFrame Panel(bool ready)
+    {
+        var pixels = new byte[8 * 8 * 4];
+        for (int offset = 0; offset < pixels.Length; offset += 4)
+        { pixels[offset + (ready ? 1 : 2)] = 200; pixels[offset + 3] = 255; }
+        return new(pixels, 8, 8, 32);
+    }
+    private static async Task FreshPanelAsync(string scenario)
+    {
+        await using var f = await Fixture.CreateAsync(Script(true),
+            options: scenario is "deadline" or "late-green" ? new(TimeSpan.FromSeconds(5), TimeSpan.FromMilliseconds(80)) : null);
+        var c = await f.StartAsync(); await Until(() => c.TaskStatus == AutomationTaskStatus.AwaitingHuman);
+        var clock = new PanelClock();
+        var waiting = Signal(); var release = Signal();
+        int samples = 0;
+        f.Captures[0].FrameFactory = () =>
+        {
+            int sample = Interlocked.Increment(ref samples);
+            if (scenario == "capture-fault" && sample == 2) throw new IOException("fresh capture failed");
+            return Panel(scenario == "late-green" && sample == 2 || scenario != "red" && sample >= 3);
+        };
+        var validator = new FreshGreenFrameValidator(clock, async (duration, token) =>
+        {
+            waiting.TrySetResult();
+            if (scenario is "cancel" or "stop" or "deadline") await release.Task.WaitAsync(token);
+            if (scenario == "late-green") f.Captures[0].Hold = true;
+            clock.Advance(duration);
+        });
+        using var registration = f.Registry.Register(f.Installation, "controlled-ready", validator);
+        var caller = await f.Caller(c);
+        var request = f.Request(c, AutomationOperation.VerifyRecovery, new { recoveryId = c.Snapshot.Recovery!.RecoveryId });
+        using var cancellation = new CancellationTokenSource();
+        var verify = f.Scheduler.Gateway.ExecuteAsync(caller, request, cancellation.Token);
+        if (scenario == "late-green") await Bound(f.Captures[0].Entered.Task);
+        if (scenario is "cancel" or "stop" or "deadline")
+        {
+            await Bound(waiting.Task);
+            Check(c.Snapshot.Recovery is { Phase: RecoveryPhase.Validating } && f.Read(c, "after") == 0 && samples == 1,
+                "earlier red frame ended validation before the observation boundary");
+            if (scenario == "cancel") cancellation.Cancel();
+            if (scenario == "stop") await f.Scheduler.StopTaskAsync(c.InstanceId);
+        }
+        var result = await verify.WaitAsync(TimeSpan.FromSeconds(8));
+        if (scenario == "settles")
+        {
+            Check(result.Value is RecoveryResult { Status: RecoveryStatus.Resolved } && samples == 3,
+                "single request failed to observe red/red/green transition");
+            await Until(() => f.Read(c, "after") == 1);
+            Check(f.Read(c, "before") == 1, "frame polling replayed the original coroutine");
+        }
+        else if (scenario is "red" or "deadline" or "cancel" or "late-green")
+        {
+            await Until(() => c.TaskStatus == AutomationTaskStatus.AwaitingHuman);
+            Check(f.Read(c, "after") == 0 && c.LastError is null, "red/cancel/deadline advanced or faulted mainline");
+            if (scenario == "red") Check(result.Value is RecoveryResult { Error: RecoveryError.ValidationRejected } &&
+                clock.GetElapsedTime(0) == TimeSpan.FromSeconds(1) && samples == 32, "red observation was unbounded or incorrectly accepted");
+            if (scenario == "deadline") Check(result.Value is RecoveryResult { Error: RecoveryError.ValidationTimedOut } && samples == 1,
+                "coordinator deadline did not preempt frame observation");
+            if (scenario == "late-green")
+            {
+                Check(result.Value is RecoveryResult { Error: RecoveryError.ValidationTimedOut } && !f.Captures[0].Disposed,
+                    "noncooperative frame work lost its deadline/resource permit");
+                var busy = await f.Verify(c);
+                Check(busy.Value is RecoveryResult { Error: RecoveryError.Busy } && samples == 1,
+                    "late frame work admitted another verification");
+                f.Captures[0].Release.TrySetResult();
+                await Until(() => !c.RecoveryWorkInFlight && f.Coordinator.AdviceInFlight == 0);
+                Check(samples == 2 && f.Read(c, "after") == 0 && c.TaskStatus == AutomationTaskStatus.AwaitingHuman,
+                    "late green frame resumed a timed-out verification");
+            }
+        }
+        else if (scenario == "stop")
+            Check(c.TaskStatus == AutomationTaskStatus.Stopped && f.Read(c, "after") == 0 && samples == 1 && f.Logger.Stops == 1,
+                "Stop did not preempt polling/continued after boundary");
+        else
+        {
+            await Bound(c.Completion);
+            Check(c.TaskStatus == AutomationTaskStatus.Faulted && c.LastError is not null && samples == 2,
+                "capture fault swallowed as transient red/verification success");
+        }
+        int finalSamples = Volatile.Read(ref samples);
+        release.TrySetResult();
+        var repeated = await f.Scheduler.Gateway.ExecuteAsync(caller, request);
+        Check(samples == finalSamples && (scenario is "stop" or "capture-fault"
+                ? repeated.Status != OperationStatus.Success : repeated == result),
+            "same operationId repeated frame verification or terminal run became active");
+        Check(f.Read(c, "after") == (scenario == "settles" ? 1 : 0), "late polling result resumed a cancelled/stopped run");
+        Console.WriteLine("Fresh recovery panel PASS: " + scenario + "; samples=" + finalSamples);
     }
     private static async Task PreservedAsync(bool init)
     {
@@ -311,11 +409,12 @@ internal static class RecoveryTests
     private sealed class Capture : ICaptureService
     {
         public bool Hold, Disposed, FailCleanup; public int Calls;
+        public Func<CapturedFrame>? FrameFactory;
         public readonly TaskCompletionSource Entered = Signal(), Release = Signal();
         public bool IsCapturing => !Disposed;
         public Task StartAsync(nint hwnd, CancellationToken cancellationToken = default) => Task.CompletedTask;
         public async Task<CapturedFrame?> GrabFrameAsync(CancellationToken cancellationToken = default)
-        { Interlocked.Increment(ref Calls); if (Hold) { Entered.TrySetResult(); await Release.Task; } return new([0, 200, 0, 255], 1, 1, 4); }
+        { Interlocked.Increment(ref Calls); if (Hold) { Entered.TrySetResult(); await Release.Task; } return FrameFactory?.Invoke() ?? new([0, 200, 0, 255], 1, 1, 4); }
         public Task StopAsync() => FailCleanup ? Task.FromException(new IOException("cleanup failed")) : Task.CompletedTask;
         public ValueTask DisposeAsync() { Disposed = true; return ValueTask.CompletedTask; }
     }
