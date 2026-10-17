@@ -38,4 +38,4 @@ dotnet run --project Rug.Core.CSharp.Tests.csproj -c Debug -p:Platform=x64 -- --
 The process is x64 (`PlatformTarget=x64`) to match the native DLL. Paths are
 resolved by walking up to the directory containing `Rug.slnx`, so the working
 directory does not matter. This harness targets `net10.0` under root-pinned SDK
-`10.0.401`; copied native DLLs land in `bin/x64/Debug/net10.0/`.
+`10.0.402`; copied native DLLs land in `bin/x64/Debug/net10.0/`.

@@ -339,8 +339,8 @@ The Hook gap and frozen native artifacts remain; 05B-02 human UI acceptance is u
 
 ## .NET 10 x64 build and verification (Task 3.5-01)
 
-* The host targets `net10.0`; root `global.json` pins SDK `10.0.401`.
-  Existing NuGet versions remain unchanged after Debug/Release x64 builds.
+* `net10.0`; `global.json` pins SDK `10.0.402`, roll-forward disabled.
+  [Build matrix](BuildBaseline.md); existing NuGet versions unchanged.
 * Build with `dotnet build Rug.UI.Core/Rug.UI.Core.csproj -c Debug -p:Platform=x64 -warnaserror`
   (or use `Release`). Run the Lua/scheduler suite with
   `dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64`.

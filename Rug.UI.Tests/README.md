@@ -8,7 +8,7 @@ tags: [ui, tests]
 
 # Rug.UI.Tests
 
-Run `dotnet run --project Rug.UI.Tests/Rug.UI.Tests.csproj -c Debug -p:Platform=x64` to validate the shipped `ui.json`, control-tree parsing, invalid schemas, and CommandBus state round trips. The suite targets `net10.0` under SDK `10.0.401`; the native WinUI renderer is compiled through `Rug.UI/Rug.UI.csproj` and can be viewed on the app's main page.
+Run `dotnet run --project Rug.UI.Tests/Rug.UI.Tests.csproj -c Debug -p:Platform=x64` to validate the shipped `ui.json`, control-tree parsing, invalid schemas, and CommandBus state round trips. The suite targets `net10.0` under SDK `10.0.402`; the native WinUI renderer is compiled through `Rug.UI/Rug.UI.csproj` and can be viewed on the app's main page.
 
 The hot-reload tests create a temporary plugin under the test output and use real `FileSystemWatcher` events. They check five rapid saves coalesce into one callback, `ui.json` and Lua edits reload, malformed JSON/Lua produce failures, and corrected files recover. The script integration harness additionally verifies that an active Lua task runs `on_stop`, releases capture, starts a fresh instance on the same HWND, and recovers that instance after a bad schema is fixed.
 

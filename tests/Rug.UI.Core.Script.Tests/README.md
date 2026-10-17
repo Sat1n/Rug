@@ -188,7 +188,7 @@ Native parser tests and three real lifecycles check classification, thread bindi
 attachment conflicts, unsafe-unload rejection, receiver ownership and fault cleanup.
 Paired HUMAN/AUTO is NOT RUN by the agent; this control is not original acceptance.
 
-Run `dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64` with the root-pinned .NET SDK `10.0.401`.
+Run `dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64` with the root-pinned .NET SDK `10.0.402`.
 The console test uses fake capture, OCR and input services, so no native Rug.Core
 DLL or target window is required. It verifies that sleep and capture yield without
 blocking, resume carries frame/OCR values into Lua, stop cancels pending sleep,

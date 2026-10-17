@@ -89,7 +89,7 @@ no automation pipeline and no native interop itself.
 
 * The app targets `net10.0-windows10.0.22621.0` with the existing
   `TargetPlatformMinVersion` of `10.0.17763.0`; root `global.json` pins SDK
-  `10.0.401`. Existing NuGet versions need no migration-specific upgrades.
+  `10.0.402`. Existing NuGet versions need no migration-specific upgrades.
 * Run `dotnet build Rug.UI/Rug.UI.csproj -c Debug -p:Platform=x64 -warnaserror`
   and repeat with `-c Release`. The x64 native DLLs from
   `x64/$(Configuration)/` are copied next to `Rug.UI.exe` under
