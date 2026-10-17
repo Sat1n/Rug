@@ -40,7 +40,7 @@ internal static class CheckpointTests
     {
         await LuaRoundTripAsync();
         foreach (string mode in new[] { "false", "missing", "timeout", "stop-validation", "stop-before", "stop-publish", "stop-publish-fault", "fault-publish", "fault-capture", "permission", "revoke" }) await FailureAsync(mode);
-        await StoreCasesAsync(); await JsonCasesAsync(); await ExactNumbersAsync(); await IdentityAsync();
+        await StoreCasesAsync(); await VersionFieldAsync(); await JsonCasesAsync(); await ExactNumbersAsync(); await IdentityAsync();
         foreach(string mode in new[]{"false","missing","timeout","stop-before"}) await RetainPreviousAsync(mode);
         await CallerCancellationAsync();
         await BlockedCancellationPropagationAsync(afterDecision: false);
@@ -260,6 +260,52 @@ internal static class CheckpointTests
             Console.WriteLine("Checkpoint store PASS: first/replace, late sequence, isolation, old/new reads, corruption/half/temp/versions/compatibility and all capacity limits");
         }
         finally{Directory.Delete(root,true);}
+    }
+    private static async Task VersionFieldAsync()
+    {
+        string root = Path.Combine(AppContext.BaseDirectory, "checkpoint-version-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using var store = new FileCheckpointStore(root);
+            var record = Record(CheckpointJson.Hash("version-field"u8), Guid.NewGuid());
+            Check((await store.PublishAsync(record, () => true, default)).Status == "committed", "version fixture publication failed");
+            string path = store.Locate(Address(record));
+            byte[] original = await File.ReadAllBytesAsync(path);
+            string text = System.Text.Encoding.UTF8.GetString(original);
+            string versionField = "\"schemaVersion\":" + CheckpointJson.SchemaVersion;
+            foreach (string version in new[] { "2147483648", "-2147483649", "2.5", "\"2\"", "null", "true", "{}", "[]", "missing" })
+            {
+                string malformed = version == "missing" ? text.Replace(versionField + ",", "", StringComparison.Ordinal) :
+                    text.Replace(versionField, "\"schemaVersion\":" + version, StringComparison.Ordinal);
+                Check(malformed != text, "version fixture did not change the file");
+                await File.WriteAllTextAsync(path, malformed);
+                byte[] before = await File.ReadAllBytesAsync(path);
+                Check((await store.ReadAsync(Address(record), Expected(record))).Status == CheckpointReadStatus.Corrupt,
+                    "malformed schema version did not return Corrupt: " + version);
+                byte[] after = await File.ReadAllBytesAsync(path);
+                Check(before.AsSpan().SequenceEqual(after), "reading malformed version modified original bytes");
+            }
+            foreach (int version in new[] { 1, CheckpointJson.SchemaVersion + 1, -1, int.MaxValue })
+            {
+                await File.WriteAllTextAsync(path, text.Replace(versionField, "\"schemaVersion\":" + version, StringComparison.Ordinal));
+                byte[] before = await File.ReadAllBytesAsync(path);
+                Check((await store.ReadAsync(Address(record), Expected(record))).Status == CheckpointReadStatus.UnsupportedFormat,
+                    "unsupported integer version classification changed: " + version);
+                byte[] after = await File.ReadAllBytesAsync(path);
+                Check(before.AsSpan().SequenceEqual(after), "unsupported version read modified bytes");
+            }
+            await File.WriteAllBytesAsync(path, original);
+            Check((await store.ReadAsync(Address(record), Expected(record))).Status == CheckpointReadStatus.Valid, "valid version rejected");
+            using (var lockedFile = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                try { await store.ReadAsync(Address(record), Expected(record)); throw new Exception("real sharing IO failure was swallowed"); }
+                catch (IOException) { }
+            }
+            byte[] afterFailure = await File.ReadAllBytesAsync(path);
+            Check(original.AsSpan().SequenceEqual(afterFailure), "failed IO read modified original bytes");
+            Console.WriteLine("Checkpoint version field PASS: overflow/fraction/type/missing => Corrupt; legacy/unknown integers => UnsupportedFormat; bytes unchanged; real IO failure exposed");
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
     private static async Task JsonCasesAsync()
     {

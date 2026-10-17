@@ -138,9 +138,12 @@ UnsupportedFormat, Oversized, InstallationMismatch, PluginMismatch, ContentMisma
 Only a complete checksum-valid supported record is returned. ConfigRevision may
 differ if configHash matches. No implicit migration, task creation, permission
 restoration, source revival or target binding restoration occurs on read.
-Format v2 fixes numeric normalization. Legacy v1 (potentially rounded checksums)
-and unknown versions return UnsupportedFormat before checksum interpretation;
+Format v2 fixes numeric normalization. Missing, nonnumeric, fractional or out-of-Int32
+schemaVersion fields return Corrupt through checked parsing. Legacy v1 (potentially
+rounded checksums) and other supported-range but unknown integer versions return
+UnsupportedFormat before checksum interpretation;
 they are neither implicitly migrated nor overwritten. Host repair is explicit.
+Reads never rewrite files; real filesystem/IO failures still propagate as errors.
 
 ## Commands and evidence
 

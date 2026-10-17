@@ -21,6 +21,9 @@ publisher; post-decision cancellation waits for and preserves actual publication
 Exact-number regressions distinguish tiny/high-precision/large-integer config
 values, equivalent decimal forms and checksum-preserving file tampering. Reopen
 keeps lexical numeric data; legacy v1 is unsupported and not silently replaced.
+Real-file version tests cover 2147483648, 2.5, wrong types/missing fields and
+unchanged bytes; valid unknown integers remain unsupported, and a real exclusive
+file lock must surface IOException rather than a corruption result.
 No new-instance checkpoint startup, human input or Hook-gap resolution is claimed.
 
 Task 3.5-06B-01 adds `--recovery-tests` to the default suite: actual Lua init/tick
