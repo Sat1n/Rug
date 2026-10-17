@@ -43,6 +43,8 @@ internal static class CheckpointTests
         await StoreCasesAsync(); await JsonCasesAsync(); await IdentityAsync();
         foreach(string mode in new[]{"false","missing","timeout","stop-before"}) await RetainPreviousAsync(mode);
         await CallerCancellationAsync();
+        await BlockedCancellationPropagationAsync(afterDecision: false);
+        await BlockedCancellationPropagationAsync(afterDecision: true);
         await NativeObservationStopAsync();
         await ShippedSampleAsync();
         await InputFreezeAsync();
@@ -348,6 +350,58 @@ internal static class CheckpointTests
         f.Validator.Release.TrySetResult();await Until(()=>f.Coordinator.ValidatorsInFlight==0);
         Check((await f.Store.ReadAsync(Address(c),Expected(c))).Record!.CheckpointId==previous.CheckpointId,"late validation committed cancelled request");
         Console.WriteLine("Checkpoint caller cancellation PASS: previous record retained; late validation ignored");
+    }
+    private static async Task BlockedCancellationPropagationAsync(bool afterDecision)
+    {
+        var before = Signal(); var allowPublish = Signal(); int publications = 0;
+        var publisher = new Publisher();
+        await using var f = await Fixture.CreateAsync(publisher: publisher, timeout: TimeSpan.FromSeconds(30),
+            beforePublish: async ct =>
+            {
+                if (Interlocked.Increment(ref publications) == 2)
+                {
+                    before.TrySetResult(); await allowPublish.Task;
+                    Check(!ct.IsCancellationRequested, "linked token propagated before the cancellation barrier was released");
+                }
+            });
+        var c = await f.StartAsync(); await Until(() => f.StoreState.GetState(c.InstanceScope, "after", 0) == 1);
+        var previous = (await f.Store.ReadAsync(Address(c), Expected(c))).Record!;
+        publisher.Hold = afterDecision;
+        using var caller = new CancellationTokenSource();
+        var pending = f.Coordinator.CommitAsync(c, "ready", "{\"step\":2}", "[\"panel-ready\"]", caller.Token);
+        await Bound(before.Task);
+        if (afterDecision)
+        {
+            allowPublish.TrySetResult();
+            await Until(() => Volatile.Read(ref publisher.Calls) == 2);
+        }
+        using var releaseCallback = new ManualResetEventSlim(); var callbackEntered = Signal();
+        // Registered last: Cancel sets the ORIGINAL token first, then this callback blocks
+        // before the coordinator's linked-token callback can run. No timing assumptions.
+        using var registration = caller.Token.Register(() => { callbackEntered.TrySetResult(); releaseCallback.Wait(); });
+        var cancellation = Task.Run(() => caller.Cancel());
+        try
+        {
+            await Bound(callbackEntered.Task);
+            Check(caller.IsCancellationRequested && !c.IsBusinessClosed, "original cancellation or live owner precondition failed");
+            allowPublish.TrySetResult(); publisher.Release.TrySetResult();
+            await Bound(pending); var result = await pending;
+            var current = (await f.Store.ReadAsync(Address(c), Expected(c))).Record!;
+            Check(c.LastError is null, "independent cancellation faulted the instance");
+            if (afterDecision)
+                Check(result.Status == "committed" && publisher.Calls == 2 && current.State.GetProperty("step").GetInt32() == 2,
+                    "cancellation after publication admission incorrectly aborted real IO");
+            else
+                Check(result.Status == "cancelled" && result.Error == CheckpointError.Cancelled && publisher.Calls == 1 &&
+                    current.CheckpointId == previous.CheckpointId && current.State.GetProperty("step").GetInt32() == 1,
+                    "cancellation before publication admitted IO or replaced the previous record");
+            Console.WriteLine("Checkpoint original-token barrier PASS: " + (afterDecision ? "after decision completes actual publication" : "before decision retains old record with zero new publications"));
+        }
+        finally
+        {
+            releaseCallback.Set(); allowPublish.TrySetResult(); publisher.Release.TrySetResult();
+            await Bound(cancellation);
+        }
     }
     private static async Task NativeObservationStopAsync()
     {

@@ -105,7 +105,7 @@ public sealed class CheckpointCoordinator(ICheckpointStore store, ICheckpointNod
                                     metadata.InstallationId, context.PluginId, metadata.PluginVersion, metadata.Code.ContentHash,
                                     context.InstanceId, context.RunGeneration, nodeId, binding.Node.StateVersion,
                                     metadata.ConfigRevision, metadata.ConfigHash, submission.State, submission.CompletedActionIds);
-                                return await store.PublishAsync(record, () => context.BeginCheckpointPublish(metadata, deadline.Token, expiresAt), deadline.Token).ConfigureAwait(false);
+                                return await store.PublishAsync(record, () => context.BeginCheckpointPublish(metadata, deadline.Token, token, grant.Token, expiresAt), deadline.Token).ConfigureAwait(false);
                             }
                             catch (OperationCanceledException) when (context.IsBusinessClosed || context.Cancellation.IsCancellationRequested) { throw; }
                             catch (OperationCanceledException) when (token.IsCancellationRequested)

@@ -113,7 +113,9 @@ sequence failure preserves old records; root writer conflict/IO errors are fault
 Crash leftovers consume capacity until trusted host cleanup, never become records.
 
 The FINAL publish decision is the token/deadline/Stop and metadata-reference check
-under the run lock, after temp validation. No disk IO, verifier, notification or
+under the run lock, after temp validation. The decision directly checks the original
+caller and grant tokens as well as the linked token, so blocked cancellation
+callbacks cannot admit an already-cancelled submission. No disk IO, verifier, notification or
 cancellation runs under that lock. Before decision, cancellation/deadline preserves
 old data. After decision, publish ignores cancellation: it completes or fails,
 and a host caller can obtain the actual committed result. Stop closes admission,

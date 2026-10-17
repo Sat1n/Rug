@@ -271,12 +271,17 @@ public sealed class TaskExecutionContext
                 throw new AutomationGateway.GatewayRejectedException(OperationError.InvalidLifecycleState);
         }
     }
-    internal bool BeginCheckpointPublish(CheckpointRunMetadata metadata, CancellationToken token, DateTimeOffset deadline)
+    internal bool BeginCheckpointPublish(CheckpointRunMetadata metadata, CancellationToken token,
+        CancellationToken callerToken, CancellationToken authorizationToken, DateTimeOffset deadline)
     {
         lock (_gate)
         {
             if (IsTerminalLocked() || !_checkpointPending || !ReferenceEquals(CheckpointMetadata, metadata) || Cancellation.IsCancellationRequested || LastError is not null)
                 return false;
+            // Linked-token propagation may be blocked by an unrelated cancellation callback.
+            // Check the original sources at the same decision boundary as lifecycle/deadline.
+            callerToken.ThrowIfCancellationRequested();
+            authorizationToken.ThrowIfCancellationRequested();
             token.ThrowIfCancellationRequested();
             return DateTimeOffset.UtcNow < deadline;
         }
