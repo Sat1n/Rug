@@ -51,7 +51,7 @@ business confirmation records, not cross-process exactly-once OS-action guarante
 ## Immutable identity and bounded data
 
 [Record](Models/CheckpointModels.cs#class:CheckpointRecord) fields use camelCase:
-schemaVersion=1, checkpointId, submissionSequence, timestampUtc, installationId,
+schemaVersion=2, checkpointId, submissionSequence, timestampUtc, installationId,
 pluginId, pluginVersion, contentHash, sourceInstanceId/sourceRunGeneration,
 nodeId/nodeStateVersion, configRevision/configHash, explicit state, completedActionIds.
 All metadata comes from the host. No implicit InstanceState/config/log copy, Lua
@@ -73,7 +73,13 @@ the startup manifest value. The snapshot source itself is never persisted.
 Configuration is the exact startup defaults plus PluginConfig snapshot. Its
 revision and values are captured under the same state-partition lock. Hash is
 bounded canonical JSON: ordinal object keys, original array order, normalized
-finite numbers, explicit null. Revision is process-local metadata, never the
+finite numbers, explicit null. Numbers normalize their original JSON decimal digits
+to signed integer coefficient plus base-10 exponent, removing leading/trailing
+zeros and normalizing all zero spellings. The exponent uses arbitrary-precision
+integer arithmetic; neither decimal nor double rounding participates in hashing.
+Thus 1e-40 differs from zero, precision beyond 29 digits and large integer differences
+are preserved, while 1000 and 1e3 agree. Existing finite-range validation is unchanged.
+Revision is process-local metadata, never the
 cross-process compatibility criterion; configHash must match. Launch inputs are
 InstanceState and are excluded. Config data itself is not automatically stored.
 
@@ -132,6 +138,9 @@ UnsupportedFormat, Oversized, InstallationMismatch, PluginMismatch, ContentMisma
 Only a complete checksum-valid supported record is returned. ConfigRevision may
 differ if configHash matches. No implicit migration, task creation, permission
 restoration, source revival or target binding restoration occurs on read.
+Format v2 fixes numeric normalization. Legacy v1 (potentially rounded checksums)
+and unknown versions return UnsupportedFormat before checksum interpretation;
+they are neither implicitly migrated nor overwritten. Host repair is explicit.
 
 ## Commands and evidence
 

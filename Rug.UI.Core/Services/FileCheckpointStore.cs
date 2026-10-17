@@ -46,6 +46,7 @@ public sealed class FileCheckpointStore : ICheckpointStore
     public async Task<CheckpointResult> PublishAsync(CheckpointRecord record, Func<bool> beginPublish, CancellationToken token)
     {
         CheckRoot(); ArgumentNullException.ThrowIfNull(beginPublish);
+        if (record.SchemaVersion != CheckpointJson.SchemaVersion) return new("rejected", CheckpointError.InvalidParameters);
         if (Interlocked.Increment(ref _waiting) > 32) { Interlocked.Decrement(ref _waiting); return new("rejected", CheckpointError.CapacityExceeded); }
         try { await _writer.WaitAsync(token).ConfigureAwait(false); }
         catch { Interlocked.Decrement(ref _waiting); throw; }
@@ -120,8 +121,10 @@ public sealed class FileCheckpointStore : ICheckpointStore
             using var doc = JsonDocument.Parse(bytes, new JsonDocumentOptions { MaxDepth = 24 });
             CheckpointJson.ValidateEnvelope(doc.RootElement);
             var payload = doc.RootElement.GetProperty("record");
+            // V1's rounded number checksums are unsafe to verify under either algorithm.
+            // Reject legacy/unknown formats explicitly; never silently rehash or migrate.
+            if (payload.GetProperty("schemaVersion").GetInt32() != CheckpointJson.SchemaVersion) return new(CheckpointReadStatus.UnsupportedFormat);
             if (doc.RootElement.GetProperty("checksum").GetString() != CheckpointJson.Hash(CheckpointJson.Canonical(payload))) return new(CheckpointReadStatus.Corrupt);
-            if (payload.GetProperty("schemaVersion").GetInt32() != 1) return new(CheckpointReadStatus.UnsupportedFormat);
             foreach (string name in new[] { "checkpointId", "submissionSequence", "timestampUtc", "installationId", "pluginId", "pluginVersion", "contentHash",
                 "sourceInstanceId", "sourceRunGeneration", "nodeId", "nodeStateVersion", "configRevision", "configHash", "state", "completedActionIds" })
                 if (!payload.TryGetProperty(name, out _)) return new(CheckpointReadStatus.Corrupt);

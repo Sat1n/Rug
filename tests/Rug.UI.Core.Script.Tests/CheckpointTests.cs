@@ -40,7 +40,7 @@ internal static class CheckpointTests
     {
         await LuaRoundTripAsync();
         foreach (string mode in new[] { "false", "missing", "timeout", "stop-validation", "stop-before", "stop-publish", "stop-publish-fault", "fault-publish", "fault-capture", "permission", "revoke" }) await FailureAsync(mode);
-        await StoreCasesAsync(); await JsonCasesAsync(); await IdentityAsync();
+        await StoreCasesAsync(); await JsonCasesAsync(); await ExactNumbersAsync(); await IdentityAsync();
         foreach(string mode in new[]{"false","missing","timeout","stop-before"}) await RetainPreviousAsync(mode);
         await CallerCancellationAsync();
         await BlockedCancellationPropagationAsync(afterDecision: false);
@@ -196,7 +196,7 @@ internal static class CheckpointTests
         public async ValueTask DisposeAsync()
         {Validator.Release.TrySetResult();foreach(var c in Captures)c.Release.TrySetResult();await Scheduler.DisposeAsync();await Store.DisposeAsync();NodeRegistration?.Dispose();Bus.Dispose();Directory.Delete(Root,true);}
     }
-    private static CheckpointRecord Record(string installation,Guid source,long sequence=1)=>new(1,Guid.NewGuid(),sequence,DateTime.UtcNow,
+    private static CheckpointRecord Record(string installation,Guid source,long sequence=1)=>new(CheckpointJson.SchemaVersion,Guid.NewGuid(),sequence,DateTime.UtcNow,
         installation,"probe","1",CheckpointJson.Hash("code"u8),source,1,"ready",1,0,CheckpointJson.Hash("config"u8),CheckpointJson.Parse("{\"step\":1}"),Array.AsReadOnly(new[]{"panel-ready"}));
     private static CheckpointAddress Address(CheckpointRecord r)=>new(r.InstallationId,r.PluginId,r.SourceInstanceId,r.SourceRunGeneration);
     private static CheckpointCompatibility Expected(CheckpointRecord r)=>new(r.InstallationId,r.PluginId,r.PluginVersion,r.ContentHash,r.NodeId,r.NodeStateVersion,r.ConfigHash);
@@ -242,7 +242,7 @@ internal static class CheckpointTests
                     (await store.ReadAsync(Address(isolated),Expected(isolated))).Record!.CheckpointId==isolated.CheckpointId,"sources/installations/generations crossed");
             Check((await store.ReadAsync(Address(record),Expected(record))).Record!.SubmissionSequence==4,"isolated source overwrote old source");
             await File.WriteAllTextAsync(path,"{\"record\":");Check((await store.ReadAsync(Address(record),Expected(record))).Status==CheckpointReadStatus.Corrupt,"half file accepted");
-            await WriteEnvelopeAsync(path,record with{SchemaVersion=2});Check((await store.ReadAsync(Address(record),Expected(record))).Status==CheckpointReadStatus.UnsupportedFormat,"unsupported version accepted");
+            await WriteEnvelopeAsync(path,record with{SchemaVersion=CheckpointJson.SchemaVersion+1});Check((await store.ReadAsync(Address(record),Expected(record))).Status==CheckpointReadStatus.UnsupportedFormat,"unsupported version accepted");
             await File.WriteAllBytesAsync(path,new byte[CheckpointJson.RecordBytes+1]);Check((await store.ReadAsync(Address(record),Expected(record))).Status==CheckpointReadStatus.Oversized,"oversized record allocated/accepted");
             await WriteEnvelopeAsync(path,record);var text=await File.ReadAllTextAsync(path);await File.WriteAllTextAsync(path,text.Replace("\"step\":1","\"step\":2"));
             Check((await store.ReadAsync(Address(record),Expected(record))).Status==CheckpointReadStatus.Corrupt,"checksum corruption accepted");
@@ -283,6 +283,54 @@ internal static class CheckpointTests
         await Until(()=>f.StoreState.GetState(c.InstanceScope,"after",0)==1);
         Check((await f.Store.ReadAsync(Address(c),Expected(c))).Record!.State.ValueKind==JsonValueKind.Null,"actual Lua null did not persist");
         Console.WriteLine("Checkpoint JSON PASS: byte/depth/actions/null/missing/duplicates/nonfinite/cycles/unsupported objects and real Lua null");
+    }
+    private static async Task ExactNumbersAsync()
+    {
+        static string Config(string number) => CheckpointJson.ConfigHash(new Dictionary<string, object?> { ["number"] = CheckpointJson.Parse(number) });
+        foreach (var (left, right) in new[] { ("1e-40", "10e-41"), ("1e-40", "0." + new string('0', 39) + "1"),
+            ("1000", "1.000E+003"), ("-0.000e-999", "0"), ("1e-2147483649", "10e-2147483650"),
+            ("123456789012345678901234567890123456789", "1234567890123456789012345678901234567890e-1") })
+            Check(Config(left) == Config(right), "equivalent exact decimal values produced different config hashes");
+
+        string root = Path.Combine(AppContext.BaseDirectory, "checkpoint-numbers-" + Guid.NewGuid().ToString("N"));
+        await using var store = new FileCheckpointStore(root);
+        try
+        {
+            foreach (var (original, changed) in new[] { ("1e-40", "0"), ("1e-400", "0"), ("1e-2147483649", "0"),
+                ("0.123456789012345678901234567890123456789", "0.123456789012345678901234567890123456788"),
+                ("9007199254740992", "9007199254740993"),
+                ("123456789012345678901234567890123456789", "123456789012345678901234567890123456788") })
+            {
+                Check(Config(original) != Config(changed), "config numeric precision collision: " + original);
+                var record = Record(CheckpointJson.Hash("exact-numbers"u8), Guid.NewGuid()) with { State = CheckpointJson.Parse("{\"number\":" + original + "}") };
+                Check((await store.PublishAsync(record, () => true, default)).Status == "committed", "exact numeric record not published");
+                await using (var reopened = new FileCheckpointStore(root))
+                {
+                    var read = await reopened.ReadAsync(Address(record), Expected(record));
+                    Check(read.Status == CheckpointReadStatus.Valid && read.Record!.State.GetProperty("number").GetRawText() == original,
+                        "filesystem reopen rounded numeric data");
+                }
+                string path = store.Locate(Address(record)); string saved = await File.ReadAllTextAsync(path);
+                string tampered = saved.Replace("\"number\":" + original, "\"number\":" + changed, StringComparison.Ordinal);
+                Check(tampered != saved, "numeric tamper fixture did not edit the value");
+                await File.WriteAllTextAsync(path, tampered);
+                Check((await store.ReadAsync(Address(record), Expected(record))).Status == CheckpointReadStatus.Corrupt,
+                    "numeric tamper retained checksum validity: " + original);
+            }
+            var legacy = Record(CheckpointJson.Hash("legacy-numbers"u8), Guid.NewGuid());
+            string legacyPath = store.Locate(Address(legacy));
+            await WriteEnvelopeAsync(legacyPath, legacy with { SchemaVersion = 1 });
+            string legacyBytes = await File.ReadAllTextAsync(legacyPath);
+            Check((await store.ReadAsync(Address(legacy), Expected(legacy))).Status == CheckpointReadStatus.UnsupportedFormat,
+                "legacy rounded-checksum format was accepted");
+            try { await store.PublishAsync(legacy with { SubmissionSequence = 2 }, () => true, default); throw new Exception("legacy record silently replaced"); }
+            catch (IOException) { }
+            Check(await File.ReadAllTextAsync(legacyPath) == legacyBytes, "legacy rejection changed stored bytes");
+            Check((await store.PublishAsync(legacy with { SchemaVersion = 1 }, () => true, default)).Error == CheckpointError.InvalidParameters,
+                "legacy format was newly published");
+            Console.WriteLine("Checkpoint exact numbers PASS: tiny/underflow/high-precision/large integers, equivalent forms, config hashes, real-file tamper and legacy format rejection");
+        }
+        finally { await store.DisposeAsync(); Directory.Delete(root, true); }
     }
     private static async Task IdentityAsync()
     {

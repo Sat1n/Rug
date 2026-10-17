@@ -1,5 +1,6 @@
 #nullable enable
 using System.Globalization;
+using System.Numerics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -10,6 +11,7 @@ namespace Rug.UI.Core.Services;
 /// <summary>Canonical bounded business JSON and immutable loaded-code identity; never hashes submission-time disk content.</summary>
 public static class CheckpointJson
 {
+    public const int SchemaVersion = 2;
     public const int StateBytes = 64 * 1024, RecordBytes = 128 * 1024, MaxActions = 128, MaxIdLength = 64;
     internal static readonly JsonSerializerOptions Options = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, MaxDepth = 24 };
     private static readonly HashSet<string> Sensitive = new(StringComparer.OrdinalIgnoreCase)
@@ -81,10 +83,28 @@ public static class CheckpointJson
             case JsonValueKind.Array:
                 writer.WriteStartArray(); foreach (var item in value.EnumerateArray()) Write(writer, item); writer.WriteEndArray(); break;
             case JsonValueKind.Number:
-                if (value.TryGetDecimal(out decimal number)) writer.WriteRawValue(number == 0 ? "0" : number.ToString("G29", CultureInfo.InvariantCulture));
-                else { double d = value.GetDouble(); if (!double.IsFinite(d)) throw new ArgumentException("Nonfinite number."); writer.WriteRawValue(d == 0 ? "0" : d.ToString("R", CultureInfo.InvariantCulture)); }
+                writer.WriteRawValue(CanonicalNumber(value.GetRawText()));
                 break;
             default: value.WriteTo(writer); break;
         }
+    }
+    /// <summary>@shape input: valid bounded JSON number; output: exact signed integer coefficient times a base-10 exponent.
+    /// @source input: System.Text.Json validated lexical token, never a rounded CLR numeric conversion.</summary>
+    private static string CanonicalNumber(string raw)
+    {
+        bool negative = raw[0] == '-';
+        int exponentAt = raw.IndexOfAny(['e', 'E']);
+        string mantissa = raw[(negative ? 1 : 0)..(exponentAt < 0 ? raw.Length : exponentAt)];
+        int pointAt = mantissa.IndexOf('.');
+        int fractionalDigits = pointAt < 0 ? 0 : mantissa.Length - pointAt - 1;
+        string digits = mantissa.Replace(".", "").TrimStart('0');
+        if (digits.Length == 0) return "0";
+        int end = digits.Length;
+        while (digits[end - 1] == '0') end--;
+        BigInteger exponent = exponentAt < 0 ? BigInteger.Zero :
+            BigInteger.Parse(raw.AsSpan(exponentAt + 1), NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture);
+        exponent += digits.Length - end - fractionalDigits;
+        return (negative ? "-" : "") + digits[..end] +
+            (exponent.IsZero ? "" : "e" + exponent.ToString(CultureInfo.InvariantCulture));
     }
 }

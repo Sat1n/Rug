@@ -101,7 +101,7 @@ public sealed class CheckpointCoordinator(ICheckpointStore store, ICheckpointNod
                                 if (await FindAsync(metadata, nodeId, deadline.Token).ConfigureAwait(false) is not { } latest || !ReferenceEquals(latest.Validator, binding.Validator) || latest.Node != binding.Node)
                                     return new CheckpointResult("rejected", CheckpointError.NoValidator);
                                 if (!valid) return new CheckpointResult("rejected", CheckpointError.ValidationRejected);
-                                var record = new CheckpointRecord(1, Guid.NewGuid(), sequence, DateTime.UtcNow,
+                                var record = new CheckpointRecord(CheckpointJson.SchemaVersion, Guid.NewGuid(), sequence, DateTime.UtcNow,
                                     metadata.InstallationId, context.PluginId, metadata.PluginVersion, metadata.Code.ContentHash,
                                     context.InstanceId, context.RunGeneration, nodeId, binding.Node.StateVersion,
                                     metadata.ConfigRevision, metadata.ConfigHash, submission.State, submission.CompletedActionIds);

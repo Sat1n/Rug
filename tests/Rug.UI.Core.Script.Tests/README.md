@@ -18,6 +18,9 @@ See [checkpoint contract and commands](../../Rug.UI.Core/Checkpoints.md).
 Original-token barriers block cancellation propagation before/after publication
 admission: pre-decision cancellation retains the old file without invoking the
 publisher; post-decision cancellation waits for and preserves actual publication.
+Exact-number regressions distinguish tiny/high-precision/large-integer config
+values, equivalent decimal forms and checksum-preserving file tampering. Reopen
+keeps lexical numeric data; legacy v1 is unsupported and not silently replaced.
 No new-instance checkpoint startup, human input or Hook-gap resolution is claimed.
 
 Task 3.5-06B-01 adds `--recovery-tests` to the default suite: actual Lua init/tick
