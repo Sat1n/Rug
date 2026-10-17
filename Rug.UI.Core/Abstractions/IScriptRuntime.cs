@@ -19,6 +19,9 @@ public interface IScriptRuntime : IAsyncDisposable
     void ConfigureState(RunIdentity identity, IReadOnlyDictionary<string, object?> launchInputs,
         IReadOnlyDictionary<string, object?> pluginConfig) { }
     Task InitializeAsync(string scriptPath, PluginManifest manifest, CancellationToken ct = default);
+    Task InitializeLoadedAsync(LoadedScriptContent code, PluginManifest manifest, CancellationToken ct) =>
+        throw new NotSupportedException("Runtime cannot initialize immutable restore code.");
+    Task PrepareRestoreAsync(string checkpointJson) => throw new NotSupportedException("Runtime cannot restore checkpoints.");
     /// <summary>Bind the owning task's black-box handler before execution begins.</summary>
     void ConfigureAnomalyHandler(Func<string, string, Task<string>> handler);
     /// <summary>Switch from one-shot execution to on_init/on_tick lifecycle mode before StepAsync.</summary>

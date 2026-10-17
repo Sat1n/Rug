@@ -4,11 +4,12 @@ using Rug.UI.Core.Services;
 
 namespace Rug.UI.Core.Models;
 
-public enum AutomationOperation { Start, Stop, Pause, Resume, Sleep, Capture, Ocr, FindImage, Click, PressKey, VerifyRecovery }
+public enum AutomationOperation { Start, Stop, Pause, Resume, Sleep, Capture, Ocr, FindImage, Click, PressKey, VerifyRecovery, RestoreCheckpoint }
 public enum OperationStatus { Success, Rejected, Cancelled, TimedOut, Failed }
 public enum OperationError { None, InvalidParameters, PermissionDenied, InstanceNotFound, StaleRun,
     BindingMismatch, UnsupportedOperation, DeduplicationConflict, DeadlineExceeded, Cancelled,
-    ExecutionFailed, CapacityExceeded, InvalidCaller, InputUnavailable, InvalidLifecycleState }
+    ExecutionFailed, CapacityExceeded, InvalidCaller, InputUnavailable, InvalidLifecycleState,
+    CheckpointChanged, CheckpointIncompatible, RestoreUnavailable, SourceStillActive, Busy, SceneRejected }
 public enum AutomationSource { PluginUI, Lua, Agent, Mcp }
 public sealed record CapturedFrameMetadata(int Width, int Height, int Stride);
 
@@ -47,6 +48,7 @@ public sealed class AutomationCallContext
     public AuthorizationTicket Authorization { get; }
     internal nint StartHwnd { get; }
     internal Action<RunIdentity>? OnReady { get; }
+    internal InputTarget? RestoreTarget { get; set; }
     public string Principal { get; }
     public AutomationSource Source { get; }
     public string PluginId { get; }

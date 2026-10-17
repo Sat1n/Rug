@@ -48,6 +48,21 @@ public sealed class TaskExecutionContext
     internal CancellationToken LifetimeToken { get; }
 
     public RunIdentity Identity { get; }
+    public CheckpointOrigin? CheckpointOrigin { get; internal set; }
+    internal void CommitCheckpointStart(CheckpointStartBoundary boundary, CancellationToken original,
+        CancellationToken execution, CancellationToken grant, DateTimeOffset deadline)
+    {
+        lock (_gate)
+        {
+            if (_status != AutomationTaskStatus.Starting || LastError is not null) throw new HostStopWakeCancellation();
+            original.ThrowIfCancellationRequested(); execution.ThrowIfCancellationRequested();
+            LifetimeToken.ThrowIfCancellationRequested(); grant.ThrowIfCancellationRequested();
+            InputEpochToken.ThrowIfCancellationRequested();
+            if (InputSession is { } session) session.Token.ThrowIfCancellationRequested();
+            if (DateTimeOffset.UtcNow >= deadline) throw new OperationCanceledException("Restore deadline exceeded.");
+            boundary.Commit(Identity);
+        }
+    }
     public Guid InstanceId => Identity.InstanceId;
     public string PluginId => Identity.PluginId;
     public long RunGeneration => Identity.RunGeneration;

@@ -6,8 +6,19 @@ using Rug.UI.Core.Models;
 namespace Rug.UI.Core.Services;
 
 /// <summary>Trusted exact-code nodes, not plugin-generated validation claims.</summary>
-public sealed class CheckpointNodeRegistry : ICheckpointNodeRegistry
+public sealed class CheckpointNodeRegistry : ICheckpointNodeRegistry, ICheckpointRestoreRegistry
 {
+    private readonly ConcurrentDictionary<(PluginInstallation, string, string, string), (CheckpointNode, ICheckpointRestoreValidator)> _restores = new();
+    public IDisposable RegisterRestore(CheckpointNode node, ICheckpointRestoreValidator validator)
+    {
+        if (!CheckpointJson.ValidId(node.NodeId) || node.StateVersion <= 0) throw new ArgumentException("Invalid restore node.");
+        var key = (node.Installation, node.PluginVersion, node.ContentHash, node.NodeId);
+        var value = (node with { ActionIds = CheckpointJson.Actions(System.Text.Json.JsonSerializer.Serialize(node.ActionIds)) }, validator);
+        if (!_restores.TryAdd(key, value)) throw new InvalidOperationException("Restore node already registered.");
+        return new Registration(() => _restores.TryRemove(new(key, value)));
+    }
+    public (CheckpointNode Node, ICheckpointRestoreValidator Validator)? FindRestore(CheckpointRunMetadata metadata, string nodeId) =>
+        _restores.TryGetValue((metadata.Installation, metadata.PluginVersion, metadata.Code.ContentHash, nodeId), out var node) ? node : null;
     private readonly ConcurrentDictionary<(PluginInstallation, string, string, string), (CheckpointNode, ICheckpointValidator)> _nodes = new();
     public IDisposable Register(CheckpointNode node, ICheckpointValidator validator)
     {

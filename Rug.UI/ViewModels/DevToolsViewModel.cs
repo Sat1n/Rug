@@ -34,6 +34,7 @@ public partial class DevToolsViewModel : ObservableObject
     private readonly IInputInterventionCoordinator _intervention;
     private readonly InputOwner _owner = InputOwner.ForDevTools("host.devtools");
     private InputTarget? _inputTarget;
+    public InputTarget? BoundInputTarget => _inputTarget;
     private Action? _validateInput;
     private IInputSession? _inputSession;
 

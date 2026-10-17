@@ -6,6 +6,10 @@ namespace Rug.UI.Core.Abstractions;
 
 public interface ITaskScheduler : IAsyncDisposable
 {
+    Task<IReadOnlyList<CheckpointChoice>> QueryCheckpointsAsync(string pluginId, CancellationToken token = default) =>
+        throw new NotSupportedException("Checkpoint discovery is unavailable.");
+    Task<AutomationCallContext> CreateCheckpointRestoreContextAsync(string pluginId, InputTarget target,
+        Action<RunIdentity>? onReady = null, CancellationToken token = default) => throw new NotSupportedException("Checkpoint restore is unavailable.");
     AutomationGateway Gateway => throw new NotSupportedException("No automation gateway is bound.");
     /// <summary>Raised after a run enters or leaves the active instance collection.</summary>
     event EventHandler? InstancesChanged;

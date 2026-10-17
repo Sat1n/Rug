@@ -16,6 +16,11 @@ using Rug.UI.Core.Security;
 using Rug.UI.Core.Schema;
 using RugTaskScheduler = Rug.UI.Core.Services.TaskScheduler;
 
+if (args.Contains("--checkpoint-restore-child")) { await CheckpointTests.RestoreChildAsync(args[1]); return; }
+if (args.Contains("--checkpoint-restore-manual")) { await ManualCheckpointRestore.RunAsync(); return; }
+if (args.Contains("--checkpoint-restore-ui")) { await ManualCheckpointRestore.RunAsync(automated: true); return; }
+if (args.Contains("--checkpoint-restore-native")) { await NativeCheckpointRestore.RunAsync(); return; }
+if (args.Contains("--checkpoint-restore-tests")) { await CheckpointTests.RunRestoreAsync(); return; }
 if (args.Contains("--checkpoint-child-read")) { await CheckpointTests.ChildReadAsync(args); return; }
 if (args.Contains("--checkpoint-tests")) { await CheckpointTests.RunAsync(); return; }
 

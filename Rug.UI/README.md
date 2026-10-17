@@ -107,8 +107,9 @@ no automation pipeline and no native interop itself.
 
 * `App` registers one `IInputArbiter` for scheduler/Lua and singleton DevTools.
   It also owns the checkpoint store/coordinator and exact embedded-code sample
-  node registry. Explicit permission consent describes `checkpoint`; there is no
-  checkpoint restore UI. See [checkpoint contract](../Rug.UI.Core/Checkpoints.md).
+  node registry. Explicit permission consent describes `checkpoint`; the footer adds
+  [checkpoint restore UI](../Rug.UI.Core/CheckpointStartup.md). Selection, explicit
+  confirmation and preparation cancellation use the Gateway; no automatic grants.
   DevTools mouse, drag, key and stress tests hold a compound-action lease and
   validate it before native input; target rebinding takes place inside the lease.
   It uses a trusted host owner independent of plugin identities.

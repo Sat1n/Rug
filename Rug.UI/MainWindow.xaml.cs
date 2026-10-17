@@ -29,6 +29,62 @@ public sealed partial class MainWindow : WindowEx
     private int _lifecycleRefreshQueued;
     private bool _initialized;
     private bool _closingInput, _inputClosed;
+    private CancellationTokenSource? _checkpointCancellation;
+    private sealed record CheckpointItem(CheckpointChoice Choice)
+    {
+        public string Label => $"{Choice.PluginId} · {Choice.NodeId ?? "未知节点"} · {Choice.SourceInstanceId?.ToString("N")[..8]} · {Choice.TimestampUtc:u} · #{Choice.Sequence} · {Choice.Compatibility}";
+    }
+    private async void RefreshCheckpoints_Click(object sender, RoutedEventArgs args)
+    {
+        if (_checkpointCancellation is not null) return;
+        string? plugin = _activePlugin;
+        RefreshCheckpointsButton.IsEnabled = false;
+        try
+        {
+            if (plugin is null) throw new InvalidOperationException("请先选择插件。");
+            var choices = await _scheduler!.QueryCheckpointsAsync(plugin);
+            if (_activePlugin != plugin || _closingInput) return;
+            CheckpointPicker.ItemsSource = choices.Select(c => new ComboBoxItem { Content = new CheckpointItem(c).Label, Tag = c }).ToArray();
+            CheckpointPicker.SelectedIndex = choices.Count == 0 ? -1 : 0;
+            CheckpointStatus.Text = choices.Count == 0 ? "当前安装没有可归属的检查点。" : "请选择检查点；恢复将再次核验记录、代码、配置及当前画面。";
+        }
+        catch (Exception error) { CheckpointStatus.Text = "检查点查询失败 · " + error.Message; }
+        finally { RefreshCheckpointsButton.IsEnabled = true; }
+    }
+    private async void RestoreCheckpoint_Click(object sender, RoutedEventArgs args)
+    {
+        if (_checkpointCancellation is not null) return;
+        using var cancellation = new CancellationTokenSource(); _checkpointCancellation = cancellation;
+        RestoreCheckpointButton.IsEnabled = RefreshCheckpointsButton.IsEnabled = false; CancelCheckpointButton.IsEnabled = true;
+        try
+        {
+            string plugin = _activePlugin ?? throw new InvalidOperationException("请先选择插件。");
+            var choice = (CheckpointPicker.SelectedItem as ComboBoxItem)?.Tag as CheckpointChoice ?? throw new InvalidOperationException("请先查看并选择检查点。");
+            if (choice.PluginId != plugin || choice.Compatibility != "Ready") throw new InvalidOperationException("此检查点不可恢复：" + choice.Compatibility);
+            var tools = App.GetService<ViewModels.DevToolsViewModel>();
+            var target = tools.BoundInputTarget ?? throw new InvalidOperationException("请先在开发工具中重新绑定目标窗口。");
+            if (!await App.GetService<Services.PluginPermissionConsent>().ConfirmStartAsync(plugin, cancellation.Token)) throw new OperationCanceledException();
+            var caller = await _scheduler!.CreateCheckpointRestoreContextAsync(plugin, target, token: cancellation.Token);
+            CheckpointStatus.Text = "正在准备／验证检查点，尚未开放业务执行…";
+            void BindingChanged(object? s, System.ComponentModel.PropertyChangedEventArgs e)
+            { if (e.PropertyName == "BoundWindow") cancellation.Cancel(); }
+            tools.PropertyChanged += BindingChanged;
+            try
+            {
+                var request = new OperationRequest(AutomationOperation.RestoreCheckpoint, JsonSerializer.SerializeToElement(new { selectionId = choice.SelectionId }),
+                    Guid.NewGuid(), Guid.NewGuid().ToString("N"), new(plugin), DateTimeOffset.UtcNow.AddSeconds(30));
+                var result = await _scheduler.Gateway.ExecuteAsync(caller, request, cancellation.Token);
+                if (result.Status == OperationStatus.Success && result.Value is RunIdentity run)
+                { _selectedInstanceId = run.InstanceId; RefreshInstancePicker(); CheckpointStatus.Text = "已从检查点启动新实例 · " + run.InstanceId.ToString("N"); }
+                else CheckpointStatus.Text = $"恢复未启动 · {result.Status} / {result.Error}";
+            }
+            finally { tools.PropertyChanged -= BindingChanged; }
+        }
+        catch (OperationCanceledException) { CheckpointStatus.Text = "恢复准备已取消；不会续接旧实例。"; }
+        catch (Exception error) { CheckpointStatus.Text = "检查点恢复失败 · " + error.Message; }
+        finally { _checkpointCancellation = null; RestoreCheckpointButton.IsEnabled = RefreshCheckpointsButton.IsEnabled = true; CancelCheckpointButton.IsEnabled = false; }
+    }
+    private void CancelCheckpoint_Click(object sender, RoutedEventArgs args) => _checkpointCancellation?.Cancel();
 
     public MainWindow()
     {
@@ -139,6 +195,7 @@ public sealed partial class MainWindow : WindowEx
     }
     private async Task ShutdownInputAsync()
     {
+        _checkpointCancellation?.Cancel();
         try
         {
             await App.GetService<IHotReloadService>().DisposeAsync();
@@ -172,6 +229,7 @@ public sealed partial class MainWindow : WindowEx
     {
         if (args.SelectedItem is NavigationViewItem item && item.Tag is string id)
         {
+            if (id != _activePlugin) _checkpointCancellation?.Cancel();
             if (id == "__devtools")
             {
                 PluginContent.Content = App.GetService<DevToolsPage>();
@@ -198,6 +256,7 @@ public sealed partial class MainWindow : WindowEx
         PluginContent.Content = next;
         _host = next;
         _activePlugin = pluginId;
+        CheckpointPicker.ItemsSource = null;
         _selectedInstanceId = null;
         RefreshInstancePicker();
         EmptyMessage.Visibility = Visibility.Collapsed;

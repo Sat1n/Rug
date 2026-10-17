@@ -8,7 +8,7 @@ using Rug.UI.Core.Services;
 using Rug.UI.Core.Native;
 using Scheduler = Rug.UI.Core.Services.TaskScheduler;
 
-internal static class CheckpointTests
+internal static partial class CheckpointTests
 {
     private static TaskCompletionSource Signal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
     private static void Check(bool condition, string text) { if (!condition) throw new Exception("Checkpoint: " + text); }
@@ -49,6 +49,7 @@ internal static class CheckpointTests
         await ShippedSampleAsync();
         await InputFreezeAsync();
         await ConcurrentSourceAsync();
+        await RunRestoreAsync();
         Console.WriteLine("Checkpoint PASS: actual Lua, trusted fresh observation, real files/reopen/child, isolated sources, Stop/IO boundaries, corruption/compatibility/limits/JSON");
     }
     private static CheckpointAddress Address(TaskExecutionContext c) => new(c.CheckpointMetadata?.InstallationId??CheckpointJson.InstallationId(c.RecoveryAuthorization!.Installation),c.PluginId,c.InstanceId,c.RunGeneration);
@@ -143,7 +144,7 @@ internal static class CheckpointTests
         public ValueTask DisposeAsync(){Disposed=true;return ValueTask.CompletedTask;}
     }
     private sealed class WindowValidator : IInputWindowValidator
-    {public InputTarget Bind(nint hwnd)=>new(hwnd,1);public bool IsValid(InputTarget target)=>true;}
+    {public long Stamp=1;public bool Valid=true;public InputTarget Bind(nint hwnd)=>new(hwnd,Stamp);public bool IsValid(InputTarget target)=>Valid&&target.WindowStamp==Stamp;}
     private sealed class Logger : Microsoft.Extensions.Logging.ILogger<LuaRuntime>
     {
         public Action<string>? Intercept;
@@ -161,6 +162,8 @@ internal static class CheckpointTests
         public readonly PluginAuthorization Authorization=new();public readonly CheckpointNodeRegistry Registry=new();public readonly Validator Validator=new();
         public readonly List<Capture> Captures=[];public bool Register=true,CaptureFailure,HoldCapture;
         public readonly List<FakeInput> Inputs=[];
+        public readonly WindowValidator Windows=new();
+        public IInputArbiter Arbiter=null!;
         public readonly Logger Log=new();public IDisposable? NodeRegistration;
         public Action<TaskExecutionContext>? OnReady;
         public static async Task<Fixture> CreateAsync(ICheckpointFilePublisher? publisher=null,Func<CancellationToken,Task>? beforePublish=null,TimeSpan? timeout=null,bool checkpoint=true,string? script=null,string version="1",bool input=false)
@@ -174,10 +177,12 @@ internal static class CheckpointTests
             f.Store=new(f.LogRoot,null,publisher,beforePublish);f.Bus=new(f.StoreState);f.Bus.SetState(StateScope.Plugin("probe"),"speed",2);
             TestAuthorizationHost.ApproveCatalog(f.Authorization,Path.Combine(root,"plugins"));
             f.Coordinator=new(f.Store,f.Registry,f.Authorization,timeout);
+            f.Arbiter=new InputArbiter(f.Windows);
             f.Scheduler=new(new PluginManager(NullLogger<PluginManager>.Instance),Path.Combine(root,"plugins"),
                 ()=>{var c=new Capture{Fail=f.CaptureFailure,Hold=f.HoldCapture};f.Captures.Add(c);return c;},()=>{var i=new FakeInput();f.Inputs.Add(i);return i;},
                 (c,i)=>new LuaRuntime(c,new FakeOcr(),i,f.Log,new FakeCoordinateMapper(),ensureForeground:_=>true,commandBus:f.Bus),NullLogger<Scheduler>.Instance,new NoAnomaly(),
-                commandBus:f.Bus,authorization:f.Authorization,inputArbiter:new InputArbiter(new WindowValidator()),checkpoints:f.Coordinator);
+                commandBus:f.Bus,authorization:f.Authorization,inputArbiter:f.Arbiter,checkpoints:f.Coordinator,
+                checkpointStore:f.Store,checkpointRestores:f.Registry);
             return f;
         }
         public async Task<TaskExecutionContext> StartAsync()
@@ -514,7 +519,7 @@ internal static class CheckpointTests
     }
     private static async Task ShippedSampleAsync()
     {
-        var code=CheckpointSamples.Code();await using var f=await Fixture.CreateAsync(script:code.Source,version:"1.0.0");f.Register=false;
+        var code=CheckpointSamples.Code();await using var f=await Fixture.CreateAsync(script:code.Source,version:"1.1.0",input:true);f.Register=false;
         f.OnReady=c=>f.NodeRegistration=f.Registry.Register(CheckpointSamples.Node(c.CheckpointMetadata!.Installation),new CheckpointSamples.GreenPanelValidator());
         var c=await f.StartAsync();await Until(()=>f.StoreState.GetState(c.InstanceScope,"checkpoint_saved",false));
         var expected=Expected(c) with{NodeId="panel-ready"};var read=await f.Store.ReadAsync(Address(c),expected);

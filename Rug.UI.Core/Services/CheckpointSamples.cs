@@ -14,8 +14,13 @@ public static class CheckpointSamples
         using var reader = new StreamReader(stream);
         return CheckpointJson.Loaded("main.lua", reader.ReadToEnd());
     }
-    public static CheckpointNode Node(PluginInstallation installation) => new(installation, "1.0.0", Code().ContentHash,
+    public static CheckpointNode Node(PluginInstallation installation) => new(installation, "1.1.0", Code().ContentHash,
         "panel-ready", 1, Array.AsReadOnly(new[] { "panel-ready" }));
+    public sealed class GreenRestoreValidator : ICheckpointRestoreValidator
+    {
+        public Task<bool> ValidateAsync(CheckpointObservation observation, CheckpointRecord checkpoint, CancellationToken token) =>
+            new GreenPanelValidator().ValidateAsync(observation, new(checkpoint.NodeId, checkpoint.State, checkpoint.CompletedActionIds), token);
+    }
     public sealed class GreenPanelValidator : ICheckpointValidator
     {
         public async Task<bool> ValidateAsync(CheckpointObservation observation, CheckpointSubmission submission, CancellationToken token)

@@ -66,6 +66,15 @@
                     <Button x:Name="StopInstanceButton" Content="停止" AutomationProperties.Name="Stop instance"
                             IsEnabled="False" Click="StopInstance_Click"/>
                 </StackPanel>
+                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                    <Button x:Name="RefreshCheckpointsButton" Content="查看检查点" AutomationProperties.Name="Refresh checkpoints" Click="RefreshCheckpoints_Click"/>
+                    <ComboBox x:Name="CheckpointPicker" Grid.Column="1" MinWidth="240" HorizontalAlignment="Stretch" AutomationProperties.Name="Checkpoint selection"/>
+                </Grid>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button x:Name="RestoreCheckpointButton" Content="从此检查点恢复" AutomationProperties.Name="Restore checkpoint" Click="RestoreCheckpoint_Click"/>
+                    <Button x:Name="CancelCheckpointButton" Content="取消准备" IsEnabled="False" Click="CancelCheckpoint_Click"/>
+                </StackPanel>
+                <TextBlock x:Name="CheckpointStatus" Text="检查点恢复需要重新绑定目标、显式授权和现场验证。" TextWrapping="Wrap"/>
             </StackPanel>
         </Border>
     </Grid>

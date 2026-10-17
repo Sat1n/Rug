@@ -109,6 +109,57 @@ public sealed class FileCheckpointStore : ICheckpointStore
             record.ConfigHash != compatibility.ConfigHash ? CheckpointReadStatus.ConfigIncompatible : CheckpointReadStatus.Valid;
         return new(status, status == CheckpointReadStatus.Valid ? record : null);
     }
+    /// <summary>@shape return: bounded detached candidates attributed to one verified installation; paths never escape the store.
+    /// @source installation: Models/AuthorizationModels.cs#class:PluginInstallation</summary>
+    public async Task<IReadOnlyList<CheckpointCandidate>> QueryAsync(PluginInstallation installation, CancellationToken token = default)
+    {
+        CheckRoot(); string installationId = CheckpointJson.InstallationId(installation);
+        var result = new List<CheckpointCandidate>();
+        foreach (var file in new DirectoryInfo(_root).EnumerateFiles("*.json").Take(_limits.MaxRecords + 1))
+        {
+            token.ThrowIfCancellationRequested();
+            if (result.Count >= _limits.MaxRecords) break;
+            if (file.Attributes.HasFlag(FileAttributes.ReparsePoint)) throw new IOException("Linked checkpoint candidate.");
+            byte[] bytes;
+            await using (var stream = new FileStream(file.FullName, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 4096, FileOptions.Asynchronous))
+            {
+                bytes = new byte[(int)Math.Min(stream.Length, CheckpointJson.RecordBytes)];
+                await stream.ReadExactlyAsync(bytes, token).ConfigureAwait(false);
+            }
+            if (BelongsTo(bytes, installationId, installation.PluginId))
+            {
+                var read = await ReadRawAsync(file.FullName, token).ConfigureAwait(false);
+                if (read.Record is { } record)
+                {
+                    if (record.InstallationId != installationId || !string.Equals(record.PluginId, installation.PluginId, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (Locate(new(record.InstallationId, record.PluginId, record.SourceInstanceId, record.SourceRunGeneration)) != file.FullName) read = new(CheckpointReadStatus.Corrupt);
+                }
+                result.Add(new(read.Status, read.Record));
+            }
+        }
+        return result.AsReadOnly();
+    }
+    // Bounded prefix attribution is only a display hint; restored records still need full integrity/address checks.
+    private static bool BelongsTo(byte[] bytes, string installationId, string pluginId)
+    {
+        bool installation = false, plugin = false, inRecord = false;
+        try
+        {
+            var reader = new Utf8JsonReader(bytes, isFinalBlock: false, new JsonReaderState(new JsonReaderOptions { MaxDepth = 24 }));
+            while (reader.Read())
+            {
+                if (reader.TokenType == JsonTokenType.PropertyName && reader.CurrentDepth == 1 && reader.ValueTextEquals("record")) inRecord = true;
+                if (!inRecord || reader.TokenType != JsonTokenType.PropertyName || reader.CurrentDepth != 2) continue;
+                bool isInstallation = reader.ValueTextEquals("installationId"), isPlugin = reader.ValueTextEquals("pluginId");
+                if (!reader.Read() || reader.TokenType != JsonTokenType.String) continue;
+                if (isInstallation) installation = reader.GetString() == installationId;
+                if (isPlugin) plugin = string.Equals(reader.GetString(), pluginId, StringComparison.OrdinalIgnoreCase);
+                if (installation && plugin) return true;
+            }
+        }
+        catch (JsonException) { }
+        return false;
+    }
     private static async Task<CheckpointReadResult> ReadRawAsync(string path, CancellationToken token)
     {
         if (!File.Exists(path)) return new(CheckpointReadStatus.Absent);

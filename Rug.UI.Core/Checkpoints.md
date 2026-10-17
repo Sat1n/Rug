@@ -185,4 +185,5 @@ PASS: Schema/state/hot reload suite; Debug/x64 Core/script/UI-test/WinUI builds,
 NOT RUN: checkpoint sample against real WGC hardware, new human-input scenarios
 or power-loss tests. Fake capture is not hardware evidence; the real-filesystem
 and subprocess read assertions are actual IO/process evidence.
-DELIVERED: checkpoint save and read. NOT DELIVERED: starting a new run from checkpoint.
+06C-01 delivered save/read only. Subsequent [06C-02 startup](CheckpointStartup.md)
+adds explicit new-instance restore; the historical 06C-01 result above is unchanged.

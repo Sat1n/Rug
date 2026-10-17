@@ -64,5 +64,11 @@ trusted test panel change do not prove human recovery; use `--recovery-manual`.
 Green verification must finish after one Verify invocation; the smoke test has no
 retry-until-success loop. See [recovery acceptance](../Rug.UI.Core/Recovery.md).
 No production approval switch.
+06C-02 `--checkpoint-restore-ui` in the script harness runs
+`CheckpointRestoreUiSmoke.ps1` against two separately started WinUI processes.
+The fixture-owned target and store survive the restart. Actual consent/crosshair
+binding, source stop, checkpoint selection, fresh WGC red rejection and green
+on_restore are checked; B/C counters must each grow once. Human input remains
+NOT RUN until the separate `--checkpoint-restore-manual` user flow is confirmed.
 The noninteractive suite compiles the actual LifecyclePresentation helper and
 asserts that retained Validating snapshots cannot hide Stopping/Faulted/Stopped.

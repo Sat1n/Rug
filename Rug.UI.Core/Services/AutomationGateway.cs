@@ -49,6 +49,7 @@ public sealed class AutomationGateway : IAutomationGateway
     private readonly Func<Guid, Task>? _stop;
     private readonly Func<Guid, bool>? _pause, _resume;
     private readonly Func<Guid, Guid, DateTimeOffset, CancellationToken, Task<RecoveryResult>>? _verifyRecovery;
+    internal Func<AutomationCallContext, Guid, DateTimeOffset, CancellationToken, CancellationToken, CheckpointStartBoundary, Task<RunIdentity>>? RestoreCheckpoint { get; set; }
     private int _activeWork;
     private readonly Func<Task>? _waitForDispatch;
     public const int Capacity = 4096;
@@ -132,7 +133,9 @@ public sealed class AutomationGateway : IAutomationGateway
     private static bool SamePlugin(string first, string second) => string.Equals(first, second, StringComparison.OrdinalIgnoreCase);
     private IEnumerable<string> Required(AutomationCallContext caller, OperationRequest request)
     {
-        if (request.Operation is AutomationOperation.Start or AutomationOperation.Resume or AutomationOperation.VerifyRecovery)
+        if (request.Operation == AutomationOperation.RestoreCheckpoint)
+            return Authorization.Query(caller.Authorization.Installation).Requested.Concat([Permission.Checkpoint, Permission.Capture]).Distinct(StringComparer.Ordinal);
+        if (request.Operation is AutomationOperation.Start or AutomationOperation.Resume or AutomationOperation.VerifyRecovery or AutomationOperation.RestoreCheckpoint)
             return Authorization.Query(caller.Authorization.Installation).Requested;
         if (ManifestAutomationPermissionChecker.RequiredPermission(request.Operation) is not { } required) return [];
         if (request.Operation == AutomationOperation.FindImage && request.Parameters.TryGetProperty("path", out var path) &&
@@ -169,12 +172,14 @@ public sealed class AutomationGateway : IAutomationGateway
             request.CorrelationId.Length > 128 || request.Parameters.ValueKind != JsonValueKind.Object ||
             System.Text.Encoding.UTF8.GetByteCount(request.Parameters.GetRawText()) > StateStore.MaxValueBytes)
             return OperationError.InvalidParameters;
-        if (request.Operation == AutomationOperation.Start)
+        if (request.Operation is AutomationOperation.Start or AutomationOperation.RestoreCheckpoint)
         {
             if (caller.Source == AutomationSource.Lua || caller.BoundRun is not null ||
                 request.Target.InstanceId is not null || request.Target.RunGeneration is not null ||
                 request.Target.TargetBindingId is not null) return OperationError.InvalidCaller;
             if (_start is null) return OperationError.UnsupportedOperation;
+            if (request.Operation == AutomationOperation.RestoreCheckpoint &&
+                (caller.Source != AutomationSource.PluginUI || caller.RestoreTarget is null || RestoreCheckpoint is null)) return OperationError.InvalidCaller;
         }
         else
         {
@@ -218,6 +223,8 @@ public sealed class AutomationGateway : IAutomationGateway
             key = new(caller.Principal, caller.Source, caller.Authorization.Installation, caller.PluginId.ToUpperInvariant(), caller.BoundRun?.InstanceId,
                 request.Target.InstanceId, request.Target.RunGeneration, request.Target.TargetBindingId, request.OperationId);
             string fingerprint = request.Operation + ":" + request.Parameters.GetRawText();
+            if (request.Operation == AutomationOperation.RestoreCheckpoint)
+                fingerprint += ":" + caller.RestoreTarget!.Hwnd + ":" + caller.RestoreTarget.WindowStamp;
             if (_entries.TryGetValue(key, out entry!))
                 return entry.Fingerprint == fingerprint ? entry.Completion.Task :
                     FinishImmediate(caller, request, OperationStatus.Rejected, OperationError.DeduplicationConflict);
@@ -252,6 +259,7 @@ public sealed class AutomationGateway : IAutomationGateway
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(callerToken, deadline.Token,
             request.Operation == AutomationOperation.Stop ? CancellationToken.None : run?.Token ?? CancellationToken.None);
         int started = 0;
+        var restoreBoundary = new CheckpointStartBoundary();
         CancellationToken executionToken = linked.Token;
         try
         {
@@ -273,7 +281,7 @@ public sealed class AutomationGateway : IAutomationGateway
                     linked.Token.ThrowIfCancellationRequested();
                 }
                 if (_activeWork >= ActiveCapacity) throw new GatewayRejectedException(OperationError.CapacityExceeded);
-                bool business = request.Operation is not (AutomationOperation.Start or AutomationOperation.Stop or AutomationOperation.Pause or AutomationOperation.Resume or AutomationOperation.VerifyRecovery);
+                bool business = request.Operation is not (AutomationOperation.Start or AutomationOperation.Stop or AutomationOperation.Pause or AutomationOperation.Resume or AutomationOperation.VerifyRecovery or AutomationOperation.RestoreCheckpoint);
                 if (business && run?.Preparing == true) throw new GatewayRejectedException(OperationError.InvalidLifecycleState);
                 var lifetime = business ? run?.Lifecycle?.EnterOperation(
                     request.Operation is AutomationOperation.Click or AutomationOperation.PressKey) : null;
@@ -305,15 +313,15 @@ public sealed class AutomationGateway : IAutomationGateway
                         dispatchToken.Token.ThrowIfCancellationRequested();
                         if (business) run?.Lifecycle?.ValidateBusiness();
                         bool inputOperation = request.Operation is AutomationOperation.Click or AutomationOperation.PressKey;
-                        if (!inputOperation) Volatile.Write(ref started, 1);
+                        if (!inputOperation && request.Operation != AutomationOperation.RestoreCheckpoint) Volatile.Write(ref started, 1);
                         var previousBoundary = InputExecutionBoundary.Started.Value;
                         var previousCaller = InputExecutionBoundary.Caller.Value;
                         InputExecutionBoundary.Started.Value = () => Volatile.Write(ref started, 1);
                         InputExecutionBoundary.Caller.Value = caller;
                         object? value;
-                        try { value = await DispatchAsync(caller, request, run, dispatchToken.Token).ConfigureAwait(false); }
+                        try { value = await DispatchAsync(caller, request, run, dispatchToken.Token, callerToken, restoreBoundary).ConfigureAwait(false); }
                         finally { InputExecutionBoundary.Started.Value = previousBoundary; InputExecutionBoundary.Caller.Value = previousCaller; }
-                        dispatchToken.Token.ThrowIfCancellationRequested();
+                        if (restoreBoundary.Identity is null) dispatchToken.Token.ThrowIfCancellationRequested();
                         return value;
                     }
                 });
@@ -330,8 +338,11 @@ public sealed class AutomationGateway : IAutomationGateway
                 lock (_gate) { entry.WorkInFlight = false; _activeWork--; }
             }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, System.Threading.Tasks.TaskScheduler.Default);
             object? value = await work.WaitAsync(linked.Token).ConfigureAwait(false);
-            if (request.Deadline <= _clock.GetUtcNow()) deadline.Cancel();
-            linked.Token.ThrowIfCancellationRequested();
+            if (restoreBoundary.Identity is null)
+            {
+                if (request.Deadline <= _clock.GetUtcNow()) deadline.Cancel();
+                linked.Token.ThrowIfCancellationRequested();
+            }
             result = new(OperationStatus.Success, Value: value);
         }
         catch (OperationCanceledException)
@@ -340,7 +351,9 @@ public sealed class AutomationGateway : IAutomationGateway
                 (request.Operation == AutomationOperation.Stop || !(run?.Token.IsCancellationRequested ?? false));
             result = new(timedOut ? OperationStatus.TimedOut : OperationStatus.Cancelled,
                 timedOut ? OperationError.DeadlineExceeded : OperationError.Cancelled, OutcomeUncertain: Volatile.Read(ref started) != 0);
+            if (restoreBoundary.Identity is { } committed) result = new(OperationStatus.Success, Value: committed);
         }
+        catch (CheckpointStartTimeoutException) { result = new(OperationStatus.TimedOut, OperationError.DeadlineExceeded); }
         catch (GatewayRejectedException error) { result = new(OperationStatus.Rejected, error.Error,
             DeniedPermission: error.Missing.FirstOrDefault(),
             MissingPermissions: error.Missing); }
@@ -371,10 +384,14 @@ public sealed class AutomationGateway : IAutomationGateway
             if (key.Instance is { } id && !_runs.ContainsKey(id)) _entries.Remove(key);
         }
     }
-    private async Task<object?> DispatchAsync(AutomationCallContext caller, OperationRequest request, Run? run, CancellationToken token)
+    private async Task<object?> DispatchAsync(AutomationCallContext caller, OperationRequest request, Run? run, CancellationToken token,
+        CancellationToken original, CheckpointStartBoundary restoreBoundary)
     {
         switch (request.Operation)
         {
+            case AutomationOperation.RestoreCheckpoint:
+                return await RestoreCheckpoint!(caller, request.Parameters.GetProperty("selectionId").GetGuid(), request.Deadline,
+                    token, original, restoreBoundary).ConfigureAwait(false);
             case AutomationOperation.Start:
                 var inputs = request.Parameters.EnumerateObject().ToDictionary(p => p.Name, p => (object?)p.Value.Clone());
                 return await _start!(caller.PluginId, caller.StartHwnd, inputs, caller.OnReady, token).ConfigureAwait(false);

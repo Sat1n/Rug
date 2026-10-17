@@ -24,7 +24,14 @@ keeps lexical numeric data; legacy v1 is unsupported and not silently replaced.
 Real-file version tests cover 2147483648, 2.5, wrong types/missing fields and
 unchanged bytes; valid unknown integers remain unsupported, and a real exclusive
 file lock must surface IOException rather than a corruption result.
-No new-instance checkpoint startup, human input or Hook-gap resolution is claimed.
+06C-02 adds [checkpoint startup](../../Rug.UI.Core/CheckpointStartup.md): actual Lua
+on_restore/new identity/origin; no init/BEFORE replay; source/descendant guards,
+dedup/conflicts; fresh observation and late result/Stop/cancel/version checks.
+`--checkpoint-restore-tests` runs the targeted suite and an actual restarted child
+with fresh explicit test grants and Fake capture/input (not WGC/human evidence).
+`--checkpoint-restore-manual` owns a persistent controlled target while restarting
+WinUI, preserving files and requiring new grants/binding. Human checks remain separate.
+The independent Hook gap is unchanged.
 
 Task 3.5-06B-01 adds `--recovery-tests` to the default suite: actual Lua init/tick
 locals and explicit result tables; frozen mainline; missing/false validators;

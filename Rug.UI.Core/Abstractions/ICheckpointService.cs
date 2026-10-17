@@ -18,8 +18,18 @@ public interface ICheckpointNodeRegistry
 }
 public interface ICheckpointStore : IAsyncDisposable
 {
+    Task<IReadOnlyList<CheckpointCandidate>> QueryAsync(PluginInstallation installation, CancellationToken token = default) =>
+        throw new NotSupportedException("Checkpoint discovery is unavailable.");
     Task<CheckpointResult> PublishAsync(CheckpointRecord record, Func<bool> beginPublish, CancellationToken token);
     Task<CheckpointReadResult> ReadAsync(CheckpointAddress address, CheckpointCompatibility compatibility, CancellationToken token = default);
+}
+public interface ICheckpointRestoreValidator
+{
+    Task<bool> ValidateAsync(CheckpointObservation observation, CheckpointRecord checkpoint, CancellationToken token);
+}
+public interface ICheckpointRestoreRegistry
+{
+    (CheckpointNode Node, ICheckpointRestoreValidator Validator)? FindRestore(CheckpointRunMetadata metadata, string nodeId);
 }
 /// <summary>Trusted replaceable IO boundary; publication has already won cancellation before this call.</summary>
 public interface ICheckpointFilePublisher

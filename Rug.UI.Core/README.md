@@ -99,9 +99,9 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   survive. Return control never continues Lua. Explicit Gateway VerifyRecovery
   rechecks grants/target/detector, acquires a new session and bounds fresh-frame observation.
   No provider or recovery input tools are added.
-* [06C checkpoint contract](Checkpoints.md) defines explicit Lua business submits,
-  exact-code nodes, fresh validation, startup config/code hashes, bounded atomic
-  storage and compatible detached reads. New-instance checkpoint startup is pending.
+* [Checkpoints](Checkpoints.md): bounded Lua saves, exact code/config identity and
+  detached reads. [Startup](CheckpointStartup.md) validates fresh scenes before
+  a new on_restore run; ordinary Start is unchanged.
 
 ## Native input bridge and coordinates (Task 2.2)
 

@@ -94,15 +94,18 @@ public partial class App : Application
             });
             services.AddSingleton<IRecoveryValidatorRegistry>(p => p.GetRequiredService<RecoveryValidatorRegistry>());
             services.AddSingleton<IRecoveryCoordinator, RecoveryCoordinator>();
-            services.AddSingleton<ICheckpointStore>(_ => new FileCheckpointStore());
+            services.AddSingleton<ICheckpointStore>(_ => new FileCheckpointStore(Environment.GetEnvironmentVariable("RUG_CHECKPOINT_ROOT")));
             services.AddSingleton<ICheckpointNodeRegistry>(_ =>
             {
                 var registry = new CheckpointNodeRegistry();
                 registry.Register(CheckpointSamples.Node(new PluginInstallation("checkpoint_probe", Path.Combine(PluginsRoot,"checkpoint_probe"))),
                     new CheckpointSamples.GreenPanelValidator());
+                registry.RegisterRestore(CheckpointSamples.Node(new PluginInstallation("checkpoint_probe", Path.Combine(PluginsRoot,"checkpoint_probe"))),
+                    new CheckpointSamples.GreenRestoreValidator());
                 return registry;
             });
             services.AddSingleton<ICheckpointCoordinator, CheckpointCoordinator>();
+            services.AddSingleton<ICheckpointRestoreRegistry>(provider => (ICheckpointRestoreRegistry)provider.GetRequiredService<ICheckpointNodeRegistry>());
             services.AddSingleton<ICommandBus>(provider =>
             {
                 var dispatcher = MainWindow.DispatcherQueue;
@@ -128,7 +131,9 @@ public partial class App : Application
                 inputArbiter: provider.GetRequiredService<IInputArbiter>(),
                 intervention: provider.GetRequiredService<IInputInterventionCoordinator>(),
                 recovery: provider.GetRequiredService<IRecoveryCoordinator>(),
-                checkpoints: provider.GetRequiredService<ICheckpointCoordinator>()));
+                checkpoints: provider.GetRequiredService<ICheckpointCoordinator>(),
+                checkpointStore: provider.GetRequiredService<ICheckpointStore>(),
+                checkpointRestores: provider.GetRequiredService<ICheckpointRestoreRegistry>()));
             services.AddSingleton<IAutomationGateway>(provider => provider.GetRequiredService<ITaskScheduler>().Gateway);
             services.AddSingleton<IHotReloadService>(provider => new HotReloadService(
                 PluginsRoot, provider.GetRequiredService<ITaskScheduler>(),

@@ -91,6 +91,11 @@ public sealed class LuaRuntime : IScriptRuntime
         function __rug_prepare_init()
           newThread(function() chunk(); if luaType(on_init) == 'function' then on_init() end end)
         end
+        function __rug_prepare_definition() newThread(function() chunk() end) end
+        function __rug_prepare_restore(json)
+          if luaType(on_restore) ~= 'function' then raise('Missing on_restore', 0) end
+          newThread(function() on_restore(json) end)
+        end
         function __rug_begin_tick()
           newThread(function() if luaType(on_tick) == 'function' then on_tick() end end)
         end
@@ -225,12 +230,21 @@ public sealed class LuaRuntime : IScriptRuntime
 
     public async Task InitializeAsync(string scriptPath, PluginManifest manifest, CancellationToken ct = default)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(scriptPath);
+        string source = await File.ReadAllTextAsync(scriptPath, ct).ConfigureAwait(false);
+        await InitializeLoadedAsync(CheckpointJson.Loaded(manifest.Entry, source), manifest, ct).ConfigureAwait(false);
+    }
+    private bool _restoreDefinition;
+    private long _definitionDeadline;
+    private LuaFunction? _prepareDefinition, _prepareRestore;
+    public async Task InitializeLoadedAsync(LoadedScriptContent code, PluginManifest manifest, CancellationToken ct)
+    {
         ArgumentNullException.ThrowIfNull(manifest);
         ArgumentNullException.ThrowIfNull(manifest.Permissions);
-        ArgumentException.ThrowIfNullOrWhiteSpace(scriptPath);
         if (State != ScriptState.Uninitialized) throw new InvalidOperationException("Runtime is already initialized.");
-        string source = await File.ReadAllTextAsync(scriptPath, ct).ConfigureAwait(false);
+        string source = code.Source;
         LoadedCode = CheckpointJson.Loaded(manifest.Entry, source);
+        if (LoadedCode != code) throw new ArgumentException("Loaded code identity mismatch.");
         _manifest = manifest;
         _identity ??= new RunIdentity(manifest.Id, _instanceScope.InstanceId, 1,
             manifest.TargetWindow == 0 ? null : Guid.NewGuid(), manifest.TargetWindow);
@@ -278,6 +292,9 @@ public sealed class LuaRuntime : IScriptRuntime
                 ((LuaFunction)_lua["__rug_prepare_oneshot"]!).Call();
                 _drive = (LuaFunction)_lua["__rug_drive"]!;
                 _prepareInit = (LuaFunction)_lua["__rug_prepare_init"]!;
+                _prepareDefinition = (LuaFunction)_lua["__rug_prepare_definition"]!;
+                _prepareRestore = (LuaFunction)_lua["__rug_prepare_restore"]!;
+                _lua.DoString("__rug_prepare_definition=nil; __rug_prepare_restore=nil");
                 _beginTick = (LuaFunction)_lua["__rug_begin_tick"]!;
                 _beginStop = (LuaFunction)_lua["__rug_begin_stop"]!;
                 // Remove ambient file/process and CLR access from script globals.
@@ -304,8 +321,37 @@ public sealed class LuaRuntime : IScriptRuntime
 
     public bool ShouldAbort() => _inStopHook
         ? Environment.TickCount64 >= Volatile.Read(ref _stopHookDeadline)
-        : _lifetime?.IsCancellationRequested == true;
+        : _lifetime?.IsCancellationRequested == true || (_restoreDefinition && Environment.TickCount64 >= _definitionDeadline);
 
+    public async Task PrepareRestoreAsync(string checkpointJson)
+    {
+        await _driveGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (State != ScriptState.Ready || _lifecycleMode) throw new InvalidOperationException("Restore must be prepared before execution.");
+            await _gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                _restoreDefinition = true;
+                _definitionDeadline = Environment.TickCount64 + 5000;
+                await Task.Run(() =>
+                {
+                    _prepareDefinition!.Call();
+                    object[] result = _drive!.Call((object?)null);
+                    if (Convert.ToString(result[0], CultureInfo.InvariantCulture) != "dead")
+                        throw new AutomationGateway.GatewayRejectedException(OperationError.RestoreUnavailable);
+                    using var values = (LuaTable)result[1];
+                    if (!Equals(values[1], true)) throw new InvalidOperationException("Restore definitions failed: " + values[2]);
+                    if (_lua!["on_restore"] is not LuaFunction restoreHook) throw new AutomationGateway.GatewayRejectedException(OperationError.RestoreUnavailable);
+                    restoreHook.Dispose();
+                    _prepareRestore!.Call(checkpointJson);
+                }).ConfigureAwait(false);
+                _lifecycleMode = true;
+            }
+            finally { _restoreDefinition = false; _gate.Release(); }
+        }
+        finally { _driveGate.Release(); }
+    }
     public async Task PrepareLifecycleAsync()
     {
         await _driveGate.WaitAsync().ConfigureAwait(false);
@@ -422,6 +468,7 @@ public sealed class LuaRuntime : IScriptRuntime
 
     public void SetState(string key, object? value)
     {
+        if (_restoreDefinition) throw new InvalidOperationException("State mutation is forbidden in restore definitions.");
         if (value is not (null or bool or string or double or long or int))
             throw new ArgumentException("Lua state values must be nil, Boolean, string or number.", nameof(value));
         _commandBus.SetState(_instanceScope, key, value);
@@ -429,6 +476,7 @@ public sealed class LuaRuntime : IScriptRuntime
 
     public void Log(string level, string message)
     {
+        if (_restoreDefinition) throw new InvalidOperationException("Logging is forbidden in restore definitions.");
         LogLevel severity = level.ToLowerInvariant() switch
         {
             "trace" => LogLevel.Trace, "debug" => LogLevel.Debug, "warn" or "warning" => LogLevel.Warning,
@@ -964,6 +1012,8 @@ public sealed class LuaRuntime : IScriptRuntime
         {
             Attempt(() => _drive?.Dispose());
             Attempt(() => _prepareInit?.Dispose());
+            Attempt(() => _prepareDefinition?.Dispose());
+            Attempt(() => _prepareRestore?.Dispose());
             Attempt(() => _beginTick?.Dispose());
             Attempt(() => _beginStop?.Dispose());
             Attempt(() => _lua?.Dispose());

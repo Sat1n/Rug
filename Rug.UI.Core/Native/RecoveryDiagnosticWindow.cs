@@ -12,10 +12,12 @@ internal sealed class RecoveryDiagnosticWindow : IDisposable
     private readonly TaskCompletionSource<nint> _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private nint _hwnd, _red, _green;
     private long _down, _up;
+    private long _afterDown, _afterUp;
     private int _isReady, _disposed;
     private Exception? _failure;
     public Task<nint> Ready => _ready.Task;
     public (long Down, long Up) KeyCounts => (Interlocked.Read(ref _down), Interlocked.Read(ref _up));
+    public (long Down, long Up) AfterKeyCounts => (Interlocked.Read(ref _afterDown), Interlocked.Read(ref _afterUp));
     public RecoveryDiagnosticWindow()
     {
         _callback = Message;
@@ -70,6 +72,8 @@ internal sealed class RecoveryDiagnosticWindow : IDisposable
         }
         if (id is 0x100 or 0x104 && w == 66) Interlocked.Increment(ref _down);
         if (id is 0x101 or 0x105 && w == 66) Interlocked.Increment(ref _up);
+        if (id is 0x100 or 0x104 && w == 67) Interlocked.Increment(ref _afterDown);
+        if (id is 0x101 or 0x105 && w == 67) Interlocked.Increment(ref _afterUp);
         if (id == 2) PostQuitMessage(0);
         return DefWindowProcW(hwnd, id, w, l);
     }
