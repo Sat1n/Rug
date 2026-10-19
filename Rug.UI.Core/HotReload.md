@@ -87,7 +87,9 @@ RegisterUiHandler receives the PluginSnapshot and returns IPluginUiUpdate
 removing any old tree. Failed staging disposes only new subscriptions. Failed commits
 roll back previous hosts; old factories remain owned until catalog publication.
 Success releases old subscriptions before the applied notification. UI defaults
-are bounded/staged during construction and published only on success.
+are bounded/staged during construction and published only on success. Later controls
+read a shared key's first staged default with committed-state JSON type semantics;
+incompatible bindings reject the candidate before replacing the old UI or config.
 DynamicUIHost checks its view generation on the dispatcher so navigation/unload
 cannot apply an obsolete tree. Callbacks/observers run outside watcher/lifecycle
 locks; shutdown awaits actual dispatched work. Reloaded is a result event: callers
@@ -111,7 +113,9 @@ permissions, paused state, real Recovering/AwaitingHuman, compile-only chunks,
 pending config/code/permissions, revocation, fixed startup code, UI rollback,
 cleanup, ordering, post-validation disk mutation and bounded queue/candidate sizes.
 UI automation checks retained paused timelines, actual UIFactory type-binding build
-failure, old-view preservation, corrections without reapplication, lifecycle/grants
+failure (including conflicting defaults on a missing key and a title-only retry),
+unchanged UI tree/run generation and unpolluted config after failure,
+corrections without reapplication, lifecycle/grants
 and completed demo state. These are not new human/input-source acceptance results.
 
 Snapshots are process-local, not persisted installations. Invalid updates do not

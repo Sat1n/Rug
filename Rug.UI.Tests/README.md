@@ -20,7 +20,11 @@ Run with `--instance-ui` to launch `GenericInstanceUiSmoke.ps1`. Its non-demo
 `timeline_probe` plugin supplies `probe.timeline` as launch input for two
 concurrent windowless runs. UI Automation verifies actual `StepFlowView` text
 when selecting each run, fallback after stop, timeline/pause preservation during
-UI-only hot reload, safe actual UIFactory build failure, and subsequent new runs. The test
+UI-only hot reload, safe actual UIFactory build failure, and subsequent new runs.
+TextCard/ToggleCard defaults sharing a previously missing key must reject both
+the initial update and its title-only retry, retaining the same UI tree and paused
+run generation. A subsequent valid bool binding to that key proves failed staging
+did not publish the string default into PluginConfig. The test
 uses an isolated plugin directory and cleans it up.
 
 Run with `--lifecycle-ui` for `LifecycleUiSmoke.ps1`: actual timer Pause/Resume

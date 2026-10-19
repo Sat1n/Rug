@@ -43,6 +43,19 @@ function Invoke-Button($window, [string]$name) {
     if (-not $button.Current.IsEnabled) { throw "UI button is disabled: $name callerLine=$((Get-PSCallStack)[1].ScriptLineNumber)" }
     $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
 }
+function Selected-Run($window) {
+    $picker = Await-Name $window '当前实例' 6 ([System.Windows.Automation.ControlType]::ComboBox)
+    $selection = $picker.GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern).Current.GetSelection()
+    if ($selection.Count -ne 1) { throw 'Expected one selected instance.' }
+    return $selection[0].Current.Name
+}
+function Assert-RetainedPausedView($window, [string]$titleRuntimeId, [string]$selectedRun) {
+    $title = Await-Name $window 'Reloaded timeline test'
+    if (($title.GetRuntimeId() -join ',') -ne $titleRuntimeId) { throw 'Failed update replaced the old UI tree.' }
+    $null = Await-Name $window 'Run B step'
+    $null = Await-Name $window '已暂停'
+    if ((Selected-Run $window) -ne $selectedRun) { throw 'Failed update changed the selected run generation.' }
+}
 
 try {
     New-Item -ItemType Directory -Path $plugin -Force | Out-Null
@@ -103,6 +116,39 @@ try {
     $null = Await-Name $window 'Reloaded timeline test'
     $null = Await-Name $window 'Run B step'
     $null = Await-Name $window '已暂停'
+    $reloadedSchema = $schema.Replace('Custom timeline test', 'Reloaded timeline test')
+    $titleRuntimeId = ((Await-Name $window 'Reloaded timeline test').GetRuntimeId() -join ',')
+    $selectedRun = Selected-Run $window
+    # A fresh key's first default must participate in later reads during this same build.
+    # A title-only retry must also fail; neither failed candidate may publish its staged config.
+    $conflict = '{"type":"Page","id":"staged-root","title":"Staged conflict","children":[{"type":"TextCard","id":"staged-text","title":"String default","stateKey":"staged_collision","default":"text"},{"type":"ToggleCard","id":"staged-toggle","title":"Bool default","stateKey":"staged_collision","default":false}]}'
+    foreach ($conflictTitle in @('Staged conflict', 'Staged conflict retry')) {
+        [System.IO.File]::WriteAllText($ui, $conflict.Replace('Staged conflict', $conflictTitle))
+        $null = Await-Name $window '热重载失败'
+        Assert-RetainedPausedView $window $titleRuntimeId $selectedRun
+        Await-NotName $window $conflictTitle
+        [System.IO.File]::WriteAllText($ui, $reloadedSchema)
+        Await-NotName $window '热重载失败'
+    }
+    # Successfully binding that same key as bool proves the rejected string default never entered PluginConfig.
+    $cleanConfig = $reloadedSchema | ConvertFrom-Json
+    $cleanConfig.title = 'Verified clean config'
+    $cleanConfig.children += [pscustomobject]@{
+        type = 'ToggleCard'; id = 'clean-toggle'; title = 'Fresh config default'
+        stateKey = 'staged_collision'; default = $true
+    }
+    [System.IO.File]::WriteAllText($ui, ($cleanConfig | ConvertTo-Json -Depth 30))
+    $null = Await-Name $window 'Verified clean config'
+    $null = Await-Name $window 'Run B step'
+    $null = Await-Name $window '已暂停'
+    if ((Selected-Run $window) -ne $selectedRun) { throw 'Config verification changed the run generation.' }
+    $toggleCondition = [System.Windows.Automation.PropertyCondition]::new(
+        [System.Windows.Automation.AutomationElement]::IsTogglePatternAvailableProperty, $true)
+    $toggle = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $toggleCondition)
+    if ($null -eq $toggle -or $toggle.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState -ne
+        [System.Windows.Automation.ToggleState]::On) { throw 'Rejected defaults polluted the fresh bool config.' }
+    [System.IO.File]::WriteAllText($ui, $reloadedSchema)
+    $null = Await-Name $window 'Reloaded timeline test'
     # Valid schema, but persisted string cannot bind to a bool control: actual UIFactory build must fail safely.
     [System.IO.File]::WriteAllText($ui,'{"type":"Page","id":"bad-root","title":"Must not replace","children":[{"type":"ToggleCard","id":"bad-toggle","title":"Bad type","stateKey":"draft","default":false}]}')
     $null = Await-Name $window '热重载失败'
@@ -134,7 +180,7 @@ try {
     $null = Await-Name $window 'Run B step'
     Invoke-Button $window 'Stop selected'
     Await-NotName $window 'Run B step'
-    Write-Output 'generic-instance-ui-ok customKey=probe.timeline consent=allow/deny/revoke/regrant'
+    Write-Output 'generic-instance-ui-ok customKey=probe.timeline staged-conflict=initial/title-retry old-ui/config/paused-run=retained consent=allow/deny/revoke/regrant'
 }
 finally {
     $env:RUG_PLUGINS_ROOT = $previous

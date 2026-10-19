@@ -101,7 +101,7 @@ no automation pipeline and no native interop itself.
 ## Plugin hot reload (Task 3.3)
 
 * The app watches `%LOCALAPPDATA%/Rug/plugins/` by default; RUG_PLUGINS_ROOT isolates tests. MainWindow reads the validated effective snapshot catalog. [07A updates](../Rug.UI.Core/HotReload.md) stage UI on the dispatcher and retain old trees/subscriptions on build failure. UI-only replacement rebinds the same InstanceState and preserves Lua identity/pause without restarting tasks.
-* Applied updates show a two-second success notice. Runtime/config/permission changes with active runs show 更新待应用; invalid changes show a persistent error while old UI/tasks remain. Unchanged content clears obsolete errors without reconstruction. UI defaults are staged until successful replacement; old subscriptions are then released. Ready precedes shell activation. Active-run code switching remains deferred.
+* Applied updates show a two-second success notice. Runtime/config/permission changes with active runs show 更新待应用; invalid changes show a persistent error while old UI/tasks remain. Unchanged content clears obsolete errors without reconstruction. UI defaults are staged until successful replacement; later controls sharing a missing key read and type-check its first staged value, so incompatible bindings fail before replacing the old UI or publishing defaults. Old subscriptions are released only after success. Ready precedes shell activation. Active-run code switching remains deferred.
 
 ## Shared input and host takeover (Task 3.5-05A)
 

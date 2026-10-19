@@ -263,12 +263,19 @@ public sealed class UIFactory : IDisposable
 
     private T State<T>(string key, T fallback)
     {
-        if (!_bus.Contains(_pluginScope, key))
+        if (_bus.Contains(_pluginScope, key)) return _bus.GetState<T>(_pluginScope, key);
+        if (_defaults.TryGetValue(key, out object? staged))
         {
-            _defaults.TryAdd(key, Rug.UI.Core.Services.StateStore.CloneValue(fallback));
-            return fallback;
+            // Read the first staged value with the same typed JSON semantics as committed state.
+            if (staged is null) return default!;
+            try { return JsonSerializer.SerializeToElement(staged).Deserialize<T>()!; }
+            catch (JsonException error)
+            {
+                throw new InvalidCastException($"State '{key}' cannot be read as {typeof(T).Name}.", error);
+            }
         }
-        return _bus.GetState<T>(_pluginScope, key);
+        _defaults.Add(key, Rug.UI.Core.Services.StateStore.CloneValue(fallback));
+        return fallback;
     }
 
     private void Bind(string key, Action<object?> update)
