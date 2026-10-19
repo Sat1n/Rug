@@ -327,8 +327,7 @@ public sealed partial class TaskScheduler : ITaskScheduler
                 if (BeforeCheckpointStartDecision is not null) await BeforeCheckpointStartDecision().ConfigureAwait(false);
                 await CheckStartPlanAsync(restore, cancellation.Token).ConfigureAwait(false);
                 context.ValidateResume?.Invoke();
-                if (CheckpointJson.ConfigHash(RestoreConfiguration(restore.Manifest).Values) != restore.Metadata.ConfigHash)
-                    throw RejectRestore(OperationError.CheckpointIncompatible);
+                CheckRestoreConfiguration(restore);
                 original.ThrowIfCancellationRequested();
             }
             if (restore is null) { context.Prepared = true; Gateway.CompleteStartingRun(context.InstanceId); }

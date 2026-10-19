@@ -42,6 +42,7 @@ internal static partial class CheckpointTests
         await RestoreActualWorkAsync();
         await RestoreDiscoveryAsync();
         await RestoreCurrentManifestAsync();
+        await RestoreDiskConfigurationAsync();
         Console.WriteLine("Checkpoint restore PASS: actual Lua, new-run links, no BEFORE replay, dedup/exclusion, fresh verification, late results");
     }
     private static async Task RestoreRoundTripAsync()
@@ -239,6 +240,51 @@ internal static partial class CheckpointTests
         var choice = (await f.Scheduler.QueryCheckpointsAsync("probe")).Single();
         Check(choice.Compatibility == "ContentMismatch" && choice.SelectionId == Guid.Empty, "selection trusted stale catalog version after manifest changed");
         Console.WriteLine("Checkpoint selection current-manifest PASS: cached version/default/permission identity not reused");
+    }
+    private static async Task RestoreDiskConfigurationAsync()
+    {
+        const string config = """{"fields":[{"key":"mode","type":"TextBox","default":"old"}]}""";
+        foreach (string mode in new[] { "changed", "created", "deleted", "empty-created", "final-boundary", "io-fault" })
+        {
+            await using var f = await Fixture.CreateAsync(script: RestoreScript, input: true);
+            string path = Path.Combine(f.Root, "plugins", "probe", "config.json");
+            if (mode is "changed" or "deleted" or "final-boundary" or "io-fault") await File.WriteAllTextAsync(path, config);
+            var source = await f.StartAsync(); await Until(() => f.StoreState.GetState(source.InstanceScope, "after", 0) == 1);
+            await f.Scheduler.StopTaskAsync(source.InstanceId);
+            var m = source.CheckpointMetadata!;
+            var validator = new RestoreValidator { Hold = mode != "final-boundary" };
+            using var node = f.Registry.RegisterRestore(new(m.Installation, m.PluginVersion, m.Code.ContentHash, "ready", 1, new[] { "panel-ready" }), validator);
+            var choice = (await f.Scheduler.QueryCheckpointsAsync("probe")).Single();
+            var caller = await f.Scheduler.CreateCheckpointRestoreContextAsync("probe", new(123, 1));
+            var finalEntered = Signal(); var finalRelease = Signal();
+            FileStream? locked = null;
+            if (mode == "final-boundary") f.Scheduler.BeforeCheckpointStartDecision = async () => { finalEntered.TrySetResult(); await finalRelease.Task; };
+            var pending = f.Scheduler.Gateway.ExecuteAsync(caller, RestoreRequest(choice.SelectionId));
+            try
+            {
+                await Bound(mode == "final-boundary" ? finalEntered.Task : validator.Entered.Task);
+                var candidate = f.Scheduler.Instances.Single();
+                Check(candidate.TaskStatus == AutomationTaskStatus.Starting && f.Inputs.Last().KeyDownCalls == 0, "disk config test did not hold preparation");
+                if (mode == "io-fault") locked = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+                else if (mode == "deleted") File.Delete(path);
+                else await File.WriteAllTextAsync(path, mode == "empty-created" ? "{}" : config.Replace("old", "new"));
+                validator.Release.TrySetResult(); finalRelease.TrySetResult();
+                var result = await pending; await Bound(candidate.Completion);
+                Check((mode == "io-fault" ? result is { Status: OperationStatus.Failed, Error: OperationError.ExecutionFailed } :
+                    result is { Status: OperationStatus.Rejected, Error: OperationError.CheckpointIncompatible, OutcomeUncertain: false }) &&
+                    f.Inputs.Last().KeyDownCalls == 0 && !f.StoreState.GetState(candidate.InstanceScope, "restore_done", false),
+                    "disk config change admitted AFTER or wrong result: " + mode + " " + result);
+                Check((await f.Store.ReadAsync(Address(source), Expected(source))).Status == CheckpointReadStatus.Valid, "restore changed the saved record");
+                if (mode == "io-fault") Check(candidate.TaskStatus == AutomationTaskStatus.Faulted, "real config IO failure was swallowed");
+                else
+                {
+                    var current = (await f.Scheduler.QueryCheckpointsAsync("probe")).Single();
+                    Check(current.Compatibility == (mode == "empty-created" ? "Ready" : "ConfigIncompatible"), "fresh selection reused old disk defaults: " + mode);
+                }
+            }
+            finally { locked?.Dispose(); validator.Release.TrySetResult(); finalRelease.TrySetResult(); }
+            Console.WriteLine("Checkpoint disk configuration PASS: " + mode + "; frozen selection rejected, zero AFTER input");
+        }
     }
     private static async Task RestoreDiscoveryAsync()
     {

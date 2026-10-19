@@ -6,7 +6,7 @@ public sealed record CheckpointChoice(Guid SelectionId, string PluginId, string?
     DateTime? TimestampUtc, long? Sequence, string Compatibility);
 public sealed record CheckpointOrigin(Guid ParentInstanceId, Guid CheckpointId, long Sequence, string NodeId);
 internal sealed record CheckpointStartPlan(Guid SelectionId, PluginManifest Manifest, CheckpointRunMetadata Metadata,
-    IReadOnlyDictionary<string, object?> Configuration, CheckpointRecord Record, string RecordHash, string ManifestHash,
+    IReadOnlyDictionary<string, object?> Configuration, CheckpointRecord Record, string RecordHash, string ManifestHash, string? ConfigFileHash,
     CheckpointNode Node, Abstractions.ICheckpointRestoreValidator Validator, DateTimeOffset ExpiresAt);
 internal sealed class CheckpointStartBoundary
 {

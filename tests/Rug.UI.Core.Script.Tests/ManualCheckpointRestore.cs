@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using Rug.UI.Core.Models;
 using Rug.UI.Core.Native;
+using Rug.UI.Core.Services;
 
 /// <summary>Opt-in: target and fixture outlive each separately restarted WinUI host. No automatic grants or human simulation.</summary>
 internal static class ManualCheckpointRestore
@@ -59,6 +61,15 @@ internal static class ManualCheckpointRestore
             {
                 await UiPhase("Save");
                 if (target.KeyCounts != (1, 1) || target.AfterKeyCounts != (0, 0)) throw new InvalidOperationException("UI save action counts incorrect");
+                await CloseHost();
+                // A second host-owned record only exercises selector A/B; it is not another Lua/native-save claim.
+                await using (var files = new FileCheckpointStore(Path.Combine(root, "records")))
+                {
+                    var record = (await files.QueryAsync(new PluginInstallation("checkpoint_probe", plugin))).Single().Record!;
+                    await files.PublishAsync(record with { CheckpointId = Guid.NewGuid(), SourceInstanceId = Guid.NewGuid() }, () => true, default);
+                    if ((await files.QueryAsync(new PluginInstallation("checkpoint_probe", plugin))).Count != 2) throw new InvalidOperationException("Selector regression requires two records");
+                    Console.WriteLine("SELECTOR FIXTURE: two distinct host-owned checkpoint records; second record is selector-only evidence.");
+                }
                 await OpenHost(); await UiPhase("Restore");
                 if (target.KeyCounts != (1, 1) || target.AfterKeyCounts != (1, 1)) throw new InvalidOperationException("UI restart replayed BEFORE or omitted AFTER");
                 Console.WriteLine("Checkpoint WinUI PASS: two actual host processes, independent persistent target, fresh WGC red rejection/green on_restore, explicit consent/rebinding and B/C once. Human acceptance NOT RUN.");

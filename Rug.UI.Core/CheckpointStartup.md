@@ -34,6 +34,12 @@ compatible; SourceStillActive, RestoreUnavailable and existing compatibility
 codes explain rejection. Config revision is informational; config hash decides.
 Selection refreshes the catalog to pin the current manifest/defaults. It does not
 restore grants/config or start a task. Invalid metadata never becomes a selection.
+The selection also pins `config.json` existence and exact byte SHA-256. Its defaults
+are parsed from those same bytes, then combined with current PluginConfig overrides.
+Each preparation/final check rejects any file creation, deletion or content change
+as CheckpointIncompatible, including formatting-only changes or changed defaults
+hidden by an override. Reselecting recomputes effective config compatibility. An
+absent file differs from an empty configuration file. IO failures are not absence.
 
 The trusted host calls `CreateCheckpointRestoreContextAsync(pluginId, InputTarget,
 onReady?, token)` using the DevTools verified window lifetime (not just HWND).
@@ -110,8 +116,10 @@ are never converted to successful recovery.
 
 Footer: 查看检查点 -> choose Ready -> bind current target in DevTools -> 从此检查点恢复.
 The button explicitly confirms this request; missing grants require normal host
-consent. Preparation shows progress and supports 取消准备. Selection/target changes
-cancel preparation; duplicate clicks are blocked. No automatic Return control.
+consent. Preparation shows progress and supports 取消准备. The checkpoint picker
+is disabled from confirmation through preparation and re-enabled on every outcome;
+late query results cannot replace the fixed choice. Plugin/target changes cancel
+preparation; duplicate clicks are blocked. No automatic Return control.
 
 `checkpoint_probe` v1.1.0 is bound to the embedded shipped source. Normal startup
 sends BEFORE B once, validates green and saves panel-ready. Restore validates a
@@ -162,10 +170,31 @@ authorization/target invalidation, dedup, definition restrictions and corrupt fi
 | --- | --- |
 | Actual Native Lua/InputService/Rug.Core + fresh WGC | PASS: red rejected, green creates new run, B=(1,1) unchanged and C=(1,1); resources cleaned |
 | Actual WinUI automation + host restart + WGC | PASS: two host PIDs (64016 then 68440), independently surviving target, renewed consent/binding, red rejected, green on_restore; B/C each (1,1) |
-| User manual checkpoint startup | NOT RUN / pending user confirmation using the isolated command above |
+| User manual checkpoint startup | Initially NOT RUN; subsequently user-confirmed 2026-10-19 (record below) |
 | Independent low-level Hook gap | Unresolved; not retested or claimed fixed by this work |
 
 The native-only fixture uses PostMessage and has no intervention event source;
 the WinUI flow uses the production detector, but UIA is not human acceptance.
 06B's prior user-confirmed single green Verify, persistent red refusal and Stop
 while AwaitingHuman remain separate historical human evidence in [Recovery](Recovery.md).
+
+User subsequently supplied the manual run on 2026-10-19: host PIDs 29880 -> 13520
+-> 18628 retained target 0x30B12, saved B once, restored C once under a new identity,
+and rejected red with SceneRejected without increasing either count. This is user
+manual evidence, separate from the earlier agent automation.
+
+The disk-config regression holds actual Lua startup at validator/final-decision
+barriers, changes/adds/deletes config.json (also absent -> empty), and requires
+CheckpointIncompatible with zero AFTER input. The UI regression holds the real
+consent await with two distinct host-owned choices: selection cannot expand/change
+until Deny releases preparation, then the selector is enabled again. The second
+record is a test-host clone for selector coverage, not another Lua-save claim.
+An exclusive-lock config IO failure remains Failed/ExecutionFailed and faults
+the candidate; it does not become absent/incompatible or execute AFTER. Every
+disk-config rejection leaves the saved record valid. The selector UI automation
+passed with host PIDs 40348 -> 41812, two records, rejected expansion during the
+controlled consent await, re-enabled selection after Deny, and final B/C=(1,1).
+Post-fix verification (2026-10-19): Debug/Release x64 WinUI, script-test and UI-test
+builds completed with zero warnings/errors; both configurations passed the full
+checkpoint, full script and Schema/state/hot-reload suites. The selector check is
+UI automation at a held consent boundary, not a new human-input acceptance run.

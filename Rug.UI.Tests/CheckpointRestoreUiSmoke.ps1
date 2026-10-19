@@ -110,6 +110,25 @@ try {
   $null=[RecoveryUiNative]::SendMessageW([IntPtr]$TargetHwnd,0x8001,[UIntPtr]0,[IntPtr]::Zero)
   Invoke 'Refresh checkpoints'
   CheckChoice 'Ready'
+  # The real host consent await is a controlled preparation barrier, released only by Deny below.
+  $picker=Await 'Checkpoint selection'
+  # The owning fixture asserts two distinct records before launching this host.
+  # Keep the collapsed peer: expanding it before the request can invalidate WinUI's UIA root.
+  $selected=$picker.GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern).Current.GetSelection()[0].Current.Name
+  Invoke 'Restore checkpoint'
+  $null=Await 'Allow permissions'
+  $picker=Await 'Checkpoint selection'
+  if($picker.Current.IsEnabled){throw 'Checkpoint selector remained enabled during suspended preparation'}
+  $selectionBlocked=$false
+  try { $picker.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand() }
+  catch { if($_.Exception.GetBaseException() -is [System.Windows.Automation.ElementNotEnabledException]){$selectionBlocked=$true}else{throw} }
+  if(-not $selectionBlocked){throw 'Disabled checkpoint selector accepted a different checkpoint'}
+  if($picker.GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern).Current.GetSelection()[0].Current.Name -ne $selected){throw 'Preparation changed checkpoint selection'}
+  Invoke 'Deny permissions'
+  $null=AwaitText '恢复准备已取消'
+  if(-not (Await 'Checkpoint selection').Current.IsEnabled){throw 'Checkpoint selector not restored after preparation cancellation'}
+  $null=Await '无运行实例'
+  Write-Output 'checkpoint-selection-lock-ok: two choices, controlled consent await, switch rejected, cancellation re-enables selection; no validator/input dispatched'
   Invoke 'Restore checkpoint'
   Invoke 'Allow permissions'
   $null=AwaitText '恢复未启动.*SceneRejected'

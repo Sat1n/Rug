@@ -69,6 +69,11 @@ No production approval switch.
 The fixture-owned target and store survive the restart. Actual consent/crosshair
 binding, source stop, checkpoint selection, fresh WGC red rejection and green
 on_restore are checked; B/C counters must each grow once. Human input remains
-NOT RUN until the separate `--checkpoint-restore-manual` user flow is confirmed.
+separate: the `--checkpoint-restore-manual` flow was subsequently user-confirmed
+with save/restart/AFTER-only continuation and red rejection (see startup contract).
+The automated fixture also creates a second host-owned checkpoint solely for
+selection coverage. A controlled real consent await must disable the selector,
+block choosing another record, and re-enable selection after Deny/cancellation.
+No timing delay or production test/auto-approval switch is added.
 The noninteractive suite compiles the actual LifecyclePresentation helper and
 asserts that retained Validating snapshots cannot hide Stopping/Faulted/Stopped.

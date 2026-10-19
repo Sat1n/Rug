@@ -31,6 +31,13 @@ public sealed partial class TaskScheduler
         if (configured is { } snapshot) foreach (var pair in snapshot.Values) values[pair.Key] = StateStore.CloneValue(pair.Value);
         return (configured?.Revision ?? 0, values);
     }
+    private void CheckRestoreConfiguration(CheckpointStartPlan plan)
+    {
+        var bytes = PluginManager.ReadConfigBytes(plan.Manifest.PluginDirectory);
+        string? hash = bytes is null ? null : CheckpointJson.Hash(bytes);
+        if (hash != plan.ConfigFileHash || CheckpointJson.ConfigHash(RestoreConfiguration(plan.Manifest).Values) != plan.Metadata.ConfigHash)
+            throw RejectRestore(OperationError.CheckpointIncompatible);
+    }
     /// <summary>@shape return: at most 128 detached summaries with bounded, expiring host selection IDs.
     /// @source candidates: Abstractions/ICheckpointService.cs#interface:ICheckpointStore</summary>
     public async Task<IReadOnlyList<CheckpointChoice>> QueryCheckpointsAsync(string pluginId, CancellationToken token = default)
@@ -38,6 +45,8 @@ public sealed partial class TaskScheduler
         if (_checkpointStore is null || _checkpointRestores is null) throw RejectRestore(OperationError.RestoreUnavailable);
         await RefreshPluginsAsync(token).ConfigureAwait(false); // Select current manifest/defaults, not stale catalog metadata.
         var source = await GetPluginAsync(pluginId, token).ConfigureAwait(false);
+        var diskConfig = PluginManager.ReadConfigSnapshot(source.PluginDirectory, source.Id);
+        source = source with { Configuration = diskConfig.Config.Defaults };
         var configuration = RestoreConfiguration(source);
         var code = CheckpointJson.Loaded(source.Entry, await File.ReadAllTextAsync(Path.Combine(source.PluginDirectory, source.Entry), token).ConfigureAwait(false));
         var installation = PluginInstallation.From(source);
@@ -59,7 +68,7 @@ public sealed partial class TaskScheduler
                 if (current.Status == CheckpointReadStatus.Valid && binding is { } node)
                 {
                     selection = Guid.NewGuid();
-                    var plan = new CheckpointStartPlan(selection, manifest, metadata, configuration.Values, record, RecordHash(record), manifestHash,
+                    var plan = new CheckpointStartPlan(selection, manifest, metadata, configuration.Values, record, RecordHash(record), manifestHash, diskConfig.FileHash,
                         node.Node, node.Validator, DateTimeOffset.UtcNow.AddMinutes(5));
                     lock (_restoreGate)
                     {
@@ -90,9 +99,9 @@ public sealed partial class TaskScheduler
         token.ThrowIfCancellationRequested();
         if (SourceActive(plan.Record)) throw RejectRestore(OperationError.SourceStillActive);
         if (plan.ExpiresAt <= DateTimeOffset.UtcNow) throw RejectRestore(OperationError.CheckpointChanged);
-        var current = RestoreConfiguration(plan.Manifest);
+        CheckRestoreConfiguration(plan);
         var code = CheckpointJson.Loaded(plan.Manifest.Entry, await File.ReadAllTextAsync(Path.Combine(plan.Manifest.PluginDirectory, plan.Manifest.Entry), token).ConfigureAwait(false));
-        if (code != plan.Metadata.Code || CheckpointJson.ConfigHash(current.Values) != plan.Metadata.ConfigHash ||
+        if (code != plan.Metadata.Code ||
             CheckpointJson.Hash(await File.ReadAllBytesAsync(Path.Combine(plan.Manifest.PluginDirectory, "manifest.json"), token).ConfigureAwait(false)) != plan.ManifestHash)
             throw RejectRestore(OperationError.CheckpointIncompatible);
         var node = await FindRestoreAsync(plan.Metadata, plan.Record.NodeId, token).ConfigureAwait(false);

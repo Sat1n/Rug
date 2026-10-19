@@ -43,19 +43,19 @@ public sealed partial class MainWindow : WindowEx
         {
             if (plugin is null) throw new InvalidOperationException("请先选择插件。");
             var choices = await _scheduler!.QueryCheckpointsAsync(plugin);
-            if (_activePlugin != plugin || _closingInput) return;
+            if (_activePlugin != plugin || _closingInput || _checkpointCancellation is not null) return;
             CheckpointPicker.ItemsSource = choices.Select(c => new ComboBoxItem { Content = new CheckpointItem(c).Label, Tag = c }).ToArray();
             CheckpointPicker.SelectedIndex = choices.Count == 0 ? -1 : 0;
             CheckpointStatus.Text = choices.Count == 0 ? "当前安装没有可归属的检查点。" : "请选择检查点；恢复将再次核验记录、代码、配置及当前画面。";
         }
         catch (Exception error) { CheckpointStatus.Text = "检查点查询失败 · " + error.Message; }
-        finally { RefreshCheckpointsButton.IsEnabled = true; }
+        finally { RefreshCheckpointsButton.IsEnabled = _checkpointCancellation is null; }
     }
     private async void RestoreCheckpoint_Click(object sender, RoutedEventArgs args)
     {
         if (_checkpointCancellation is not null) return;
         using var cancellation = new CancellationTokenSource(); _checkpointCancellation = cancellation;
-        RestoreCheckpointButton.IsEnabled = RefreshCheckpointsButton.IsEnabled = false; CancelCheckpointButton.IsEnabled = true;
+        CheckpointPicker.IsEnabled = RestoreCheckpointButton.IsEnabled = RefreshCheckpointsButton.IsEnabled = false; CancelCheckpointButton.IsEnabled = true;
         try
         {
             string plugin = _activePlugin ?? throw new InvalidOperationException("请先选择插件。");
@@ -82,7 +82,7 @@ public sealed partial class MainWindow : WindowEx
         }
         catch (OperationCanceledException) { CheckpointStatus.Text = "恢复准备已取消；不会续接旧实例。"; }
         catch (Exception error) { CheckpointStatus.Text = "检查点恢复失败 · " + error.Message; }
-        finally { _checkpointCancellation = null; RestoreCheckpointButton.IsEnabled = RefreshCheckpointsButton.IsEnabled = true; CancelCheckpointButton.IsEnabled = false; }
+        finally { _checkpointCancellation = null; CheckpointPicker.IsEnabled = RestoreCheckpointButton.IsEnabled = RefreshCheckpointsButton.IsEnabled = true; CancelCheckpointButton.IsEnabled = false; }
     }
     private void CancelCheckpoint_Click(object sender, RoutedEventArgs args) => _checkpointCancellation?.Cancel();
 

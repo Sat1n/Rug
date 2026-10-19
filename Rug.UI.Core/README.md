@@ -101,7 +101,8 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   No provider or recovery input tools are added.
 * [Checkpoints](Checkpoints.md): bounded Lua saves, exact code/config identity and
   detached reads. [Startup](CheckpointStartup.md) validates fresh scenes before
-  a new on_restore run; ordinary Start is unchanged.
+  a new on_restore run; config.json existence/content and effective configuration
+  are pinned through the final startup check. Ordinary Start is unchanged.
 
 ## Native input bridge and coordinates (Task 2.2)
 

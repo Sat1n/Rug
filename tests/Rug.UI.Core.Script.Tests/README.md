@@ -29,6 +29,9 @@ on_restore/new identity/origin; no init/BEFORE replay; source/descendant guards,
 dedup/conflicts; fresh observation and late result/Stop/cancel/version checks.
 `--checkpoint-restore-tests` runs the targeted suite and an actual restarted child
 with fresh explicit test grants and Fake capture/input (not WGC/human evidence).
+Disk-config barriers cover changed/created/deleted defaults, absent versus empty,
+the final startup boundary, and genuine exclusive-lock IO failure: zero AFTER
+input, preserved saved record, and fresh selection reparses current defaults.
 `--checkpoint-restore-manual` owns a persistent controlled target while restarting
 WinUI, preserving files and requiring new grants/binding. Human checks remain separate.
 The independent Hook gap is unchanged.

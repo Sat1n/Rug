@@ -110,6 +110,8 @@ no automation pipeline and no native interop itself.
   node registry. Explicit permission consent describes `checkpoint`; the footer adds
   [checkpoint restore UI](../Rug.UI.Core/CheckpointStartup.md). Selection, explicit
   confirmation and preparation cancellation use the Gateway; no automatic grants.
+  The checkpoint selector is disabled throughout confirmation/preparation and is
+  re-enabled after completion/cancellation; late query results cannot replace it.
   DevTools mouse, drag, key and stress tests hold a compound-action lease and
   validate it before native input; target rebinding takes place inside the lease.
   It uses a trusted host owner independent of plugin identities.

@@ -36,7 +36,7 @@ public sealed class PluginManager(ILogger<PluginManager> logger) : IPluginManage
                     ?? throw new InvalidDataException("manifest.json is null.");
                 ValidateManifest(manifest, directory);
                 if (_configs.ContainsKey(manifest.Id)) throw new InvalidDataException($"Duplicate plugin id '{manifest.Id}'.");
-                PluginConfig config = ReadConfig(directory, manifest.Id);
+                PluginConfig config = ReadConfigSnapshot(directory, manifest.Id).Config;
                 manifest = manifest with { Configuration = config.Defaults, PluginDirectory = Path.GetFullPath(directory) };
                 _configs.Add(manifest.Id, config);
                 accepted.Add(manifest);
@@ -88,12 +88,26 @@ public sealed class PluginManager(ILogger<PluginManager> logger) : IPluginManage
     private static bool IsReparsePoint(string path) =>
         (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
 
-    private static PluginConfig ReadConfig(string directory, string pluginId)
+    internal static byte[]? ReadConfigBytes(string directory)
     {
         string path = Path.Combine(directory, "config.json");
-        if (!File.Exists(path)) return new(pluginId, new PluginConfigSchema(), new Dictionary<string, object?>());
-        if (IsReparsePoint(path)) throw new InvalidDataException("Config is a link.");
-        PluginConfigSchema schema = JsonSerializer.Deserialize<PluginConfigSchema>(File.ReadAllText(path), JsonOptions)
+        try
+        {
+            if (IsReparsePoint(path)) throw new InvalidDataException("Config is a link.");
+            return File.ReadAllBytes(path);
+        }
+        catch (FileNotFoundException) { return null; }
+        catch (DirectoryNotFoundException) { return null; }
+    }
+
+    /// <summary>@shape return: defaults parsed from exactly the bytes identified by FileHash; null hash means absent.
+    /// @source config: Models/PluginConfigSchema.cs#class:PluginConfigSchema</summary>
+    internal static (PluginConfig Config, string? FileHash) ReadConfigSnapshot(string directory, string pluginId)
+    {
+        byte[]? bytes = ReadConfigBytes(directory);
+        if (bytes is null) return (new(pluginId, new PluginConfigSchema(), new Dictionary<string, object?>()), null);
+        using var reader = new StreamReader(new MemoryStream(bytes));
+        PluginConfigSchema schema = JsonSerializer.Deserialize<PluginConfigSchema>(reader.ReadToEnd(), JsonOptions)
             ?? throw new InvalidDataException("config.json is null.");
         if (schema.Fields is null) throw new InvalidDataException("config.json fields must be an array.");
         var defaults = new Dictionary<string, object?>(StringComparer.Ordinal);
@@ -104,7 +118,7 @@ public sealed class PluginManager(ILogger<PluginManager> logger) : IPluginManage
                 throw new InvalidDataException("Config field keys must be unique safe identifiers.");
             defaults.Add(field.Key, ValidateDefault(field));
         }
-        return new(pluginId, schema, defaults);
+        return (new(pluginId, schema, defaults), CheckpointJson.Hash(bytes));
     }
 
     private static object? ValidateDefault(PluginConfigField field)
