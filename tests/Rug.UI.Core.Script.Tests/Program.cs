@@ -21,6 +21,7 @@ if (args.Contains("--checkpoint-restore-manual")) { await ManualCheckpointRestor
 if (args.Contains("--checkpoint-restore-ui")) { await ManualCheckpointRestore.RunAsync(automated: true); return; }
 if (args.Contains("--checkpoint-restore-native")) { await NativeCheckpointRestore.RunAsync(); return; }
 if (args.Contains("--checkpoint-restore-tests")) { await CheckpointTests.RunRestoreAsync(); return; }
+if (args.Contains("--plugin-update-tests")) { await CheckpointTests.RunPluginUpdatesAsync(); return; }
 if (args.Contains("--checkpoint-child-read")) { await CheckpointTests.ChildReadAsync(args); return; }
 if (args.Contains("--checkpoint-tests")) { await CheckpointTests.RunAsync(); return; }
 
@@ -795,36 +796,39 @@ try
     await using (var reloader = new HotReloadService(schedulerRoot, scheduler,
         NullLogger<HotReloadService>.Instance, TimeSpan.FromMilliseconds(300)))
     {
-        using var uiBinding = reloader.RegisterUiHandler("hot", async (path, token) =>
+        using var uiBinding = reloader.RegisterUiHandler("hot", (snapshot, token) =>
         {
-            await new SchemaParser().ParseFileAsync(path, token);
+            new SchemaParser().Parse(snapshot.UiJson!);
+            return Task.FromResult<IPluginUiUpdate>(new TestPluginUiStage());
         });
         reloader.Reloaded += (_, e) =>
         {
-            if (e.PluginId == "hot") reloadSignals.Enqueue("success");
+            if (e.PluginId == "hot") reloadSignals.Enqueue(e.Status.ToString());
         };
         reloader.ReloadFailed += (_, e) =>
         {
             if (e.PluginId == "hot") reloadSignals.Enqueue("failure");
         };
         reloader.Start();
+        await reloader.Ready;
         await File.WriteAllTextAsync(Path.Combine(hotDirectory, "main.lua"), """
             function on_init() rug.log('hot_v2') end
             function on_stop() rug.log('hot_stop') end
             """);
-        await WaitUntilAsync(() => reloadSignals.Contains("success") && events.Contains("Lua: hot_v2"));
-        Check(!scheduler.Instances.Any(instance => instance.InstanceId == hotOriginal) &&
-              scheduler.Instances.Any(instance => instance.PluginId == "hot" && instance.TargetHwnd == 707) &&
-              events.Contains("Lua: hot_stop") && captures.Any(item => item.StartedHwnd == 707 && item.StopCalls == 1),
-              "hot reload did not stop/cleanup old Lua and start a fresh HWND session");
+        await WaitUntilAsync(() => reloadSignals.Contains("RuntimePending"));
+        Check(scheduler.Instances.Any(instance => instance.InstanceId == hotOriginal) && !events.Contains("Lua: hot_v2"),
+              "runtime update changed active instance or replayed init");
 
         await File.WriteAllTextAsync(hotUi, "{ invalid JSON");
-        await WaitUntilAsync(() => reloadSignals.Contains("failure") &&
-            !scheduler.Instances.Any(instance => instance.PluginId == "hot"));
+        await WaitUntilAsync(() => reloadSignals.Contains("failure"));
+        Check(scheduler.Instances.Any(instance => instance.InstanceId == hotOriginal), "invalid update stopped old instance");
         await File.WriteAllTextAsync(hotUi, """{"type":"Page","id":"hot-page","title":"Recovered"}""");
-        await WaitUntilAsync(() => reloadSignals.Count(signal => signal == "success") == 2 &&
-            scheduler.Instances.Any(instance => instance.PluginId == "hot" && instance.TargetHwnd == 707));
-        await WaitUntilAsync(() => events.Count(item => item == "Lua: hot_v2") >= 2);
+        await WaitUntilAsync(() => reloadSignals.Count(signal => signal == "RuntimePending") >= 2);
+        await scheduler.StopTaskAsync(hotOriginal);
+        reloader.RequestReload(hotDirectory);
+        await WaitUntilAsync(() => reloadSignals.Contains("RuntimeApplied"));
+        await scheduler.StartTaskAsync("hot", 707);
+        await WaitUntilAsync(() => events.Contains("Lua: hot_v2"));
     }
     await Task.WhenAll(scheduler.Instances.Where(instance => instance.PluginId == "hot")
         .Select(instance => scheduler.StopTaskAsync(instance.InstanceId)));
@@ -1114,6 +1118,7 @@ await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new 
 await GatewayTests.RunAsync();
 await RecoveryTests.RunAsync();
 await CheckpointTests.RunAsync();
+await CheckpointTests.RunPluginUpdatesAsync();
 await LifecycleTests.RunAsync();
 await AuthorizationTests.RunAsync();
 await InputArbitrationTests.RunAsync();

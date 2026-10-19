@@ -56,7 +56,14 @@ public sealed class PluginManager(ILogger<PluginManager> logger) : IPluginManage
             ? config : throw new KeyNotFoundException($"Plugin '{pluginId}' has not been scanned or is invalid.");
     }
 
-    private static void ValidateManifest(PluginManifest manifest, string directory)
+    internal static PluginManifest ParseManifest(string directory, string json, IReadOnlySet<string> files)
+    {
+        var manifest = JsonSerializer.Deserialize<PluginManifest>(json, JsonOptions) ?? throw new InvalidDataException("manifest.json is null.");
+        ValidateManifest(manifest, directory, files);
+        if (manifest.Permissions.Any(p => !Permission.IsKnown(p))) throw new InvalidDataException("Unknown permission declaration.");
+        return manifest with { PluginDirectory = Path.GetFullPath(directory) };
+    }
+    private static void ValidateManifest(PluginManifest manifest, string directory, IReadOnlySet<string>? files = null)
     {
         if (!Regex.IsMatch(manifest.Id ?? "", "^[A-Za-z0-9][A-Za-z0-9._-]*$"))
             throw new InvalidDataException("Plugin id must be a safe nonempty identifier.");
@@ -74,6 +81,11 @@ public sealed class PluginManager(ILogger<PluginManager> logger) : IPluginManage
 
         string fullDirectory = Path.GetFullPath(directory);
         string entry = Path.GetFullPath(Path.Combine(fullDirectory, manifest.Entry));
+        if (files is not null)
+        {
+            if (!files.Contains(manifest.Entry.Replace('\\', '/'))) throw new InvalidDataException("Entry is absent from candidate.");
+            return;
+        }
         if (!entry.StartsWith(fullDirectory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
             !File.Exists(entry) || IsReparsePoint(entry))
             throw new InvalidDataException("Entry script is missing or outside the plugin directory.");
@@ -107,7 +119,12 @@ public sealed class PluginManager(ILogger<PluginManager> logger) : IPluginManage
         byte[]? bytes = ReadConfigBytes(directory);
         if (bytes is null) return (new(pluginId, new PluginConfigSchema(), new Dictionary<string, object?>()), null);
         using var reader = new StreamReader(new MemoryStream(bytes));
-        PluginConfigSchema schema = JsonSerializer.Deserialize<PluginConfigSchema>(reader.ReadToEnd(), JsonOptions)
+        return (ParseConfig(pluginId, reader.ReadToEnd()), CheckpointJson.Hash(bytes));
+    }
+    internal static PluginConfig ParseConfig(string pluginId, string? json)
+    {
+        if (json is null) return new(pluginId, new PluginConfigSchema(), new Dictionary<string, object?>());
+        PluginConfigSchema schema = JsonSerializer.Deserialize<PluginConfigSchema>(json, JsonOptions)
             ?? throw new InvalidDataException("config.json is null.");
         if (schema.Fields is null) throw new InvalidDataException("config.json fields must be an array.");
         var defaults = new Dictionary<string, object?>(StringComparer.Ordinal);
@@ -118,7 +135,7 @@ public sealed class PluginManager(ILogger<PluginManager> logger) : IPluginManage
                 throw new InvalidDataException("Config field keys must be unique safe identifiers.");
             defaults.Add(field.Key, ValidateDefault(field));
         }
-        return (new(pluginId, schema, defaults), CheckpointJson.Hash(bytes));
+        return new(pluginId, schema, defaults);
     }
 
     private static object? ValidateDefault(PluginConfigField field)

@@ -166,11 +166,12 @@ internal static partial class CheckpointTests
         public IInputArbiter Arbiter=null!;
         public readonly Logger Log=new();public IDisposable? NodeRegistration;
         public Action<TaskExecutionContext>? OnReady;
-        public static async Task<Fixture> CreateAsync(ICheckpointFilePublisher? publisher=null,Func<CancellationToken,Task>? beforePublish=null,TimeSpan? timeout=null,bool checkpoint=true,string? script=null,string version="1",bool input=false)
+        public static async Task<Fixture> CreateAsync(ICheckpointFilePublisher? publisher=null,Func<CancellationToken,Task>? beforePublish=null,TimeSpan? timeout=null,bool checkpoint=true,string? script=null,string version="1",bool input=false,bool agent=false,IAnomalyLogger? anomalyLogger=null)
         {
             string root=Path.Combine(AppContext.BaseDirectory,"checkpoint-test-"+Guid.NewGuid().ToString("N"));string dir=Path.Combine(root,"plugins","probe");Directory.CreateDirectory(dir);
             var permissions=new List<string>{Permission.Capture,Permission.Timer};if(checkpoint)permissions.Add(Permission.Checkpoint);
             if(input)permissions.Add(Permission.ControlInput);
+            if(agent)permissions.Add(Permission.Agent);
             await File.WriteAllTextAsync(Path.Combine(dir,"manifest.json"),JsonSerializer.Serialize(new{id="probe",name="Probe",version,targetProcess="test",permissions}));
             await File.WriteAllTextAsync(Path.Combine(dir,"main.lua"),script??Script);
             var f=new Fixture{Root=root,LogRoot=Path.Combine(root,"records"),Store=null!,Bus=null!,Scheduler=null!,Coordinator=null!};
@@ -180,7 +181,7 @@ internal static partial class CheckpointTests
             f.Arbiter=new InputArbiter(f.Windows);
             f.Scheduler=new(new PluginManager(NullLogger<PluginManager>.Instance),Path.Combine(root,"plugins"),
                 ()=>{var c=new Capture{Fail=f.CaptureFailure,Hold=f.HoldCapture};f.Captures.Add(c);return c;},()=>{var i=new FakeInput();f.Inputs.Add(i);return i;},
-                (c,i)=>new LuaRuntime(c,new FakeOcr(),i,f.Log,new FakeCoordinateMapper(),ensureForeground:_=>true,commandBus:f.Bus),NullLogger<Scheduler>.Instance,new NoAnomaly(),
+                (c,i)=>new LuaRuntime(c,new FakeOcr(),i,f.Log,new FakeCoordinateMapper(),ensureForeground:_=>true,commandBus:f.Bus),NullLogger<Scheduler>.Instance,anomalyLogger??new NoAnomaly(),
                 commandBus:f.Bus,authorization:f.Authorization,inputArbiter:f.Arbiter,checkpoints:f.Coordinator,
                 checkpointStore:f.Store,checkpointRestores:f.Registry);
             return f;

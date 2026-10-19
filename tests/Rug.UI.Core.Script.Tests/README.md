@@ -8,6 +8,13 @@ tags: [lua, tests, input]
 
 # Lua coroutine bridge tests
 
+07A adds --plugin-update-tests and the default suite: immutable bounded snapshots,
+compile-only prevalidation, failed-update old-run/UI/catalog retention, UI-only
+pause/state preservation, pending config/code/permission updates, revocation,
+real recovery-state barriers, fixed startup code, rollback/subscription disposal,
+late-save and post-validation disk-change gates, entry compilation and queue limits.
+See [snapshot update contract](../../Rug.UI.Core/HotReload.md); no update restarts Lua.
+
 06C-01 adds `--checkpoint-tests` and the default full suite: actual Lua, trusted
 Fake observation, real filesystem first-create/replace/integrity and separate
 same-process/child-process reopen evidence. Controlled barriers check Stop before

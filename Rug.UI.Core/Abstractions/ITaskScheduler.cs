@@ -6,6 +6,9 @@ namespace Rug.UI.Core.Abstractions;
 
 public interface ITaskScheduler : IAsyncDisposable
 {
+    Task<IReadOnlyList<PluginSnapshot>> GetPluginSnapshotsAsync(CancellationToken token = default) => throw new NotSupportedException();
+    Task<PluginUpdateStatus> ClassifyPluginUpdateAsync(PluginSnapshot snapshot, CancellationToken token = default) => throw new NotSupportedException();
+    Task PublishPluginSnapshotAsync(PluginSnapshot snapshot, CancellationToken token = default) => throw new NotSupportedException();
     Task<IReadOnlyList<CheckpointChoice>> QueryCheckpointsAsync(string pluginId, CancellationToken token = default) =>
         throw new NotSupportedException("Checkpoint discovery is unavailable.");
     Task<AutomationCallContext> CreateCheckpointRestoreContextAsync(string pluginId, InputTarget target,

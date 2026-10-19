@@ -28,6 +28,7 @@ public sealed partial class MainWindow : WindowEx
     private bool _updatingInstancePicker;
     private int _lifecycleRefreshQueued;
     private bool _initialized;
+    private IReadOnlyList<PluginSnapshot> _effectivePlugins = [];
     private bool _closingInput, _inputClosed;
     private CancellationTokenSource? _checkpointCancellation;
     private sealed record CheckpointItem(CheckpointChoice Choice)
@@ -138,14 +139,20 @@ public sealed partial class MainWindow : WindowEx
         _pauseSubscription = bus.Subscribe("host.pause_selected", (_, token) => ControlSelectedAsync(AutomationOperation.Pause, token));
         _resumeSubscription = bus.Subscribe("host.resume_selected", (_, token) => ControlSelectedAsync(AutomationOperation.Resume, token));
         var reload = App.GetService<IHotReloadService>();
-        reload.Reloaded += (_, e) => DispatcherQueue.TryEnqueue(() =>
+        reload.Reloaded += (_, e) => DispatcherQueue.TryEnqueue(async () =>
         {
-            ReloadStatus.Text = e.PluginId + " 已于 " + e.Timestamp.ToString("HH:mm:ss") + " 重载";
+            if (e.Status == PluginUpdateStatus.Superseded) return;
+            if (e.Status == PluginUpdateStatus.Unchanged) { ReloadStatus.Text = e.PluginId + " · 内容未变，未重复应用"; return; }
+            ReloadStatus.Text = e.Status == PluginUpdateStatus.RuntimePending ? e.PluginId + " · 更新待应用，旧任务继续运行" :
+                e.PluginId + " 已于 " + e.Timestamp.ToString("HH:mm:ss") + " 更新";
+            if (e.Status == PluginUpdateStatus.RuntimePending) return;
+            _effectivePlugins = await _scheduler.GetPluginSnapshotsAsync();
             RefreshPluginList();
             RefreshInstancePicker();
         });
         reload.ReloadFailed += (_, e) => DispatcherQueue.TryEnqueue(() =>
             ReloadStatus.Text = e.PluginId + " 重载失败：" + e.Error.Message);
+        _effectivePlugins = await _scheduler.GetPluginSnapshotsAsync();
         RefreshPluginList();
         if (PluginNavigation.MenuItems.FirstOrDefault() is NavigationViewItem first)
         {
@@ -210,7 +217,7 @@ public sealed partial class MainWindow : WindowEx
 
     private void RefreshPluginList()
     {
-        var plugins = App.GetService<IPluginManager>().ScanPlugins(App.PluginsRoot).ToArray();
+        var plugins = _effectivePlugins.Select(p => p.Manifest).ToArray();
         PluginNavigation.MenuItems.Clear();
         foreach (PluginManifest plugin in plugins)
             PluginNavigation.MenuItems.Add(new NavigationViewItem
@@ -246,11 +253,11 @@ public sealed partial class MainWindow : WindowEx
     private async Task SelectPluginAsync(string pluginId)
     {
         if (_activePlugin == pluginId && _host is not null) return;
-        var plugin = App.GetService<IPluginManager>().ScanPlugins(App.PluginsRoot)
-            .FirstOrDefault(item => item.Id == pluginId);
+        var snapshot = (await _scheduler!.GetPluginSnapshotsAsync()).FirstOrDefault(item => item.PluginId == pluginId);
+        var plugin = snapshot?.Manifest;
         if (plugin is null) return;
         var next = new DynamicUIHost();
-        try { await next.LoadFileAsync(Path.Combine(plugin.PluginDirectory, "ui.json"), pluginId: plugin.Id); }
+        try { next.LoadJson(snapshot!.UiJson ?? "{\"type\":\"Page\",\"id\":\"empty-plugin-ui\"}", pluginId: plugin.Id); }
         catch (Exception error) { next.ShowLoadError(error); }
         next.AttachHotReload(App.GetService<IHotReloadService>(), pluginId);
         PluginContent.Content = next;

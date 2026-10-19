@@ -263,13 +263,16 @@ internal static class AuthorizationTests
         Check((await scheduler.Gateway.ExecuteAsync(newCaller, Request(AutomationOperation.Capture, OperationTarget.ForRun(freshIdentity)))).Status == OperationStatus.Success,
             "fresh granted run failed");
         await using var reload = new HotReloadService(pluginsRoot, scheduler, NullLogger<HotReloadService>.Instance);
-        var failed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        reload.ReloadFailed += (_, _) => failed.TrySetResult(true);
+        var pending = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        reload.Reloaded += (_, e) => { if (e.Status == PluginUpdateStatus.RuntimePending) pending.TrySetResult(true); };
         reload.Start();
+        await reload.Ready;
         await Write("first", [Permission.Timer, Permission.Capture, Permission.Agent]);
-        await failed.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        Check(!scheduler.Instances.Any(c => c.PluginId == "first") && auth.Query(installation).Granted.Contains(Permission.Agent) == false,
-            "expanded reload automatically authorized/restarted");
+        await pending.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Check(scheduler.Instances.Any(c => c.InstanceId == fresh) && auth.Query(installation).Granted.Contains(Permission.Agent) == false,
+            "expanded update stopped/restarted or authorized old run");
+        auth.Revoke(installation, [Permission.Capture]);
+        await Until(() => !scheduler.Instances.Any(c => c.PluginId == "first"));
         await scheduler.StopTaskAsync(other);
         for (int n = 0; n < 10; n++)
         {

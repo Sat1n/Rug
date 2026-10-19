@@ -100,8 +100,8 @@ no automation pipeline and no native interop itself.
 
 ## Plugin hot reload (Task 3.3)
 
-* The app watches `%LOCALAPPDATA%/Rug/plugins/` by default; set `RUG_PLUGINS_ROOT` to use an isolated directory. `MainWindow` lists scanned plugins and attaches the selected `DynamicUIHost` to its plugin ID. Changing JSON or Lua rebuilds the card tree on the WinUI dispatcher while the app stays open. The old factory unsubscribes before its controls are removed. PluginConfig values persist in memory across reloads; InstanceState is discarded when the old run stops.
-* The host displays a success `InfoBar` for two seconds, or a persistent error with the JSON/Lua exception stack. A failed parse keeps the last good UI in place; correcting the file triggers another reload. UI and script changes are validated before new instances start.
+* The app watches `%LOCALAPPDATA%/Rug/plugins/` by default; RUG_PLUGINS_ROOT isolates tests. MainWindow reads the validated effective snapshot catalog. [07A updates](../Rug.UI.Core/HotReload.md) stage UI on the dispatcher and retain old trees/subscriptions on build failure. UI-only replacement rebinds the same InstanceState and preserves Lua identity/pause without restarting tasks.
+* Applied updates show a two-second success notice. Runtime/config/permission changes with active runs show 更新待应用; invalid changes show a persistent error while old UI/tasks remain. Unchanged content clears obsolete errors without reconstruction. UI defaults are staged until successful replacement; old subscriptions are then released. Ready precedes shell activation. Active-run code switching remains deferred.
 
 ## Shared input and host takeover (Task 3.5-05A)
 

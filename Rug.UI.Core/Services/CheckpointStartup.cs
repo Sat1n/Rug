@@ -45,6 +45,14 @@ public sealed partial class TaskScheduler
         if (_checkpointStore is null || _checkpointRestores is null) throw RejectRestore(OperationError.RestoreUnavailable);
         await RefreshPluginsAsync(token).ConfigureAwait(false); // Select current manifest/defaults, not stale catalog metadata.
         var source = await GetPluginAsync(pluginId, token).ConfigureAwait(false);
+        if (_snapshots?.GetValueOrDefault(pluginId) is { } effective)
+        {
+            var disk = await new PluginUpdatePipeline().PrepareAsync(effective.Directory, 0, token).ConfigureAwait(false);
+            foreach (var file in effective.Candidate.Files.Values.Where(f => !f.Path.Equals("ui.json", StringComparison.OrdinalIgnoreCase)))
+                if (!disk.Files.TryGetValue(file.Path, out var current) || current.ContentHash != file.ContentHash || current.Exists != file.Exists)
+                    throw RejectRestore(OperationError.CheckpointIncompatible);
+            if (disk.Files.Keys.Any(p => p != "ui.json" && !effective.Candidate.Files.ContainsKey(p))) throw RejectRestore(OperationError.CheckpointIncompatible);
+        }
         var diskConfig = PluginManager.ReadConfigSnapshot(source.PluginDirectory, source.Id);
         source = source with { Configuration = diskConfig.Config.Defaults };
         var configuration = RestoreConfiguration(source);

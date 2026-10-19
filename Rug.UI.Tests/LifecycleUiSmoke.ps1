@@ -109,16 +109,15 @@ try {
     $script:lastAction = 'hot reload'
     [System.IO.File]::WriteAllText($ui, $schema.Replace('Lifecycle before reload', 'Lifecycle after reload'))
     $null = Await-Name $window 'Lifecycle after reload'
-    $null = Await-Name $window '运行中'
-    Check-Controls $window $false # Reload replaces old runs; it is not pause recovery.
-    Invoke-Button $window 'Pause instance'
     $null = Await-Name $window '已暂停'
+    $null = Await-Name $window 'Lifecycle A'
+    Check-Controls $window $true # UI-only reload keeps the original paused run.
     Invoke-Button $window 'Stop instance'
     $null = Await-Name $window '无运行实例'
     foreach ($name in 'Pause instance','Resume instance','Stop instance') {
         if ((Await-Name $window $name ([System.Windows.Automation.ControlType]::Button)).Current.IsEnabled) { throw "Terminal control enabled: $name" }
     }
-    Write-Output 'lifecycle-ui-ok sleepPause=confirmed instances=isolated resume=explicit refresh=current hotReload=new-runs terminalControls=disabled'
+    Write-Output 'lifecycle-ui-ok sleepPause=confirmed instances=isolated resume=explicit refresh=current hotReload=preserved-paused-run terminalControls=disabled'
     Write-Output 'NOT RUN: real-human pause/takeover and uncancellable native pending labels; deterministic barrier tests cover those backend boundaries.'
 }
 finally {

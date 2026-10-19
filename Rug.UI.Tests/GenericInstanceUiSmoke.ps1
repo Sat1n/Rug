@@ -40,7 +40,7 @@ function Invoke-Button($window, [string]$name) {
     $button = Await-Name $window $name 6 ([System.Windows.Automation.ControlType]::Button)
     $ready = [System.Diagnostics.Stopwatch]::StartNew()
     while (-not $button.Current.IsEnabled -and $ready.Elapsed.TotalSeconds -lt 6) { Start-Sleep -Milliseconds 25 }
-    if (-not $button.Current.IsEnabled) { throw "UI button is disabled: $name" }
+    if (-not $button.Current.IsEnabled) { throw "UI button is disabled: $name callerLine=$((Get-PSCallStack)[1].ScriptLineNumber)" }
     $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
 }
 
@@ -57,7 +57,8 @@ try {
  {"type":"ButtonCard","id":"start-b","title":"Start B","command":"host.start_windowless",
   "parameter":{"probe.timeline":[{"Id":"b","Title":"Run B step","Status":"Succeeded","Thumbnail":null}]}},
  {"type":"ButtonCard","id":"stop","title":"Stop selected","command":"host.stop_selected"},
- {"type":"StepFlowView","id":"flow","title":"Probe steps","stateKey":"probe.timeline","steps":[]}
+ {"type":"StepFlowView","id":"flow","title":"Probe steps","stateKey":"probe.timeline","steps":[]},
+ {"type":"TextCard","id":"setting","title":"Persisted setting","stateKey":"draft","default":"keep"}
 ]}
 '@
     $ui = Join-Path $plugin 'ui.json'
@@ -96,16 +97,30 @@ try {
     Invoke-Button $window 'Stop selected'
     $null = Await-Name $window 'Run B step'
     Await-NotName $window 'Run A step'
+    Invoke-Button $window 'Pause instance'
+    $null = Await-Name $window '已暂停'
     [System.IO.File]::WriteAllText($ui, $schema.Replace('Custom timeline test', 'Reloaded timeline test'))
     $null = Await-Name $window 'Reloaded timeline test'
+    $null = Await-Name $window 'Run B step'
+    $null = Await-Name $window '已暂停'
+    # Valid schema, but persisted string cannot bind to a bool control: actual UIFactory build must fail safely.
+    [System.IO.File]::WriteAllText($ui,'{"type":"Page","id":"bad-root","title":"Must not replace","children":[{"type":"ToggleCard","id":"bad-toggle","title":"Bad type","stateKey":"draft","default":false}]}')
+    $null = Await-Name $window '热重载失败'
+    $null = Await-Name $window 'Reloaded timeline test'
+    $null = Await-Name $window 'Run B step'
+    $null = Await-Name $window '已暂停'
+    Await-NotName $window 'Must not replace'
+    [System.IO.File]::WriteAllText($ui, $schema.Replace('Custom timeline test', 'Reloaded timeline test'))
+    Await-NotName $window '热重载失败'
+    Invoke-Button $window 'Resume instance'
+    $null = Await-Name $window '运行中'
+    Invoke-Button $window 'Stop selected'
     Await-NotName $window 'Run B step'
     Invoke-Button $window 'Start A'
-    Invoke-Button $window 'Next instance'
     $null = Await-Name $window 'Run A step'
     Invoke-Button $window 'Stop selected'
     Await-NotName $window 'Run A step'
     Invoke-Button $window 'Start A'
-    Invoke-Button $window 'Next instance'
     $null = Await-Name $window 'Run A step'
     Invoke-Button $window 'Plugin permissions'
     Invoke-Button $window 'Revoke permissions'

@@ -10,7 +10,7 @@ tags: [ui, tests]
 
 Run `dotnet run --project Rug.UI.Tests/Rug.UI.Tests.csproj -c Debug -p:Platform=x64` to validate the shipped `ui.json`, control-tree parsing, invalid schemas, and CommandBus state round trips. The suite targets `net10.0` under SDK `10.0.402`; the native WinUI renderer is compiled through `Rug.UI/Rug.UI.csproj` and can be viewed on the app's main page.
 
-The hot-reload tests create a temporary plugin under the test output and use real `FileSystemWatcher` events. They check five rapid saves coalesce into one callback, `ui.json` and Lua edits reload, malformed JSON/Lua produce failures, and corrected files recover. The script integration harness additionally verifies that an active Lua task runs `on_stop`, releases capture, starts a fresh instance on the same HWND, and recovers that instance after a bad schema is fixed.
+The hot-reload tests use real FileSystemWatcher events and validated snapshots: five rapid saves produce one application, inactive code changes publish without starting Lua, malformed JSON/Lua retain old UI/catalog, and corrections recover. The script harness --plugin-update-tests adds actual Lua and deterministic barriers for old-run preservation, UI-only pause/state retention, pending runtime/config/permissions, revocation, immutable startup source, rollback, ordering and capacity. See [07A contract](../Rug.UI.Core/HotReload.md).
 
 Run `pwsh -File Rug.UI.Tests/HotReloadUiSmoke.ps1` from the repository root after building the Debug/x64 WinUI app and Debug/x64 UI test project. The script resolves their net10.0 output paths. The script creates a unique disposable plugin under the test output and passes it through `RUG_PLUGINS_ROOT`, starts the app, uses Windows UI Automation to find the rendered `BeforeReload` title, rewrites `ui.json`, waits for `AfterReload`, then verifies both JSON and Lua syntax errors appear in the `InfoBar` and recover after corrected saves. It records each elapsed time. It closes only the process it started and verifies the resolved temporary path before removing the test directory. It does not edit installed plugins.
 
@@ -19,8 +19,8 @@ Run `dotnet run --project Rug.UI.Tests/Rug.UI.Tests.csproj -c Debug -p:Platform=
 Run with `--instance-ui` to launch `GenericInstanceUiSmoke.ps1`. Its non-demo
 `timeline_probe` plugin supplies `probe.timeline` as launch input for two
 concurrent windowless runs. UI Automation verifies actual `StepFlowView` text
-when selecting each run, fallback after stop, stale data removal during an
-active-run schema hot reload, and binding a new run after that reload. The test
+when selecting each run, fallback after stop, timeline/pause preservation during
+UI-only hot reload, safe actual UIFactory build failure, and subsequent new runs. The test
 uses an isolated plugin directory and cleans it up.
 
 Run with `--lifecycle-ui` for `LifecycleUiSmoke.ps1`: actual timer Pause/Resume

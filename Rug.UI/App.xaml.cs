@@ -183,6 +183,7 @@ public partial class App : Application
         catch (Exception error) { App.GetService<ILogger<App>>().LogError(error, "Input detector unavailable; automatic input remains closed"); }
         _ = App.GetService<DemoWorkflowCoordinator>();
         App.GetService<IHotReloadService>().Start();
+        await App.GetService<IHotReloadService>().Ready;
         await App.GetService<IActivationService>().ActivateAsync(args);
     }
 

@@ -34,6 +34,8 @@ compatible; SourceStillActive, RestoreUnavailable and existing compatibility
 codes explain rejection. Config revision is informational; config hash decides.
 Selection refreshes the catalog to pin the current manifest/defaults. It does not
 restore grants/config or start a task. Invalid metadata never becomes a selection.
+With the 07A updater enabled, selection uses the effective catalog and rejects
+unapplied runtime-file changes; it cannot sideload pending disk code/config.
 The selection also pins `config.json` existence and exact byte SHA-256. Its defaults
 are parsed from those same bytes, then combined with current PluginConfig overrides.
 Each preparation/final check rejects any file creation, deletion or content change

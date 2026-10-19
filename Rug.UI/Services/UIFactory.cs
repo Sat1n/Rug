@@ -22,6 +22,12 @@ public sealed class UIFactory : IDisposable
     private readonly List<(StepFlowView View, StepFlowStateBinding Binding)> _stepViews = [];
     private readonly Dictionary<string, List<Action<object?>>> _bindings = new(StringComparer.Ordinal);
     private bool _disposed;
+    private readonly Dictionary<string, object?> _defaults = new(StringComparer.Ordinal);
+    public void CommitDefaults()
+    {
+        foreach (var pair in _defaults) if (!_bus.Contains(_pluginScope, pair.Key)) _bus.SetState(_pluginScope, pair.Key, pair.Value);
+        _defaults.Clear();
+    }
 
     public event EventHandler<Exception>? CommandFailed;
 
@@ -259,7 +265,7 @@ public sealed class UIFactory : IDisposable
     {
         if (!_bus.Contains(_pluginScope, key))
         {
-            _bus.SetState(_pluginScope, key, fallback);
+            _defaults.TryAdd(key, Rug.UI.Core.Services.StateStore.CloneValue(fallback));
             return fallback;
         }
         return _bus.GetState<T>(_pluginScope, key);

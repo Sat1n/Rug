@@ -86,13 +86,14 @@ public sealed partial class TaskScheduler : ITaskScheduler
     public LifecycleSnapshot? GetLifecycle(Guid instanceId) =>
         _instances.TryGetValue(instanceId, out var context) ? context.Snapshot : null;
 
-    /// <summary>Replace the cached catalog after a plugin file save, under the same gate used by starts.</summary>
+    /// <summary>Legacy bootstrap refresh; managed updates use only validated snapshot publication.</summary>
     public async Task RefreshPluginsAsync(CancellationToken cancellationToken = default)
     {
         await _catalogGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (_disposed) throw new ObjectDisposedException(nameof(TaskScheduler));
+            if (_snapshots is not null) return; // Managed updates publish validated snapshots, never a disk rescan.
             _catalog = await Task.Run(() => _plugins.ScanPlugins(_pluginsRoot)
                 .ToDictionary(p => p.Id, StringComparer.OrdinalIgnoreCase), cancellationToken)
                 .ConfigureAwait(false);
@@ -142,7 +143,7 @@ public sealed partial class TaskScheduler : ITaskScheduler
         }
     }
 
-    /// <summary>Prevent starts of one plugin while its old runtime and catalog are replaced.</summary>
+    /// <summary>Serialize one plugin's startup and snapshot publication; this lease never stops a run.</summary>
     public async Task<IAsyncDisposable> AcquirePluginReloadAsync(string pluginId,
         CancellationToken cancellationToken = default)
     {
@@ -301,7 +302,9 @@ public sealed partial class TaskScheduler : ITaskScheduler
             if (hwnd != 0)
                 await capture.StartAsync(hwnd, cancellation.Token).ConfigureAwait(false);
             cancellation.Token.ThrowIfCancellationRequested();
-            if (restore is null) await runtime.InitializeAsync(Path.Combine(source.PluginDirectory, source.Entry), manifest, cancellation.Token).ConfigureAwait(false);
+            if (restore is null && _snapshots?.GetValueOrDefault(pluginId) is { } effective)
+                await runtime.InitializeLoadedAsync(effective.EntryCode, manifest, cancellation.Token).ConfigureAwait(false);
+            else if (restore is null) await runtime.InitializeAsync(Path.Combine(source.PluginDirectory, source.Entry), manifest, cancellation.Token).ConfigureAwait(false);
             else await runtime.InitializeLoadedAsync(restore.Metadata.Code, manifest, cancellation.Token).ConfigureAwait(false);
             if (source.Permissions.Contains(Permission.Checkpoint))
             {
