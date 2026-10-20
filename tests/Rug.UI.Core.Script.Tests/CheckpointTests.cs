@@ -136,10 +136,11 @@ internal static partial class CheckpointTests
     {
         public bool Fail,Disposed,Hold;public int Calls;
         public readonly TaskCompletionSource Entered=Signal(),Release=Signal();
+        public readonly TaskCompletionSource Blocked=Signal();
         public bool IsCapturing=>!Disposed;
         public Task StartAsync(nint hwnd,CancellationToken cancellationToken=default)=>Task.CompletedTask;
         public async Task<CapturedFrame?> GrabFrameAsync(CancellationToken cancellationToken=default)
-        {Calls++;Entered.TrySetResult();if(Hold)await Release.Task;if(Fail)throw new IOException("capture fault");var pixels=new byte[8*8*4];for(int i=0;i<pixels.Length;i+=4){pixels[i+1]=200;pixels[i+3]=255;}return new(pixels,8,8,32);}
+        {Calls++;Entered.TrySetResult();if(Hold){Blocked.TrySetResult();await Release.Task;}if(Fail)throw new IOException("capture fault");var pixels=new byte[8*8*4];for(int i=0;i<pixels.Length;i+=4){pixels[i+1]=200;pixels[i+3]=255;}return new(pixels,8,8,32);}
         public Task StopAsync()=>Task.CompletedTask;
         public ValueTask DisposeAsync(){Disposed=true;return ValueTask.CompletedTask;}
     }
@@ -160,6 +161,7 @@ internal static partial class CheckpointTests
         public required string Root,LogRoot;public required FileCheckpointStore Store;public required Scheduler Scheduler;public required CheckpointCoordinator Coordinator;
         public readonly StateStore StoreState=new();public required CommandBus Bus;
         public readonly PluginAuthorization Authorization=new();public readonly CheckpointNodeRegistry Registry=new();public readonly Validator Validator=new();
+        public readonly RuntimeUpdateCompatibilityRegistry UpdateRules=new();
         public readonly List<Capture> Captures=[];public bool Register=true,CaptureFailure,HoldCapture;
         public readonly List<FakeInput> Inputs=[];
         public readonly WindowValidator Windows=new();
@@ -183,7 +185,7 @@ internal static partial class CheckpointTests
                 ()=>{var c=new Capture{Fail=f.CaptureFailure,Hold=f.HoldCapture};f.Captures.Add(c);return c;},()=>{var i=new FakeInput();f.Inputs.Add(i);return i;},
                 (c,i)=>new LuaRuntime(c,new FakeOcr(),i,f.Log,new FakeCoordinateMapper(),ensureForeground:_=>true,commandBus:f.Bus),NullLogger<Scheduler>.Instance,anomalyLogger??new NoAnomaly(),
                 commandBus:f.Bus,authorization:f.Authorization,inputArbiter:f.Arbiter,checkpoints:checkpointHost?.Invoke(f.Coordinator)??f.Coordinator,
-                checkpointStore:f.Store,checkpointRestores:f.Registry);
+                checkpointStore:f.Store,checkpointRestores:f.Registry,updateCompatibility:f.UpdateRules);
             return f;
         }
         public async Task<TaskExecutionContext> StartAsync()

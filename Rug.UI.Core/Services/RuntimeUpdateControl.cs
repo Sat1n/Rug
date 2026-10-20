@@ -13,12 +13,14 @@ public sealed partial class TaskScheduler
     /// <summary>@shape request: host-only plugin scope; preparation holds the startup lease only while arming.
     /// @source checkpoint: CheckpointCoordinator.cs#class:CheckpointCoordinator</summary>
     private async Task<object?> ControlRuntimeUpdateAsync(AutomationCallContext caller, OperationRequest request,
-        CancellationToken execution, CancellationToken original)
+        CancellationToken execution, CancellationToken original, CheckpointStartBoundary boundary)
     {
         var installation = caller.Authorization.Installation;
         if (request.Operation == AutomationOperation.QueryRuntimeUpdate) return RuntimeUpdates.Query(installation);
         if (request.Operation == AutomationOperation.CancelRuntimeUpdate)
             return RuntimeUpdates.Cancel(installation, request.Parameters.GetProperty("updateId").GetGuid());
+        if (request.Operation == AutomationOperation.SwitchRuntimeUpdate)
+            return await SwitchRuntimeUpdateAsync(caller, request, execution, original, boundary).ConfigureAwait(false);
         var observed = _instances.Values.Where(r => r.PluginId.Equals(caller.PluginId, StringComparison.OrdinalIgnoreCase)).ToArray();
         if (observed.Length is 0 or > RuntimeUpdateCoordinator.MaxInstances || observed.Any(r => r.TaskStatus != AutomationTaskStatus.Running || r.PauseRequested))
             throw new AutomationGateway.GatewayRejectedException(OperationError.UpdateUnavailable);

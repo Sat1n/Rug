@@ -365,6 +365,10 @@ The Hook gap and frozen native artifacts remain; 05B-02 human UI acceptance is u
   only the plan's hold in the original coroutine; user pause/Stop/fault precedence
   remains. Every checkpoint outcome is bound to its invocation's plan/source,
   including failed attempts without receipts. Frozen is not code publication or a new generation.
+* [07B-02 switching](RuntimeSwitch.md) adds explicit host-only Gateway group switching,
+  injected exact-snapshot direct-continuation rules, declaration-only candidates,
+  fresh pre/post-stop scene checks and irreversible source-stop/publication decisions.
+  New on_restore runs have separate origin metadata/state; inherited Pause blocks business.
 * The per-plugin start lease serializes validated publication. The shell and future starts use the applied snapshot, not fresh disk reads. Staged UI construction rolls back on failure and releases old subscriptions only after success. Ready precedes host activation; dispose the watcher before the scheduler. Notifications distinguish pending, unchanged, applied, superseded and failed outcomes.
 
 ## Script-only demo tasks (Task 3.4)

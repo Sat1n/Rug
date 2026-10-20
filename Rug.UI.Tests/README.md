@@ -8,6 +8,13 @@ tags: [ui, tests]
 
 # Rug.UI.Tests
 
+07B-02 uses script harness `--runtime-switch-ui`: fixed embedded v1/v2 sample,
+explicit switch dialog, actual fresh WGC before/after Stop, new-generation AFTER-only,
+inherited Pause and visible red-scene rejection. `CheckpointRestoreUiSmoke.ps1`
+adds Switch/SwitchPause/SwitchReject phases. `--runtime-switch-manual` provides
+isolated user steps; automated UI results are not human acceptance. See
+[switching and commands](../Rug.UI.Core/RuntimeSwitch.md).
+
 07B-01 actual UI verification runs through the script harness `--runtime-update-ui`
 after Debug/x64 app/test builds. `CheckpointRestoreUiSmoke.ps1 -Phase Update`
 uses its fixture's green isolated target and temporary `update_probe`; it confirms

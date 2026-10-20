@@ -8,6 +8,15 @@ tags: [lua, tests, input]
 
 # Lua coroutine bridge tests
 
+07B-02 adds `--runtime-switch-tests` (also in the full suite): actual Lua/real files,
+single/double AFTER-only, host rule/config/permission/node/hash/action checks,
+preparation rollback, post-stop scene failure, real fault preservation, direct
+original-token cancellation barriers, concurrent/deduplicated switches, paused
+continuation, uncooperative capture lifetime, UI staging failures and takeover.
+`--runtime-switch-ui` uses real WinUI/WGC for success, inherited Pause and red-scene
+failure. `--runtime-switch-manual` is the self-contained user fixture with update/
+red/green/done commands. See [contract/manual steps](../../Rug.UI.Core/RuntimeSwitch.md).
+
 07B-01 adds `--runtime-update-tests` to the default full suite: actual Lua
 BEFORE/checkpoint/AFTER with real files and Fake services, history exclusion,
 complete multi-run reservation, timeout rollback, Pause/Stop/revoke/candidate

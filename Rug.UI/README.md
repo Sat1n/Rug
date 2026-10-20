@@ -65,6 +65,12 @@ no automation pipeline and no native interop itself.
 
 ## Dynamic UI renderer (Task 3.2)
 
+* [07B-02 runtime switch](../Rug.UI.Core/RuntimeSwitch.md) adds a host-created explicit
+  confirmation dialog, candidate progress, irreversible-stop warning, new identities,
+  committed-versus-restored states and failure reasons. Pre-stop Cancel stays usable;
+  inherited Pause requires Resume. The same staged UI builder/rollback/subscription
+  lifetime protects the old tree during candidate preparation. No input-policy bypass.
+
 * `Services/UIFactory.cs` maps validated `UISchemaNode` trees to WinUI 3 controls. Settings cards use Windows Community Toolkit `SettingsCard`; navigation uses the native `SelectorBar`. `Controls/TaskSelectorCard` provides selection, ordering, select-all, clear and command dispatch; `Controls/StepFlowView` renders status and optional app-owned thumbnail URIs. `InfoBanner` maps to `InfoBar`.
 * `Views/DynamicUIHost` accepts JSON text or a file plus `ICommandBus`. The host calls `SetActiveInstance(RunIdentity?, displayFallbacks)` for any plugin; the binding survives card rebuilds, and null releases the live instance subscription. Settings controls read/write the selected plugin's `PluginConfig` scope; each `StepFlowView` reads and subscribes to its own schema `stateKey` in the active run's `InstanceState`. Instance changes and card rebuilds reread that scope, with schema steps as defaults. The factory applies exact-scope/key UI notifications on the dispatcher and detaches subscriptions when replaced or unloaded. Command failures surface in the host `InfoBar`.
 * `MainWindow` hosts plugin navigation, `DynamicUIHost` and the active-instance picker. It follows scheduler changes, clears stopped runs and rebinds after hot reload. Schema commands `host.start_windowless`/`host.stop_selected` keep their existing Gateway route. The host's **运行绑定窗口任务** button starts the selected plugin against the trusted DevTools crosshair binding, with explicit consent; schema parameters cannot supply HWNDs. The older `MainPage` remains a legacy page.

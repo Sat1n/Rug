@@ -11,7 +11,9 @@ tags: [plugins, snapshot, validation, hotreload]
 [Pipeline](Services/PluginUpdatePipeline.cs#class:PluginUpdatePipeline) implements
 Prepare -> Validate. The [watcher](Services/HotReloadService.cs#class:HotReloadService)
 debounces and serializes publication; neither stops, restarts or resumes Lua.
-Runtime switching, transactional installation and checkpoint migration are deferred.
+The watcher itself never switches active runs. [07B-02 explicit compatible switching](RuntimeSwitch.md)
+is a separate host-confirmed path; transactional disk installation and generic
+checkpoint migration remain deferred.
 The [07B-01 host preparation](RuntimeUpdates.md) can explicitly reserve all Running
 checkpoint-capable sources and freeze new successful submissions. Saving files
 does not arm this flow; newer candidates cancel old plans without switching code.
@@ -123,8 +125,8 @@ and completed demo state. These are not new human/input-source acceptance result
 
 Snapshots are process-local, not persisted installations. Invalid updates do not
 roll back disk files; restarting the app does not recover an old in-memory snapshot.
-No active-run code switch, automatic migration, checkpoint replay, cross-process
-publication or arbitrary trusted-host callback transaction is claimed.
+The watcher provides no active-run code switch, automatic migration, checkpoint
+replay, cross-process publication or arbitrary trusted-host callback transaction.
 
 ## Recorded verification (2026-10-19)
 

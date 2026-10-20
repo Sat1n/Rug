@@ -223,7 +223,7 @@ public sealed partial class TaskExecutionContext
     {
         lock (_gate)
         {
-            if (_pauseRequested || _updateFrozen || _status is not (AutomationTaskStatus.Starting or AutomationTaskStatus.Running) || Cancellation.IsCancellationRequested) return null;
+            if (SwitchGroup is { IsOpen: false } || _pauseRequested || _updateFrozen || _status is not (AutomationTaskStatus.Starting or AutomationTaskStatus.Running) || Cancellation.IsCancellationRequested) return null;
             if (_segments++ == 0) _segmentsDrained = Signal();
             return new WorkLease(this, segment: true, input: false);
         }
@@ -258,16 +258,16 @@ public sealed partial class TaskExecutionContext
         lock (_gate)
         { ValidateBusinessLocked(); if (_checkpointPending) throw new AutomationGateway.GatewayRejectedException(OperationError.InvalidLifecycleState); }
     }
-    private void ValidateBusinessLocked()
+    private void ValidateBusinessLocked(bool preparation = false)
     {
-        if (_updateFrozen || _status is AutomationTaskStatus.Stopping or AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted or AutomationTaskStatus.Recovering or AutomationTaskStatus.AwaitingHuman)
+        if ((!preparation && SwitchGroup is { IsOpen: false }) || _updateFrozen || _status is AutomationTaskStatus.Stopping or AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted or AutomationTaskStatus.Recovering or AutomationTaskStatus.AwaitingHuman)
             throw new AutomationGateway.GatewayRejectedException(OperationError.InvalidLifecycleState);
     }
-    internal (IDisposable Work, long Sequence) EnterCheckpoint()
+    internal (IDisposable Work, long Sequence) EnterCheckpoint(bool preparation = false)
     {
         lock (_gate)
         {
-            ValidateBusinessLocked(); Cancellation.Token.ThrowIfCancellationRequested();
+            ValidateBusinessLocked(preparation); Cancellation.Token.ThrowIfCancellationRequested();
             if (_checkpointPending) throw new AutomationGateway.GatewayRejectedException(OperationError.InvalidLifecycleState);
             long sequence = checked(_checkpointSequence + 1);
             _checkpointPending = true; _checkpointFinished = Signal();

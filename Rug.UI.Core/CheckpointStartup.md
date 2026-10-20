@@ -18,6 +18,9 @@ and [read-only validator contract](Abstractions/ICheckpointService.cs#interface:
 
 ## Host contracts
 
+[Runtime updates](RuntimeSwitch.md) have a separate trusted cross-version path.
+They do not relax this public restore selection, exact-match or SourceStillActive policy.
+
 `ICheckpointStore.QueryAsync(PluginInstallation, token)` scans the existing fixed
 root, bounded by store limits. It returns detached candidates for that verified
 installation. Paths never come from requests. Complete attributable invalid

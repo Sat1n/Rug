@@ -13,8 +13,11 @@ internal sealed class CheckpointStartBoundary
     private readonly object _gate = new();
     private RunIdentity? _identity;
     private bool _cancelled;
+    private object? _result;
     public RunIdentity? Identity => Volatile.Read(ref _identity);
-    public bool CancelPreparation() { lock (_gate) { if (_identity is not null) return false; _cancelled = true; return true; } }
+    public object? CommittedResult => Volatile.Read(ref _result) ?? Identity;
+    public void CommitResult(object result) { lock (_gate) { if (_cancelled) throw new OperationCanceledException(); Volatile.Write(ref _result, result); } }
+    public bool CancelPreparation() { lock (_gate) { if (_identity is not null || _result is not null) return false; _cancelled = true; return true; } }
     public void Commit(RunIdentity identity)
     { lock (_gate) { if (_cancelled) throw new OperationCanceledException(); Volatile.Write(ref _identity, identity); } }
 }

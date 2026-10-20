@@ -8,4 +8,5 @@ public interface IRuntimeUpdateCoordinator : IAsyncDisposable
 {
     event EventHandler<RuntimeUpdateChangedEventArgs>? Changed;
     RuntimeUpdateSnapshot? Query(PluginInstallation installation);
+    IDisposable RegisterUiHandler(string pluginId, Func<PluginSnapshot, CancellationToken, Task<IPluginUiUpdate>> handler);
 }

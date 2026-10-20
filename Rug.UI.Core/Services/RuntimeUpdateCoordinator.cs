@@ -5,10 +5,10 @@ using Rug.UI.Core.Models;
 
 namespace Rug.UI.Core.Services;
 
-/// <summary>Bounded process-local checkpoint freezes. Never publishes candidates or restarts Lua.
+/// <summary>Bounded process-local checkpoint freezes and explicit compatible group-switch decisions.
 /// @shape plans: at most one per installation, <=8 retained candidates, <=32 runs per plan.
 /// @source candidates: PluginUpdates.cs#class:TaskScheduler</summary>
-public sealed class RuntimeUpdateCoordinator : IRuntimeUpdateCoordinator
+public sealed partial class RuntimeUpdateCoordinator : IRuntimeUpdateCoordinator
 {
     public const int Capacity = 8, MaxInstances = 32;
     private sealed class Plan(Guid id, TaskExecutionContext[] runs, DateTimeOffset deadline, CancellationToken original)
@@ -21,12 +21,14 @@ public sealed class RuntimeUpdateCoordinator : IRuntimeUpdateCoordinator
         public HashSet<Guid> Drained { get; } = [];
         public TaskCompletionSource Ended { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public EventHandler<LifecycleChangedEventArgs>? Handler;
+        public RuntimeSwitchWork? Switch;
     }
     private sealed class Slot(PluginSnapshot effective, PluginSnapshot candidate, RuntimeUpdateSnapshot snapshot)
     {
         public PluginSnapshot Effective = effective, Candidate = candidate;
         public RuntimeUpdateSnapshot Snapshot = snapshot;
         public Plan? Plan;
+        public RuntimeSwitchWork? LastSwitch;
         public DateTimeOffset Expires = DateTimeOffset.UtcNow.AddMinutes(10);
     }
     private readonly object _gate = new();
@@ -59,6 +61,7 @@ public sealed class RuntimeUpdateCoordinator : IRuntimeUpdateCoordinator
             {
                 if (old.Candidate.ContentVersion == candidate.ContentVersion && old.Effective.ContentVersion == effective.ContentVersion) return;
                 EndLocked(old, RuntimeUpdateStage.Cancelled, OperationError.UpdateSuperseded, "Candidate replaced");
+                if (old.Plan?.Switch is { Stopping: true }) return; // Worker owns irreversible cleanup; never replace its reservation.
             }
             else if (_slots.Count >= Capacity) throw new AutomationGateway.GatewayRejectedException(OperationError.CapacityExceeded);
             snapshot = new(installation, null, effective.ContentVersion, candidate.ContentVersion, RuntimeUpdateStage.Pending,
@@ -70,9 +73,10 @@ public sealed class RuntimeUpdateCoordinator : IRuntimeUpdateCoordinator
     internal void Applied(PluginSnapshot snapshot)
     {
         RuntimeUpdateSnapshot? changed = null;
-        lock (_gate) if (_slots.Remove(PluginInstallation.From(snapshot.Manifest), out var slot))
+        lock (_gate) if (_slots.TryGetValue(PluginInstallation.From(snapshot.Manifest), out var slot))
         {
             EndLocked(slot, RuntimeUpdateStage.Cancelled, OperationError.UpdateSuperseded, "Effective snapshot changed");
+            if (slot.Plan?.Switch is not { Stopping: true }) _slots.Remove(PluginInstallation.From(snapshot.Manifest));
             changed = slot.Snapshot;
         }
         if (changed is not null) Notify(changed);
@@ -143,6 +147,7 @@ public sealed class RuntimeUpdateCoordinator : IRuntimeUpdateCoordinator
         lock (_gate)
         {
             if (!_slots.TryGetValue(installation, out var slot) || slot.Snapshot.UpdateId != id) throw Reject(OperationError.UpdateSuperseded);
+            if (slot.Plan?.Switch is { Stopping: true } || slot.LastSwitch is { Committed: true }) throw Reject(OperationError.UpdateIrreversible);
             EndLocked(slot, RuntimeUpdateStage.Cancelled, OperationError.None, "Preparation cancelled; original coroutines released");
             snapshot = slot.Snapshot;
         }
@@ -158,6 +163,16 @@ public sealed class RuntimeUpdateCoordinator : IRuntimeUpdateCoordinator
     private void EndLocked(Slot slot, RuntimeUpdateStage stage, OperationError error, string reason)
     {
         if (slot.Plan is not { } plan) return;
+        if (plan.Switch is { } switching)
+        {
+            if (switching.Committed) return; // Request cancellation cannot undo a published group.
+            switching.Aborted.TrySetResult();
+            if (switching.Stopping)
+            {
+                slot.Snapshot = View(slot, RuntimeUpdateStage.NeedsHuman, error, reason + "; source stop is irreversible");
+                return; // No old hold is released until all sources have actually stopped.
+            }
+        }
         slot.Snapshot = View(slot, stage, error, reason);
         slot.Plan = null; // Decision precedes wake-up; no cancellation callback controls admission.
         slot.Expires = DateTimeOffset.UtcNow.AddMinutes(10);
@@ -232,8 +247,8 @@ public sealed class RuntimeUpdateCoordinator : IRuntimeUpdateCoordinator
         var plan = slot.Plan!;
         return new(slot.Snapshot.Installation, plan.Id, slot.Effective.ContentVersion, slot.Candidate.ContentVersion, stage, error,
             reason, ++_revision, plan.Deadline, Array.AsReadOnly(plan.Runs.Select(r => new RuntimeUpdateProgress(r.Identity,
-                stage is RuntimeUpdateStage.WaitingCheckpoint or RuntimeUpdateStage.Frozen && plan.Drained.Contains(r.InstanceId),
-                plan.Receipts.GetValueOrDefault(r.InstanceId))).ToArray()));
+                stage is RuntimeUpdateStage.WaitingCheckpoint or RuntimeUpdateStage.Frozen or RuntimeUpdateStage.PreparingSwitch && plan.Drained.Contains(r.InstanceId),
+                plan.Receipts.GetValueOrDefault(r.InstanceId), plan.Switch?.Replacements.GetValueOrDefault(r.InstanceId))).ToArray()));
     }
     private static AutomationGateway.GatewayRejectedException Reject(OperationError error) => new(error);
     private void Notify(RuntimeUpdateSnapshot snapshot)
@@ -248,7 +263,9 @@ public sealed class RuntimeUpdateCoordinator : IRuntimeUpdateCoordinator
         {
             if (_disposed) return; _disposed = true;
             foreach (var slot in _slots.Values) EndLocked(slot, RuntimeUpdateStage.Cancelled, OperationError.Cancelled, "Host closing");
-            _slots.Clear(); Changed = null; monitors = _monitors.ToArray();
+            // Irreversible switch workers retain their slots until actual source/candidate cleanup finishes.
+            foreach (var key in _slots.Where(p => p.Value.Plan?.Switch is not { Stopping: true }).Select(p => p.Key).ToArray()) _slots.Remove(key);
+            _uiHandlers.Clear(); Changed = null; monitors = _monitors.ToArray();
         }
         _shutdown.Cancel(); await Task.WhenAll(monitors).ConfigureAwait(false); _shutdown.Dispose();
     }

@@ -1,4 +1,4 @@
-param([int]$AppProcessId, [long]$TargetHwnd, [ValidateSet("Save","Restore","Update")][string]$Phase, [string]$PluginDirectory)
+param([int]$AppProcessId, [long]$TargetHwnd, [ValidateSet("Save","Restore","Update","Switch","SwitchPause","SwitchReject")][string]$Phase, [string]$PluginDirectory, [string]$TargetTemplate)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName System.Windows.Forms
@@ -49,7 +49,7 @@ function Select-Item($name) { (Await $name).GetCurrentPattern([System.Windows.Au
 try {
  $app=Get-Process -Id $AppProcessId
  $script:window=[System.Windows.Automation.AutomationElement]::FromHandle($app.MainWindowHandle)
- $pluginName=if($Phase -eq 'Update'){'Update freeze probe'}else{'Checkpoint controlled panel'}
+ $pluginName=if($Phase -eq 'Update' -or $Phase.StartsWith('Switch')){'Update freeze probe'}else{'Checkpoint controlled panel'}
  $null=Await ('监控中 · '+$pluginName) # Let initial asynchronous plugin load finish before changing navigation.
  Select-Item '开发工具'
  $null=[RecoveryUiNative]::SetThreadDpiAwarenessContext([IntPtr](-4))
@@ -99,7 +99,7 @@ try {
   }
   throw "Checkpoint dropdown missing: $pattern"
  }
- if($Phase -eq 'Update') {
+ if($Phase -eq 'Update' -or $Phase.StartsWith('Switch')) {
   Invoke 'Start bound task'
   Invoke 'Allow permissions'
   $null=Await '运行中'
@@ -111,6 +111,43 @@ try {
    return $picker.GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern).Current.GetSelection()[0].Current.Name
   }
   $identity=CurrentRun
+  if($Phase.StartsWith('Switch')) {
+   # Fixed shipped source/target bytes; no production auto-approval or arbitrary compatibility mapping.
+   Copy-Item -LiteralPath (Join-Path $TargetTemplate 'main.lua') -Destination (Join-Path $PluginDirectory 'main.lua')
+   Copy-Item -LiteralPath (Join-Path $TargetTemplate 'manifest.json') -Destination (Join-Path $PluginDirectory 'manifest.json')
+   $null=AwaitText '更新待应用'
+   Invoke 'Prepare runtime update'
+   $null=AwaitText '^已冻结，尚未切换 · 1/1'
+   if($Phase -eq 'SwitchReject') {
+    $null=[RecoveryUiNative]::SendMessageW([IntPtr]$TargetHwnd,0x8001,[UIntPtr]0,[IntPtr]::Zero)
+   }
+   if($Phase -eq 'SwitchPause') {
+    Invoke 'Pause instance'
+    $null=Await '已暂停'
+   }
+   Invoke 'Switch runtime update'
+   Invoke '确认切换'
+   if($Phase -eq 'SwitchReject') {
+    $null=AwaitText '^更新准备失败.*SceneRejected'
+    $null=[RecoveryUiNative]::SendMessageW([IntPtr]$TargetHwnd,0x8001,[UIntPtr]1,[IntPtr]::Zero)
+    Invoke 'Stop instance'
+    $null=Await '无运行实例'
+    Write-Output 'runtime-switch-reject-ui-ok fresh red scene rejected; source not stopped by update; no replacement business'
+    return
+   }
+   if($Phase -eq 'SwitchPause') {
+    $null=AwaitText '^切换已提交，等待恢复钩子完成'
+    $null=Await '已暂停'
+    Invoke 'Resume instance'
+   }
+   $completed=AwaitText '^新实例恢复完成'
+   if($completed -notmatch '→[a-f0-9]{8} g[2-9]'){throw 'Missing new identity/generation in switch summary'}
+   $null=Await '运行中'
+   Invoke 'Stop instance'
+   $null=Await '无运行实例'
+   Write-Output "runtime-switch-ui-ok $Phase explicit confirmation/new generation/fresh WGC/AFTER-only; $completed"
+   return
+  }
   # Only captured runtime code changes: the currently loaded trusted Lua remains unchanged.
   [System.IO.File]::AppendAllText((Join-Path $PluginDirectory 'main.lua'),"`n-- pending runtime candidate")
   $null=AwaitText '更新待应用'

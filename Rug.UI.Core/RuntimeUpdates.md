@@ -13,6 +13,8 @@ retains one process-local plan per installation. This unit only freezes/releases
 the original coroutine: it never publishes a runtime candidate, stops a run as an
 update action, migrates state, starts a generation or replays business input.
 07A UI-only updates and invalid-candidate rollback remain in effect.
+[07B-02 explicit compatible switching](RuntimeSwitch.md) extends a fully frozen
+plan with replacement preparation and an irreversible source-stop/group-commit path.
 
 ## Host contract
 
@@ -134,7 +136,8 @@ Prepare -> Frozen -> Cancel. The Lua log must advance to AFTER in the same run.
 Prepare again and Stop: the held AFTER must not execute. The sample is pinned to
 embedded source; modified code cannot acquire trusted-node support on a new run.
 
-Actual runtime switching and version mapping are deferred to 07B-02. Checkpoints
+Actual runtime switching now uses the separate [07B-02 contract](RuntimeSwitch.md);
+the freeze/cancel-only path described above remains unchanged. Checkpoints
 do not atomically commit OS actions and disk records. Existing independent Hook
 observation gaps and human/input-source acceptance limits are unchanged.
 

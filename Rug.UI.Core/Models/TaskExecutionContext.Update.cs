@@ -10,6 +10,46 @@ public sealed partial class TaskExecutionContext
     private long _updateAfterSequence;
     private TaskCompletionSource _updateReleased = Completed();
     internal Action<CheckpointUpdateAttempt, CheckpointRecord>? CheckpointPublished { get; set; }
+    public RuntimeUpdateOrigin? RuntimeUpdateOrigin { get; internal set; }
+    internal InputTarget? VerifiedTarget { get; set; }
+    internal RuntimeSwitchGroup? SwitchGroup { get; set; }
+    internal TaskCompletionSource<bool> FirstHookCompleted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    internal bool CloseForUpdate()
+    {
+        bool paused;
+        lock (_gate)
+        {
+            paused = _pauseRequested;
+            if (!IsTerminalLocked())
+            {
+                _status = AutomationTaskStatus.Stopping; _revision++;
+                _stopping.TrySetResult(); _preservedForHuman = false;
+                _pauseRequested = _resumeRequested = false;
+                _resume.TrySetResult(); _pauseSignal.TrySetResult(); PulseActivation();
+            }
+        }
+        Notify(); Cancel(); return paused;
+    }
+    internal static void CommitSwitchCandidates(TaskExecutionContext[] candidates, Action publish)
+    {
+        // Fixed identity order; no IO/service/UI callbacks under the transition locks.
+        var ordered = candidates.OrderBy(c => c.InstanceId).ToArray();
+        int entered = 0;
+        try
+        {
+            foreach (var candidate in ordered) { Monitor.Enter(candidate._gate); entered++; }
+            foreach (var candidate in ordered)
+            {
+                if (candidate._status != AutomationTaskStatus.Starting || candidate.LastError is not null) throw new HostStopWakeCancellation();
+                candidate.LifetimeToken.ThrowIfCancellationRequested();
+                candidate.AuthorizationLease!.Token.ThrowIfCancellationRequested();
+                candidate.InputEpochToken.ThrowIfCancellationRequested();
+                candidate.InputSession?.Token.ThrowIfCancellationRequested();
+            }
+            publish();
+        }
+        finally { for (int i = entered - 1; i >= 0; i--) Monitor.Exit(ordered[i]._gate); }
+    }
     internal CheckpointUpdateAttempt CaptureCheckpointAttempt()
     { lock (_gate) return new(Guid.NewGuid(), Identity, _updateId); }
     internal bool ArmUpdate(Guid id)

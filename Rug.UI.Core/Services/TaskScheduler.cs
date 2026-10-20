@@ -47,7 +47,8 @@ public sealed partial class TaskScheduler : ITaskScheduler
         IAutomationPermissionChecker? permissionChecker = null, IPluginAuthorization? authorization = null,
         IInputArbiter? inputArbiter = null, IInputInterventionCoordinator? intervention = null,
         IRecoveryCoordinator? recovery = null, ICheckpointCoordinator? checkpoints = null,
-        ICheckpointStore? checkpointStore = null, ICheckpointRestoreRegistry? checkpointRestores = null)
+        ICheckpointStore? checkpointStore = null, ICheckpointRestoreRegistry? checkpointRestores = null,
+        IRuntimeUpdateCompatibilityRegistry? updateCompatibility = null)
     {
         _plugins = plugins ?? throw new ArgumentNullException(nameof(plugins));
         _anomalies = anomalies ?? throw new ArgumentNullException(nameof(anomalies));
@@ -76,6 +77,7 @@ public sealed partial class TaskScheduler : ITaskScheduler
         _recovery = recovery ?? new RecoveryCoordinator(anomalies, Gateway.Authorization, new RecoveryValidatorRegistry());
         _checkpoints = checkpoints;
         _checkpointStore = checkpointStore; _checkpointRestores = checkpointRestores;
+        _updateCompatibility = updateCompatibility ?? new RuntimeUpdateCompatibilityRegistry();
         Gateway.RestoreCheckpoint = RestoreCheckpointAsync;
         Gateway.RuntimeUpdateControl = ControlRuntimeUpdateAsync;
     }
@@ -161,11 +163,12 @@ public sealed partial class TaskScheduler : ITaskScheduler
     private async Task<Guid> StartCoreAsync(string pluginId, nint hwnd,
         IReadOnlyDictionary<string, object?> launchInputs, Action<RunIdentity>? onReady,
         CancellationToken cancellationToken, CheckpointStartPlan? restore = null, InputTarget? restoreTarget = null,
-        CancellationToken original = default, DateTimeOffset deadline = default, CheckpointStartBoundary? restoreBoundary = null)
+        CancellationToken original = default, DateTimeOffset deadline = default, CheckpointStartBoundary? restoreBoundary = null,
+        RuntimeSwitchCandidate? switchCandidate = null)
     {
         var cancellation = CancellationTokenSource.CreateLinkedTokenSource(restore is null ? cancellationToken : _shutdown.Token, _shutdown.Token);
         using var restoreCancellation = restore is null ? default : cancellationToken.Register(() =>
-        { if (restoreBoundary!.CancelPreparation()) cancellation.Cancel(); });
+        { if (switchCandidate is null ? restoreBoundary!.CancelPreparation() : !switchCandidate.Group.IsOpen) cancellation.Cancel(); });
         ICaptureService? capture = null;
         IInputService? input = null;
         IScriptRuntime? runtime = null;
@@ -181,7 +184,7 @@ public sealed partial class TaskScheduler : ITaskScheduler
         try
         {
             PluginManifest source = restore?.Manifest ?? await GetPluginAsync(pluginId, cancellation.Token).ConfigureAwait(false);
-            if (RuntimeUpdates.BlocksStart(pluginId)) throw new AutomationGateway.GatewayRejectedException(OperationError.UpdatePreparing);
+            if (switchCandidate is null && RuntimeUpdates.BlocksStart(pluginId)) throw new AutomationGateway.GatewayRejectedException(OperationError.UpdatePreparing);
             var ticket = Gateway.Authorization.Bind(source);
             authorizationLease = Gateway.Authorization.Admit(ticket, source.Permissions);
             authorizationCancellation = authorizationLease.Token.Register(() => cancellation.Cancel());
@@ -242,6 +245,9 @@ public sealed partial class TaskScheduler : ITaskScheduler
                 InputCancellation = inputCancellation, InputEpochToken = inputEpoch,
                 DeclaresInput = declaresInput, InputSession = inputSession, RecoveryAuthorization = ticket
             };
+            context.VerifiedTarget = target;
+            context.SwitchGroup = switchCandidate?.Group;
+            context.RuntimeUpdateOrigin = switchCandidate?.Origin;
             if (restore is not null) context.CheckpointOrigin = new(restore.Record.SourceInstanceId, restore.Record.CheckpointId, restore.Record.SubmissionSequence, restore.Record.NodeId);
             context.ValidateResume = () =>
             {
@@ -330,6 +336,20 @@ public sealed partial class TaskScheduler : ITaskScheduler
             {
                 runtime.ConfigureRecoveryHandler((reason, detail) => _recovery.RequestAsync(context, reason, detail));
                 await runtime.PrepareRestoreAsync(RestoreJson(restore.Record)).ConfigureAwait(false);
+                if (switchCandidate is not null)
+                {
+                    // Declaration only. No on_restore, input session/lease or runner business before group commit.
+                    context.Runner = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await switchCandidate.Group.Opened.Task.WaitAsync(context.LifetimeToken).ConfigureAwait(false);
+                            await RunAsync(context).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException) { context.Cancel(); await CleanupAsync(context).ConfigureAwait(false); }
+                    });
+                    return id;
+                }
                 await ValidateCheckpointStartAsync(context, restore, cancellation.Token, original, deadline).ConfigureAwait(false);
                 if (declaresInput && _intervention is not null)
                 {
@@ -451,7 +471,8 @@ public sealed partial class TaskScheduler : ITaskScheduler
         CancellationToken token = context.Cancellation.Token;
         try
         {
-            await DriveHookAsync(context, token).ConfigureAwait(false); // on_init
+            await DriveHookAsync(context, token).ConfigureAwait(false); // on_init or the prepared on_restore
+            context.FirstHookCompleted.TrySetResult(true);
             context.SetStatus(AutomationTaskStatus.Running);
             while (true)
             {
@@ -471,6 +492,7 @@ public sealed partial class TaskScheduler : ITaskScheduler
         }
         finally
         {
+            context.FirstHookCompleted.TrySetResult(false);
             context.Cancel();
             await CleanupAsync(context).ConfigureAwait(false);
         }

@@ -50,8 +50,8 @@ public sealed class AutomationGateway : IAutomationGateway
     private readonly Func<Guid, bool>? _pause, _resume;
     private readonly Func<Guid, Guid, DateTimeOffset, CancellationToken, Task<RecoveryResult>>? _verifyRecovery;
     internal Func<AutomationCallContext, Guid, DateTimeOffset, CancellationToken, CancellationToken, CheckpointStartBoundary, Task<RunIdentity>>? RestoreCheckpoint { get; set; }
-    internal Func<AutomationCallContext, OperationRequest, CancellationToken, CancellationToken, Task<object?>>? RuntimeUpdateControl { get; set; }
-    private static bool UpdateControl(AutomationOperation op) => op is AutomationOperation.PrepareRuntimeUpdate or AutomationOperation.QueryRuntimeUpdate or AutomationOperation.CancelRuntimeUpdate;
+    internal Func<AutomationCallContext, OperationRequest, CancellationToken, CancellationToken, CheckpointStartBoundary, Task<object?>>? RuntimeUpdateControl { get; set; }
+    private static bool UpdateControl(AutomationOperation op) => op is AutomationOperation.PrepareRuntimeUpdate or AutomationOperation.QueryRuntimeUpdate or AutomationOperation.CancelRuntimeUpdate or AutomationOperation.SwitchRuntimeUpdate;
     private int _activeWork;
     private readonly Func<Task>? _waitForDispatch;
     public const int Capacity = 4096;
@@ -135,6 +135,8 @@ public sealed class AutomationGateway : IAutomationGateway
     private static bool SamePlugin(string first, string second) => string.Equals(first, second, StringComparison.OrdinalIgnoreCase);
     private IEnumerable<string> Required(AutomationCallContext caller, OperationRequest request)
     {
+        if (request.Operation == AutomationOperation.SwitchRuntimeUpdate)
+            return Authorization.Query(caller.Authorization.Installation).Requested.Concat([Permission.Checkpoint, Permission.Capture]).Distinct(StringComparer.Ordinal);
         if (request.Operation == AutomationOperation.PrepareRuntimeUpdate)
             return Authorization.Query(caller.Authorization.Installation).Requested.Concat([Permission.Checkpoint]).Distinct(StringComparer.Ordinal);
         if (request.Operation == AutomationOperation.RestoreCheckpoint)
@@ -324,7 +326,7 @@ public sealed class AutomationGateway : IAutomationGateway
                         dispatchToken.Token.ThrowIfCancellationRequested();
                         if (business) run?.Lifecycle?.ValidateBusiness();
                         bool inputOperation = request.Operation is AutomationOperation.Click or AutomationOperation.PressKey;
-                        if (!inputOperation && request.Operation != AutomationOperation.RestoreCheckpoint) Volatile.Write(ref started, 1);
+                        if (!inputOperation && request.Operation is not (AutomationOperation.RestoreCheckpoint or AutomationOperation.SwitchRuntimeUpdate)) Volatile.Write(ref started, 1);
                         var previousBoundary = InputExecutionBoundary.Started.Value;
                         var previousCaller = InputExecutionBoundary.Caller.Value;
                         InputExecutionBoundary.Started.Value = () => Volatile.Write(ref started, 1);
@@ -332,7 +334,7 @@ public sealed class AutomationGateway : IAutomationGateway
                         object? value;
                         try { value = await DispatchAsync(caller, request, run, dispatchToken.Token, callerToken, restoreBoundary).ConfigureAwait(false); }
                         finally { InputExecutionBoundary.Started.Value = previousBoundary; InputExecutionBoundary.Caller.Value = previousCaller; }
-                        if (restoreBoundary.Identity is null) dispatchToken.Token.ThrowIfCancellationRequested();
+                        if (restoreBoundary.CommittedResult is null) dispatchToken.Token.ThrowIfCancellationRequested();
                         return value;
                     }
                 });
@@ -349,7 +351,7 @@ public sealed class AutomationGateway : IAutomationGateway
                 lock (_gate) { entry.WorkInFlight = false; _activeWork--; }
             }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, System.Threading.Tasks.TaskScheduler.Default);
             object? value = await work.WaitAsync(linked.Token).ConfigureAwait(false);
-            if (restoreBoundary.Identity is null)
+            if (restoreBoundary.CommittedResult is null)
             {
                 if (request.Deadline <= _clock.GetUtcNow()) deadline.Cancel();
                 linked.Token.ThrowIfCancellationRequested();
@@ -362,7 +364,7 @@ public sealed class AutomationGateway : IAutomationGateway
                 (request.Operation == AutomationOperation.Stop || !(run?.Token.IsCancellationRequested ?? false));
             result = new(timedOut ? OperationStatus.TimedOut : OperationStatus.Cancelled,
                 timedOut ? OperationError.DeadlineExceeded : OperationError.Cancelled, OutcomeUncertain: Volatile.Read(ref started) != 0);
-            if (restoreBoundary.Identity is { } committed) result = new(OperationStatus.Success, Value: committed);
+            if (restoreBoundary.CommittedResult is { } committed) result = new(OperationStatus.Success, Value: committed);
         }
         catch (CheckpointStartTimeoutException) { result = new(OperationStatus.TimedOut, OperationError.DeadlineExceeded); }
         catch (GatewayRejectedException error) { result = new(OperationStatus.Rejected, error.Error,
@@ -398,7 +400,7 @@ public sealed class AutomationGateway : IAutomationGateway
     private async Task<object?> DispatchAsync(AutomationCallContext caller, OperationRequest request, Run? run, CancellationToken token,
         CancellationToken original, CheckpointStartBoundary restoreBoundary)
     {
-        if (UpdateControl(request.Operation)) return await RuntimeUpdateControl!(caller, request, token, original).ConfigureAwait(false);
+        if (UpdateControl(request.Operation)) return await RuntimeUpdateControl!(caller, request, token, original, restoreBoundary).ConfigureAwait(false);
         switch (request.Operation)
         {
             case AutomationOperation.RestoreCheckpoint:

@@ -37,6 +37,9 @@ public sealed partial class DynamicUIHost : Page
         UISchemaNode schema = _parser.Parse(json);
         Render(schema, bus ?? App.GetService<ICommandBus>());
     }
+    public void ShowRuntimeSwitchStatus(bool completed, string message) => ShowNotice(
+        completed ? InfoBarSeverity.Success : InfoBarSeverity.Informational,
+        completed ? "运行更新恢复完成" : "运行更新已提交", message);
 
     public async Task LoadFileAsync(string path, ICommandBus? bus = null,
         CancellationToken cancellationToken = default, string? pluginId = null)

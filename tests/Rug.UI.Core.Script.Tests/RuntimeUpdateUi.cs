@@ -3,9 +3,9 @@ using System.Diagnostics;
 using Rug.UI.Core.Native;
 
 /// <summary>Real WinUI + WGC, no synthetic human acceptance or automatic permission grant.</summary>
-internal static class RuntimeUpdateUi
+internal static partial class RuntimeUpdateUi
 {
-    public static async Task RunAsync()
+    public static async Task RunAsync(string phase = "Update")
     {
         DirectoryInfo? repo = new(AppContext.BaseDirectory);
         while(repo is not null && !File.Exists(Path.Combine(repo.FullName,"Rug.UI","Rug.UI.csproj"))) repo=repo.Parent;
@@ -24,7 +24,7 @@ internal static class RuntimeUpdateUi
         async Task Forward(StreamReader reader)
         {while(await reader.ReadLineAsync() is {} line) {
             diagnostics.Enqueue(line); while(diagnostics.Count>80) diagnostics.TryDequeue(out _);
-            if(line.Contains("[update-probe]") || line.Contains("faulted")) { logs.Enqueue(line); Console.WriteLine(line[..Math.Min(1000,line.Length)]); }
+            if(line.Contains("[update-probe]") || line.Contains("[update-v2]") || line.Contains("faulted")) { logs.Enqueue(line); Console.WriteLine(line[..Math.Min(1000,line.Length)]); }
         }}
         var output=Forward(app.StandardOutput);var errors=Forward(app.StandardError);
         try
@@ -37,7 +37,8 @@ internal static class RuntimeUpdateUi
                 await Task.Delay(25, ready.Token);
             }
             var ps=new ProcessStartInfo("pwsh"){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};
-            foreach(var arg in new[]{"-NoProfile","-File",Path.Combine(repo.FullName,"Rug.UI.Tests","CheckpointRestoreUiSmoke.ps1"),"-AppProcessId",app.Id.ToString(),"-TargetHwnd",hwnd.ToString(),"-Phase","Update","-PluginDirectory",plugin}) ps.ArgumentList.Add(arg);
+            foreach(var arg in new[]{"-NoProfile","-File",Path.Combine(repo.FullName,"Rug.UI.Tests","CheckpointRestoreUiSmoke.ps1"),"-AppProcessId",app.Id.ToString(),"-TargetHwnd",hwnd.ToString(),"-Phase",phase,"-PluginDirectory",plugin}) ps.ArgumentList.Add(arg);
+            if(phase.StartsWith("Switch")) {ps.ArgumentList.Add("-TargetTemplate");ps.ArgumentList.Add(Path.Combine(repo.FullName,"samples","runtime-update-v2"));}
             using var probe=Process.Start(ps)!;var stdout=probe.StandardOutput.ReadToEndAsync();var stderr=probe.StandardError.ReadToEndAsync();
             try {await probe.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(60));}
             catch {if(!probe.HasExited)probe.Kill(true);throw;}
@@ -57,6 +58,20 @@ internal static class RuntimeUpdateUi
             Directory.Delete(root,true);
         }
         int Count(string token)=>logs.Count(s=>s.Contains(token));
+        if(phase.StartsWith("Switch"))
+        {
+            if(phase=="SwitchReject")
+            {
+                if(Count("[update-probe] INIT")!=1 || Count("[update-probe] STOP")!=1 || Count("[update-v2] AFTER")!=0 || logs.Any(s=>s.Contains("faulted")))
+                    throw new InvalidOperationException("Rejected switch ran new business or faulted source: "+string.Join("\n",logs));
+                Console.WriteLine("Runtime switch actual WinUI/WGC rejection PASS: red scene, visible SceneRejected, no target business"); return;
+            }
+            if(Count("[update-probe] INIT")!=1 || Count("[update-probe] STOP")!=1 ||
+                Count("[update-v2] AFTER")!=1 || Count("[update-probe] BEFORE")!=Count("[update-probe] AFTER")+1 || logs.Any(s=>s.Contains("faulted")))
+                throw new InvalidOperationException("Unexpected switch Lua sequence: "+string.Join("\n",logs));
+            Console.WriteLine("Runtime switch actual WinUI/WGC PASS: host confirmation, fresh pre/post-stop validation, new generation AFTER-only, one source INIT/STOP; phase="+phase);
+            return;
+        }
         if(Count("[update-probe] INIT")!=1 || Count("[update-probe] STOP")!=1 ||
             Count("[update-probe] BEFORE")!=Count("[update-probe] AFTER")+1 || logs.Any(s=>s.Contains("faulted")))
             throw new InvalidOperationException("Unexpected real Lua sequence: "+string.Join("\n",logs));

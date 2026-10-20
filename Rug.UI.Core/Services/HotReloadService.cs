@@ -75,7 +75,8 @@ public sealed class HotReloadService : IHotReloadService
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (_handlerCount >= MaxHandlers) throw new InvalidOperationException("UI update handler capacity exceeded.");
             if (!_handlers.TryGetValue(pluginId, out var handlers)) _handlers[pluginId] = handlers = new();
-            long id = ++_nextHandler; handlers.Add(id, prepareUiAsync); _handlerCount++; return new Registration(this, pluginId, id);
+            var switching = _scheduler.RuntimeUpdates?.RegisterUiHandler(pluginId, prepareUiAsync);
+            long id = ++_nextHandler; handlers.Add(id, prepareUiAsync); _handlerCount++; return new Registration(this, pluginId, id, switching);
         }
     }
     private void QueueFile(string path)
@@ -191,12 +192,13 @@ public sealed class HotReloadService : IHotReloadService
         lock (_gate) { if (_disposed) return; _disposed = true; _watcher?.Dispose(); _watcher = null; worker = _worker; _pending.Clear(); _latest.Clear(); _knownIds.Clear(); _entryFiles.Clear(); _handlers.Clear(); _handlerCount = 0; }
         _shutdown.Cancel(); _ready.TrySetCanceled(); if (worker is not null) await worker.ConfigureAwait(false); _shutdown.Dispose();
     }
-    private sealed class Registration(HotReloadService owner, string pluginId, long id) : IDisposable
+    private sealed class Registration(HotReloadService owner, string pluginId, long id, IDisposable? switching) : IDisposable
     {
         private int _disposed;
         public void Dispose()
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            switching?.Dispose();
             lock (owner._gate) if (owner._handlers.TryGetValue(pluginId, out var handlers))
             { if (handlers.Remove(id)) owner._handlerCount--; if (handlers.Count == 0) owner._handlers.Remove(pluginId); }
         }

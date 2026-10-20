@@ -108,6 +108,13 @@ public partial class App : Application
             });
             services.AddSingleton<ICheckpointCoordinator, CheckpointCoordinator>();
             services.AddSingleton<ICheckpointRestoreRegistry>(provider => (ICheckpointRestoreRegistry)provider.GetRequiredService<ICheckpointNodeRegistry>());
+            services.AddSingleton<IRuntimeUpdateCompatibilityRegistry>(_ =>
+            {
+                var registry = new RuntimeUpdateCompatibilityRegistry();
+                // Only the embedded exact source/target pair has a direct-continuation rule. Never trust mutable installed hashes.
+                RuntimeUpdateSamples.RegisterSwitchAsync(registry, Path.Combine(PluginsRoot,"update_probe")).GetAwaiter().GetResult();
+                return registry;
+            });
             services.AddSingleton<ICommandBus>(provider =>
             {
                 var dispatcher = MainWindow.DispatcherQueue;
@@ -135,7 +142,8 @@ public partial class App : Application
                 recovery: provider.GetRequiredService<IRecoveryCoordinator>(),
                 checkpoints: provider.GetRequiredService<ICheckpointCoordinator>(),
                 checkpointStore: provider.GetRequiredService<ICheckpointStore>(),
-                checkpointRestores: provider.GetRequiredService<ICheckpointRestoreRegistry>()));
+                checkpointRestores: provider.GetRequiredService<ICheckpointRestoreRegistry>(),
+                updateCompatibility: provider.GetRequiredService<IRuntimeUpdateCompatibilityRegistry>()));
             services.AddSingleton<IAutomationGateway>(provider => provider.GetRequiredService<ITaskScheduler>().Gateway);
             services.AddSingleton<IHotReloadService>(provider => new HotReloadService(
                 PluginsRoot, provider.GetRequiredService<ITaskScheduler>(),

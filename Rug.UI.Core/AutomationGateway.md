@@ -17,12 +17,18 @@ gateway with a local run registration. No C-ABI changes are involved.
 
 ## Request and caller contract
 
+Host-only [runtime update switching](RuntimeSwitch.md) uses
+`SwitchRuntimeUpdate {updateId,candidateVersion,revision}` alongside prepare/query/
+cancel. It shares identity/grants/parameter checks, bounded dedup and operation
+records. A retained group-commit boundary preserves committed results after
+request cancellation; query separately reports restore completion or group failure.
+
 `OperationRequest` contains an operation enum, detached JSON object parameters,
 nonempty operation GUID, correlation string (1–128 characters), structural target
 and absolute UTC deadline. Parameters are capped at 64 KiB. Targets contain
 plugin ID, instance ID, generation and nullable binding ID; they contain no HWND.
 Start uses only a plugin target, and returns the scheduler-created `RunIdentity`.
-All other operations require the exact live run and binding, including a null
+Except for trusted plugin-scoped checkpoint/update controls, other operations require the exact live run and binding, including a null
 binding for windowless runs. Unknown/stopped, wrong-plugin, stale-generation and
 wrong-binding requests fail before service dispatch.
 

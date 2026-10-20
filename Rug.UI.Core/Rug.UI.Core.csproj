@@ -20,5 +20,9 @@
   <ItemGroup>
     <EmbeddedResource Include="..\plugins\checkpoint_probe\main.lua" LogicalName="Rug.CheckpointProbe.lua" />
     <EmbeddedResource Include="..\plugins\update_probe\main.lua" LogicalName="Rug.UpdateProbe.lua" />
+    <EmbeddedResource Include="..\plugins\update_probe\manifest.json" LogicalName="Rug.UpdateProbe.manifest" />
+    <EmbeddedResource Include="..\plugins\update_probe\ui.json" LogicalName="Rug.UpdateProbe.ui" />
+    <EmbeddedResource Include="..\samples\runtime-update-v2\main.lua" LogicalName="Rug.UpdateTarget.lua" />
+    <EmbeddedResource Include="..\samples\runtime-update-v2\manifest.json" LogicalName="Rug.UpdateTarget.manifest" />
   </ItemGroup>
 </Project>
