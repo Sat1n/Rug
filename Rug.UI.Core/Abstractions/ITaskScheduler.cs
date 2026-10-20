@@ -6,6 +6,8 @@ namespace Rug.UI.Core.Abstractions;
 
 public interface ITaskScheduler : IAsyncDisposable
 {
+    IRuntimeUpdateCoordinator? RuntimeUpdates => null;
+    Task<AutomationCallContext> CreateRuntimeUpdateContextAsync(string pluginId, CancellationToken token = default) => throw new NotSupportedException();
     Task<IReadOnlyList<PluginSnapshot>> GetPluginSnapshotsAsync(CancellationToken token = default) => throw new NotSupportedException();
     Task<PluginUpdateStatus> ClassifyPluginUpdateAsync(PluginSnapshot snapshot, CancellationToken token = default) => throw new NotSupportedException();
     Task PublishPluginSnapshotAsync(PluginSnapshot snapshot, CancellationToken token = default) => throw new NotSupportedException();

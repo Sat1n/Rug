@@ -12,6 +12,9 @@ tags: [plugins, snapshot, validation, hotreload]
 Prepare -> Validate. The [watcher](Services/HotReloadService.cs#class:HotReloadService)
 debounces and serializes publication; neither stops, restarts or resumes Lua.
 Runtime switching, transactional installation and checkpoint migration are deferred.
+The [07B-01 host preparation](RuntimeUpdates.md) can explicitly reserve all Running
+checkpoint-capable sources and freeze new successful submissions. Saving files
+does not arm this flow; newer candidates cancel old plans without switching code.
 Input detection and the independent Hook observation gap remain unchanged.
 
 ## Snapshot and validation

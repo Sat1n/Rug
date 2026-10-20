@@ -50,6 +50,8 @@ public sealed class AutomationGateway : IAutomationGateway
     private readonly Func<Guid, bool>? _pause, _resume;
     private readonly Func<Guid, Guid, DateTimeOffset, CancellationToken, Task<RecoveryResult>>? _verifyRecovery;
     internal Func<AutomationCallContext, Guid, DateTimeOffset, CancellationToken, CancellationToken, CheckpointStartBoundary, Task<RunIdentity>>? RestoreCheckpoint { get; set; }
+    internal Func<AutomationCallContext, OperationRequest, CancellationToken, CancellationToken, Task<object?>>? RuntimeUpdateControl { get; set; }
+    private static bool UpdateControl(AutomationOperation op) => op is AutomationOperation.PrepareRuntimeUpdate or AutomationOperation.QueryRuntimeUpdate or AutomationOperation.CancelRuntimeUpdate;
     private int _activeWork;
     private readonly Func<Task>? _waitForDispatch;
     public const int Capacity = 4096;
@@ -133,6 +135,8 @@ public sealed class AutomationGateway : IAutomationGateway
     private static bool SamePlugin(string first, string second) => string.Equals(first, second, StringComparison.OrdinalIgnoreCase);
     private IEnumerable<string> Required(AutomationCallContext caller, OperationRequest request)
     {
+        if (request.Operation == AutomationOperation.PrepareRuntimeUpdate)
+            return Authorization.Query(caller.Authorization.Installation).Requested.Concat([Permission.Checkpoint]).Distinct(StringComparer.Ordinal);
         if (request.Operation == AutomationOperation.RestoreCheckpoint)
             return Authorization.Query(caller.Authorization.Installation).Requested.Concat([Permission.Checkpoint, Permission.Capture]).Distinct(StringComparer.Ordinal);
         if (request.Operation is AutomationOperation.Start or AutomationOperation.Resume or AutomationOperation.VerifyRecovery or AutomationOperation.RestoreCheckpoint)
@@ -172,7 +176,14 @@ public sealed class AutomationGateway : IAutomationGateway
             request.CorrelationId.Length > 128 || request.Parameters.ValueKind != JsonValueKind.Object ||
             System.Text.Encoding.UTF8.GetByteCount(request.Parameters.GetRawText()) > StateStore.MaxValueBytes)
             return OperationError.InvalidParameters;
-        if (request.Operation is AutomationOperation.Start or AutomationOperation.RestoreCheckpoint)
+        if (UpdateControl(request.Operation))
+        {
+            if (!caller.RuntimeUpdateHost || caller.Source != AutomationSource.PluginUI || caller.BoundRun is not null ||
+                request.Target.InstanceId is not null || request.Target.RunGeneration is not null || request.Target.TargetBindingId is not null)
+                return OperationError.InvalidCaller;
+            if (RuntimeUpdateControl is null) return OperationError.UnsupportedOperation;
+        }
+        else if (request.Operation is AutomationOperation.Start or AutomationOperation.RestoreCheckpoint)
         {
             if (caller.Source == AutomationSource.Lua || caller.BoundRun is not null ||
                 request.Target.InstanceId is not null || request.Target.RunGeneration is not null ||
@@ -281,7 +292,7 @@ public sealed class AutomationGateway : IAutomationGateway
                     linked.Token.ThrowIfCancellationRequested();
                 }
                 if (_activeWork >= ActiveCapacity) throw new GatewayRejectedException(OperationError.CapacityExceeded);
-                bool business = request.Operation is not (AutomationOperation.Start or AutomationOperation.Stop or AutomationOperation.Pause or AutomationOperation.Resume or AutomationOperation.VerifyRecovery or AutomationOperation.RestoreCheckpoint);
+                bool business = !UpdateControl(request.Operation) && request.Operation is not (AutomationOperation.Start or AutomationOperation.Stop or AutomationOperation.Pause or AutomationOperation.Resume or AutomationOperation.VerifyRecovery or AutomationOperation.RestoreCheckpoint);
                 if (business && run?.Preparing == true) throw new GatewayRejectedException(OperationError.InvalidLifecycleState);
                 var lifetime = business ? run?.Lifecycle?.EnterOperation(
                     request.Operation is AutomationOperation.Click or AutomationOperation.PressKey) : null;
@@ -387,6 +398,7 @@ public sealed class AutomationGateway : IAutomationGateway
     private async Task<object?> DispatchAsync(AutomationCallContext caller, OperationRequest request, Run? run, CancellationToken token,
         CancellationToken original, CheckpointStartBoundary restoreBoundary)
     {
+        if (UpdateControl(request.Operation)) return await RuntimeUpdateControl!(caller, request, token, original).ConfigureAwait(false);
         switch (request.Operation)
         {
             case AutomationOperation.RestoreCheckpoint:

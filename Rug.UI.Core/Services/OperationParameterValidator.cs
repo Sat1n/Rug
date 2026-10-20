@@ -11,6 +11,9 @@ internal static class OperationParameterValidator
     /// @source parameters: Models/OperationModels.cs#class:OperationRequest</summary>
     public static bool IsValid(AutomationOperation operation, JsonElement parameters) => operation switch
     {
+        AutomationOperation.PrepareRuntimeUpdate or AutomationOperation.QueryRuntimeUpdate => !parameters.EnumerateObject().Any(),
+        AutomationOperation.CancelRuntimeUpdate => parameters.EnumerateObject().Count() == 1 &&
+            parameters.TryGetProperty("updateId", out var update) && update.ValueKind == JsonValueKind.String && update.TryGetGuid(out var updateId) && updateId != Guid.Empty,
         AutomationOperation.RestoreCheckpoint => parameters.EnumerateObject().Count() == 1 &&
             parameters.TryGetProperty("selectionId", out var selection) && selection.ValueKind == JsonValueKind.String &&
             selection.TryGetGuid(out var selectionId) && selectionId != Guid.Empty,

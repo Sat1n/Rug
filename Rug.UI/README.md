@@ -105,6 +105,11 @@ no automation pipeline and no native interop itself.
 
 ## Shared input and host takeover (Task 3.5-05A)
 
+The [07B-01 footer](../Rug.UI.Core/RuntimeUpdates.md) offers explicit runtime-update
+preparation and cancellation through trusted Gateway callers, per-instance node
+progress and **已冻结，尚未切换**. Cancelling retains the original Lua/run and
+any user Pause. Preparation never grants permissions or publishes runtime code.
+
 * `App` registers one `IInputArbiter` for scheduler/Lua and singleton DevTools.
   It also owns the checkpoint store/coordinator and exact embedded-code sample
   node registry. Explicit permission consent describes `checkpoint`; the footer adds

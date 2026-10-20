@@ -8,6 +8,8 @@ namespace Rug.UI.Core.Services;
 /// <summary>Trusted exact-code nodes, not plugin-generated validation claims.</summary>
 public sealed class CheckpointNodeRegistry : ICheckpointNodeRegistry, ICheckpointRestoreRegistry
 {
+    public bool Supports(CheckpointRunMetadata metadata) => _nodes.Keys.Any(key =>
+        key.Item1 == metadata.Installation && key.Item2 == metadata.PluginVersion && key.Item3 == metadata.Code.ContentHash);
     private readonly ConcurrentDictionary<(PluginInstallation, string, string, string), (CheckpointNode, ICheckpointRestoreValidator)> _restores = new();
     public IDisposable RegisterRestore(CheckpointNode node, ICheckpointRestoreValidator validator)
     {
@@ -43,6 +45,8 @@ public sealed class CheckpointNodeRegistry : ICheckpointNodeRegistry, ICheckpoin
 public sealed class CheckpointCoordinator(ICheckpointStore store, ICheckpointNodeRegistry nodes,
     IPluginAuthorization authorization, TimeSpan? validationTimeout = null) : ICheckpointCoordinator
 {
+    public bool SupportsUpdateFreeze(TaskExecutionContext context) =>
+        context.CheckpointMetadata is { } metadata && nodes.Supports(metadata);
     private readonly TimeSpan _timeout = validationTimeout ?? TimeSpan.FromSeconds(5);
     private int _validators;
     private sealed class CapacityException : Exception;
@@ -116,7 +120,10 @@ public sealed class CheckpointCoordinator(ICheckpointStore store, ICheckpointNod
                                     metadata.InstallationId, context.PluginId, metadata.PluginVersion, metadata.Code.ContentHash,
                                     context.InstanceId, context.RunGeneration, nodeId, binding.Node.StateVersion,
                                     metadata.ConfigRevision, metadata.ConfigHash, submission.State, submission.CompletedActionIds);
-                                return await store.PublishAsync(record, () => context.BeginCheckpointPublish(metadata, deadline.Token, token, grant.Token, expiresAt), deadline.Token).ConfigureAwait(false);
+                                var published = await store.PublishAsync(record, () => context.BeginCheckpointPublish(metadata, deadline.Token, token, grant.Token, expiresAt), deadline.Token).ConfigureAwait(false);
+                                // Freeze before releasing checkpoint admission or returning a result to Lua.
+                                if (published.Status == "committed") context.CheckpointPublished?.Invoke(record);
+                                return published;
                             }
                             catch (OperationCanceledException) when (context.IsBusinessClosed || context.Cancellation.IsCancellationRequested) { throw; }
                             catch (OperationCanceledException) when (token.IsCancellationRequested)

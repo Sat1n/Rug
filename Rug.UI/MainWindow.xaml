@@ -75,6 +75,11 @@
                     <Button x:Name="CancelCheckpointButton" Content="取消准备" IsEnabled="False" Click="CancelCheckpoint_Click"/>
                 </StackPanel>
                 <TextBlock x:Name="CheckpointStatus" Text="检查点恢复需要重新绑定目标、显式授权和现场验证。" TextWrapping="Wrap"/>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button x:Name="PrepareUpdateButton" Content="准备运行更新" AutomationProperties.Name="Prepare runtime update" IsEnabled="False" Click="PrepareUpdate_Click"/>
+                    <Button x:Name="CancelUpdateButton" Content="取消更新准备" AutomationProperties.Name="Cancel runtime update" IsEnabled="False" Click="CancelUpdate_Click"/>
+                </StackPanel>
+                <TextBlock x:Name="RuntimeUpdateStatus" Text="无运行更新准备；文件保存不会冻结任务。" TextWrapping="Wrap"/>
             </StackPanel>
         </Border>
     </Grid>

@@ -109,6 +109,7 @@ public sealed partial class MainWindow : WindowEx
         {
             if (_scheduler is not null) _scheduler.InstancesChanged -= OnInstancesChanged;
             if (_scheduler is not null) _scheduler.LifecycleChanged -= OnLifecycleChanged;
+            if (_scheduler?.RuntimeUpdates is { } updates) updates.Changed -= RuntimeUpdateChanged;
             if (_inputArbiter is not null) _inputArbiter.StateChanged -= InputControlChanged;
             if (_intervention is not null) _intervention.StateChanged -= InputControlChanged;
             if (_demo is not null) _demo.TimelineChanged -= OnDemoTimelineChanged;
@@ -124,6 +125,7 @@ public sealed partial class MainWindow : WindowEx
         if (_initialized) return;
         _initialized = true;
         _scheduler = App.GetService<ITaskScheduler>();
+        if (_scheduler.RuntimeUpdates is { } updates) updates.Changed += RuntimeUpdateChanged;
         _inputArbiter = App.GetService<IInputArbiter>();
         _intervention = App.GetService<IInputInterventionCoordinator>();
         _intervention.StateChanged += InputControlChanged;
@@ -268,6 +270,8 @@ public sealed partial class MainWindow : WindowEx
         RefreshInstancePicker();
         EmptyMessage.Visibility = Visibility.Collapsed;
         ReloadStatus.Text = "监控中 · " + plugin.Name;
+        _updateView = null;
+        await RefreshRuntimeUpdateAsync();
     }
 
     private async void PluginPermissions_Click(object sender, RoutedEventArgs args)

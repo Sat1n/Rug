@@ -8,6 +8,13 @@ tags: [ui, tests]
 
 # Rug.UI.Tests
 
+07B-01 actual UI verification runs through the script harness `--runtime-update-ui`
+after Debug/x64 app/test builds. `CheckpointRestoreUiSmoke.ps1 -Phase Update`
+uses its fixture's green isolated target and temporary `update_probe`; it confirms
+explicit consent, new-checkpoint real WGC freeze, same-generation cancellation,
+and Stop while frozen. Actual Lua logs assert one INIT/STOP and no held AFTER
+after Stop. See [preparation contract](../Rug.UI.Core/RuntimeUpdates.md).
+
 Run `dotnet run --project Rug.UI.Tests/Rug.UI.Tests.csproj -c Debug -p:Platform=x64` to validate the shipped `ui.json`, control-tree parsing, invalid schemas, and CommandBus state round trips. The suite targets `net10.0` under SDK `10.0.402`; the native WinUI renderer is compiled through `Rug.UI/Rug.UI.csproj` and can be viewed on the app's main page.
 
 The hot-reload tests use real FileSystemWatcher events and validated snapshots: five rapid saves produce one application, inactive code changes publish without starting Lua, malformed JSON/Lua retain old UI/catalog, and corrections recover. The script harness --plugin-update-tests adds actual Lua and deterministic barriers for old-run preservation, UI-only pause/state retention, pending runtime/config/permissions, revocation, immutable startup source, rollback, ordering and capacity. See [07A contract](../Rug.UI.Core/HotReload.md).

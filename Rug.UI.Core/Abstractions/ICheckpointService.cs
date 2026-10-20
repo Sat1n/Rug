@@ -6,6 +6,7 @@ namespace Rug.UI.Core.Abstractions;
 
 public interface ICheckpointCoordinator
 {
+    bool SupportsUpdateFreeze(TaskExecutionContext context) => false;
     Task<CheckpointResult> CommitAsync(TaskExecutionContext context, string nodeId, string stateJson, string completedActionIdsJson, CancellationToken token = default);
 }
 public interface ICheckpointValidator
@@ -14,6 +15,7 @@ public interface ICheckpointValidator
 }
 public interface ICheckpointNodeRegistry
 {
+    bool Supports(CheckpointRunMetadata metadata) => false;
     (CheckpointNode Node, ICheckpointValidator Validator)? Find(CheckpointRunMetadata metadata, string nodeId);
 }
 public interface ICheckpointStore : IAsyncDisposable

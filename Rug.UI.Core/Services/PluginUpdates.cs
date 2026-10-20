@@ -46,10 +46,15 @@ public sealed partial class TaskScheduler
         if (snapshots.Any(p => string.Equals(p.Directory, snapshot.Directory, StringComparison.OrdinalIgnoreCase) && p.PluginId != snapshot.PluginId) ||
             old is not null && !string.Equals(old.Directory, snapshot.Directory, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Update cannot replace plugin or installation identity.");
-        if (old?.ContentVersion == snapshot.ContentVersion) return PluginUpdateStatus.Unchanged;
+        if (old?.ContentVersion == snapshot.ContentVersion)
+        { RuntimeUpdates.Applied(snapshot); return PluginUpdateStatus.Unchanged; }
         bool runtime = old?.RuntimeVersion != snapshot.RuntimeVersion;
         if (runtime && _instances.Values.Any(c => c.PluginId.Equals(snapshot.PluginId, StringComparison.OrdinalIgnoreCase) &&
-            c.TaskStatus is not (AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted))) return PluginUpdateStatus.RuntimePending;
+            c.TaskStatus is not (AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted)))
+        {
+            if (old is not null) RuntimeUpdates.Pending(old, snapshot);
+            return PluginUpdateStatus.RuntimePending;
+        }
         return runtime ? PluginUpdateStatus.RuntimeApplied : PluginUpdateStatus.UiApplied;
     }
     /// <summary>Caller owns the per-plugin update/start lease and has staged all UI trees.</summary>
@@ -69,5 +74,6 @@ public sealed partial class TaskScheduler
         }
         finally { _catalogGate.Release(); }
         Gateway.Authorization.Register(manifest); // Never grants. Outside catalog/lifecycle locks.
+        RuntimeUpdates.Applied(snapshot);
     }
 }

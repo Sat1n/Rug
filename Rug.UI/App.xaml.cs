@@ -102,6 +102,8 @@ public partial class App : Application
                     new CheckpointSamples.GreenPanelValidator());
                 registry.RegisterRestore(CheckpointSamples.Node(new PluginInstallation("checkpoint_probe", Path.Combine(PluginsRoot,"checkpoint_probe"))),
                     new CheckpointSamples.GreenRestoreValidator());
+                registry.Register(RuntimeUpdateSamples.Node(new PluginInstallation("update_probe", Path.Combine(PluginsRoot,"update_probe"))),
+                    new CheckpointSamples.GreenPanelValidator());
                 return registry;
             });
             services.AddSingleton<ICheckpointCoordinator, CheckpointCoordinator>();

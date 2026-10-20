@@ -490,6 +490,7 @@ public sealed class LuaRuntime : IScriptRuntime
 
     private async Task<ScriptExecutionResult> DriveAsync(bool resume)
     {
+        if (_context is not null) await _context.WaitForUpdateBoundaryAsync().ConfigureAwait(false);
         await _driveGate.WaitAsync().ConfigureAwait(false);
         try { return await DriveCoreAsync(resume).ConfigureAwait(false); }
         finally { _driveGate.Release(); }
@@ -518,6 +519,7 @@ public sealed class LuaRuntime : IScriptRuntime
                     if (_context.PauseRequested) return new(ScriptState.Paused);
                 }
                 input = await pending.WaitAsync(token).ConfigureAwait(false);
+                if (_context?.UpdateFrozen == true) return new(ScriptState.Yielded);
             }
             catch (OperationCanceledException error) when (token.IsCancellationRequested || error is HostStopAdmissionCancellation)
             {

@@ -1,0 +1,1 @@
+{"type":"Page","id":"update-page","title":"Update freeze probe","children":[{"type":"InfoBanner","id":"instructions","title":"显式准备，不切换代码","description":"绑定绿色隔离窗口并启动。修改 main.lua 后点击准备运行更新；冻结后取消应继续原协程，停止不得继续。"},{"type":"InfoBanner","id":"sequence","title":"Lua BEFORE／AFTER 计数","description":"验证入口输出真实 Lua 执行序列；主线计数保存在本实例 before_count／after_count。"}]}

@@ -360,6 +360,10 @@ The Hook gap and frozen native artifacts remain; 05B-02 human UI acceptance is u
 
 * `HotReloadService` watches each immediate plugin directory recursively for JSON/Lua writes, renames and deletes. It merges bursts per directory over a 400 ms window; watcher overflow schedules a full rescan. The service is background-only and exposes `RegisterUiHandler` plus success/failure events without referencing WinUI.
 * [07A snapshot updates](HotReload.md) capture bounded immutable manifest/config/UI/Lua candidates, validate before touching live resources, and compile without execution. Invalid updates preserve old UI/runs/catalog; UI-only changes rebind the same run and preserve pause. Runtime/config/permission changes remain pending while any instance is active; no automatic Stop/Start occurs.
+* [07B-01 preparation](RuntimeUpdates.md) adds trusted Gateway prepare/query/cancel,
+  complete source-set reservations and new-checkpoint freezes. Cancellation releases
+  only the plan's hold in the original coroutine; user pause/Stop/fault precedence
+  remains. Frozen is not code publication or a new generation.
 * The per-plugin start lease serializes validated publication. The shell and future starts use the applied snapshot, not fresh disk reads. Staged UI construction rolls back on failure and releases old subscriptions only after success. Ready precedes host activation; dispose the watcher before the scheduler. Notifications distinguish pending, unchanged, applied, superseded and failed outcomes.
 
 ## Script-only demo tasks (Task 3.4)

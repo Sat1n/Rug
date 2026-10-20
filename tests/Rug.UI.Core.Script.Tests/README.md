@@ -8,6 +8,14 @@ tags: [lua, tests, input]
 
 # Lua coroutine bridge tests
 
+07B-01 adds `--runtime-update-tests` to the default full suite: actual Lua
+BEFORE/checkpoint/AFTER with real files and Fake services, history exclusion,
+complete multi-run reservation, timeout rollback, Pause/Stop/revoke/candidate
+and late IO barriers, original cancellation propagation and repeated cleanup.
+`--runtime-update-ui` separately runs actual WinUI/real WGC against a fixture-owned
+green target; no human/input-source acceptance is inferred. See
+[runtime preparation](../../Rug.UI.Core/RuntimeUpdates.md).
+
 07A adds --plugin-update-tests and the default suite: immutable bounded snapshots,
 compile-only prevalidation, failed-update old-run/UI/catalog retention, UI-only
 pause/state preservation, pending config/code/permission updates, revocation,

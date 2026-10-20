@@ -1,4 +1,4 @@
-param([int]$AppProcessId, [long]$TargetHwnd, [ValidateSet("Save","Restore")][string]$Phase)
+param([int]$AppProcessId, [long]$TargetHwnd, [ValidateSet("Save","Restore","Update")][string]$Phase, [string]$PluginDirectory)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName System.Windows.Forms
@@ -49,7 +49,8 @@ function Select-Item($name) { (Await $name).GetCurrentPattern([System.Windows.Au
 try {
  $app=Get-Process -Id $AppProcessId
  $script:window=[System.Windows.Automation.AutomationElement]::FromHandle($app.MainWindowHandle)
- $null=Await '监控中 · Checkpoint controlled panel' # Let initial asynchronous plugin load finish before changing navigation.
+ $pluginName=if($Phase -eq 'Update'){'Update freeze probe'}else{'Checkpoint controlled panel'}
+ $null=Await ('监控中 · '+$pluginName) # Let initial asynchronous plugin load finish before changing navigation.
  Select-Item '开发工具'
  $null=[RecoveryUiNative]::SetThreadDpiAwarenessContext([IntPtr](-4))
  $screen=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds
@@ -70,12 +71,12 @@ try {
  $null=Await '已绑定，见上方窗口信息卡片'
  $hex='0x'+$TargetHwnd.ToString('X')
  $null=Await $hex # Prove the actual selected HWND, not merely successful selection of some window.
- Select-Item 'Checkpoint controlled panel'
+ Select-Item $pluginName
  function AwaitText($pattern) {
   $watch=[Diagnostics.Stopwatch]::StartNew()
   while($watch.Elapsed.TotalSeconds -lt 15) {
-   $all=[System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Subtree,
-    [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ProcessIdProperty,$AppProcessId))
+   $all=$script:window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+    [System.Windows.Automation.Condition]::TrueCondition)
    foreach($element in $all){if($element.Current.Name -match $pattern){return $element.Current.Name}}
    Start-Sleep -Milliseconds 40
   }
@@ -97,6 +98,37 @@ try {
    Start-Sleep -Milliseconds 50
   }
   throw "Checkpoint dropdown missing: $pattern"
+ }
+ if($Phase -eq 'Update') {
+  Invoke 'Start bound task'
+  Invoke 'Allow permissions'
+  $null=Await '运行中'
+  function CurrentRun {
+   $conditions=[System.Windows.Automation.AndCondition]::new(
+    [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,'当前实例'),
+    [System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::ComboBox))
+   $picker=$script:window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$conditions)
+   return $picker.GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern).Current.GetSelection()[0].Current.Name
+  }
+  $identity=CurrentRun
+  # Only captured runtime code changes: the currently loaded trusted Lua remains unchanged.
+  [System.IO.File]::AppendAllText((Join-Path $PluginDirectory 'main.lua'),"`n-- pending runtime candidate")
+  $null=AwaitText '更新待应用'
+  Invoke 'Prepare runtime update'
+  $frozen=AwaitText '^已冻结，尚未切换 · 1/1'
+  if($frozen -notmatch 'panel-ready#(\d+)'){throw 'Missing committed checkpoint sequence'}
+  $cycle=[int]$Matches[1]
+  Invoke 'Cancel runtime update'
+  $null=AwaitText '^更新准备已取消'
+  $selected=CurrentRun
+  if($selected -ne $identity){throw 'Cancel changed run generation'}
+  Invoke 'Prepare runtime update'
+  $null=AwaitText '^已冻结，尚未切换 · 1/1'
+  Invoke 'Stop instance'
+  $null=Await '无运行实例'
+  $null=AwaitText '^更新准备失败'
+  Write-Output "runtime-update-ui-ok prepare/fresh-WGC/freeze/cancel/same-run/stop; retained=$identity; cancelledCheckpointCycle=$cycle"
+  return
  }
  if($Phase -eq 'Save') {
   Invoke 'Start bound task'

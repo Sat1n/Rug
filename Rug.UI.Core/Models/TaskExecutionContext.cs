@@ -10,7 +10,7 @@ public enum AutomationTaskStatus { Starting, Running, Paused, Recovering, Awaiti
 /// <summary>Single transition authority and actual-work lifetime for one run.
 /// @shape identity: host RunIdentity; counters: actual Lua segments / service tasks.
 /// @source services: Services/TaskScheduler.cs#class:TaskScheduler</summary>
-public sealed class TaskExecutionContext
+public sealed partial class TaskExecutionContext
 {
     internal sealed class HostStopWakeCancellation : OperationCanceledException;
     private readonly object _gate = new();
@@ -134,7 +134,7 @@ public sealed class TaskExecutionContext
 
     internal bool Resume()
     {
-        lock (_gate) if (_status != AutomationTaskStatus.Paused || !_pauseRequested) return false;
+        lock (_gate) if (_updateFrozen || _status != AutomationTaskStatus.Paused || !_pauseRequested) return false;
         try { ValidateResume?.Invoke(); } // Service checks never run under the state lock.
         catch (Exception) when (Snapshot.Status is AutomationTaskStatus.Stopping or AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted)
         { return false; }
@@ -223,7 +223,7 @@ public sealed class TaskExecutionContext
     {
         lock (_gate)
         {
-            if (_pauseRequested || _status is not (AutomationTaskStatus.Starting or AutomationTaskStatus.Running) || Cancellation.IsCancellationRequested) return null;
+            if (_pauseRequested || _updateFrozen || _status is not (AutomationTaskStatus.Starting or AutomationTaskStatus.Running) || Cancellation.IsCancellationRequested) return null;
             if (_segments++ == 0) _segmentsDrained = Signal();
             return new WorkLease(this, segment: true, input: false);
         }
@@ -260,7 +260,7 @@ public sealed class TaskExecutionContext
     }
     private void ValidateBusinessLocked()
     {
-        if (_status is AutomationTaskStatus.Stopping or AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted or AutomationTaskStatus.Recovering or AutomationTaskStatus.AwaitingHuman)
+        if (_updateFrozen || _status is AutomationTaskStatus.Stopping or AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted or AutomationTaskStatus.Recovering or AutomationTaskStatus.AwaitingHuman)
             throw new AutomationGateway.GatewayRejectedException(OperationError.InvalidLifecycleState);
     }
     internal (IDisposable Work, long Sequence) EnterCheckpoint()

@@ -77,9 +77,12 @@ public sealed partial class TaskScheduler : ITaskScheduler
         _checkpoints = checkpoints;
         _checkpointStore = checkpointStore; _checkpointRestores = checkpointRestores;
         Gateway.RestoreCheckpoint = RestoreCheckpointAsync;
+        Gateway.RuntimeUpdateControl = ControlRuntimeUpdateAsync;
     }
 
     public AutomationGateway Gateway { get; }
+    public RuntimeUpdateCoordinator RuntimeUpdates { get; } = new();
+    IRuntimeUpdateCoordinator ITaskScheduler.RuntimeUpdates => RuntimeUpdates;
     public IReadOnlyCollection<TaskExecutionContext> Instances => _instances.Values.ToArray();
     public event EventHandler? InstancesChanged;
     public event EventHandler<LifecycleChangedEventArgs>? LifecycleChanged;
@@ -178,6 +181,7 @@ public sealed partial class TaskScheduler : ITaskScheduler
         try
         {
             PluginManifest source = restore?.Manifest ?? await GetPluginAsync(pluginId, cancellation.Token).ConfigureAwait(false);
+            if (RuntimeUpdates.BlocksStart(pluginId)) throw new AutomationGateway.GatewayRejectedException(OperationError.UpdatePreparing);
             var ticket = Gateway.Authorization.Bind(source);
             authorizationLease = Gateway.Authorization.Admit(ticket, source.Permissions);
             authorizationCancellation = authorizationLease.Token.Register(() => cancellation.Cancel());
@@ -312,8 +316,13 @@ public sealed partial class TaskScheduler : ITaskScheduler
                 var code = runtime.LoadedCode ?? throw new InvalidOperationException("Runtime lacks immutable code snapshot.");
                 context.CheckpointMetadata = new(ticket.Installation, CheckpointJson.InstallationId(ticket.Installation), source.Version,
                     code, configRevision, CheckpointJson.ConfigHash(configuration));
-                runtime.ConfigureCheckpointHandler((node, state, actions) =>
-                    (_checkpoints ?? throw new InvalidOperationException("Host checkpoint coordinator is not configured.")).CommitAsync(context, node, state, actions));
+                context.CheckpointPublished = record => RuntimeUpdates.Published(context, record);
+                runtime.ConfigureCheckpointHandler(async (node, state, actions) =>
+                {
+                    var result = await (_checkpoints ?? throw new InvalidOperationException("Host checkpoint coordinator is not configured.")).CommitAsync(context, node, state, actions).ConfigureAwait(false);
+                    await RuntimeUpdates.ReturnedAsync(context, result).ConfigureAwait(false);
+                    return result;
+                });
             }
             cancellation.Token.ThrowIfCancellationRequested();
             if (restore is null) await runtime.PrepareLifecycleAsync().ConfigureAwait(false);
@@ -578,6 +587,7 @@ public sealed partial class TaskScheduler : ITaskScheduler
             drained = _startsDrained.Task;
         }
         _shutdown.Cancel();
+        await RuntimeUpdates.DisposeAsync().ConfigureAwait(false);
         await drained.ConfigureAwait(false);
         await Task.WhenAll(_instances.Keys.Select(StopTaskAsync)).ConfigureAwait(false);
         lock (_restoreGate) { _selections.Clear(); _restoring.Clear(); }
