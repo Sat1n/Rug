@@ -12,6 +12,10 @@ tags: [lua, tests, input]
 BEFORE/checkpoint/AFTER with real files and Fake services, history exclusion,
 complete multi-run reservation, timeout rollback, Pause/Stop/revoke/candidate
 and late IO barriers, original cancellation propagation and repeated cleanup.
+`--runtime-update-late-tests` isolates cancelled-A/new-B validation races for
+rejected, timed-out, cancelled and committed results. B stays waiting with the
+same revision, then freezes on its own next valid checkpoint; cancellation resumes
+the same Lua coroutine once and releases plan monitors/subscriptions.
 `--runtime-update-ui` separately runs actual WinUI/real WGC against a fixture-owned
 green target; no human/input-source acceptance is inferred. See
 [runtime preparation](../../Rug.UI.Core/RuntimeUpdates.md).

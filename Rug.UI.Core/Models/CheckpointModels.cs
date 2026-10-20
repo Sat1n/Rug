@@ -9,7 +9,12 @@ public enum CheckpointError
     Cancelled, StaleSubmission, CapacityExceeded, InvalidLifecycleState, Busy
 }
 public sealed record CheckpointResult(string Status, CheckpointError Error = CheckpointError.None,
-    Guid? CheckpointId = null, long? SubmissionSequence = null);
+    Guid? CheckpointId = null, long? SubmissionSequence = null)
+{
+    // Host-only attribution for every outcome; never serialized to disk or returned to Lua.
+    internal CheckpointUpdateAttempt? UpdateAttempt { get; init; }
+}
+internal sealed record CheckpointUpdateAttempt(Guid AttemptId, RunIdentity Source, Guid? UpdateId);
 public enum CheckpointReadStatus
 {
     Absent, Valid, Corrupt, UnsupportedFormat, Oversized,

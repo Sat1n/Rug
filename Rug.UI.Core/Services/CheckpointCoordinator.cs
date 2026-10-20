@@ -56,6 +56,13 @@ public sealed class CheckpointCoordinator(ICheckpointStore store, ICheckpointNod
     /// The actual worker retains its permit until IO finishes even when the yielded caller stops waiting.</summary>
     public async Task<CheckpointResult> CommitAsync(TaskExecutionContext context, string nodeId, string stateJson, string completedActionIdsJson, CancellationToken token = default)
     {
+        var attempt = context.CaptureCheckpointAttempt();
+        var result = await CommitAttemptAsync(context, nodeId, stateJson, completedActionIdsJson, attempt, token).ConfigureAwait(false);
+        return result with { UpdateAttempt = attempt };
+    }
+    private async Task<CheckpointResult> CommitAttemptAsync(TaskExecutionContext context, string nodeId, string stateJson,
+        string completedActionIdsJson, CheckpointUpdateAttempt attempt, CancellationToken token)
+    {
         if (context.IsBusinessClosed) throw new TaskExecutionContext.HostStopWakeCancellation();
         if (_timeout <= TimeSpan.Zero || _timeout > TimeSpan.FromMinutes(1)) throw new ArgumentOutOfRangeException(nameof(validationTimeout));
         CheckpointSubmission submission;
@@ -122,7 +129,7 @@ public sealed class CheckpointCoordinator(ICheckpointStore store, ICheckpointNod
                                     metadata.ConfigRevision, metadata.ConfigHash, submission.State, submission.CompletedActionIds);
                                 var published = await store.PublishAsync(record, () => context.BeginCheckpointPublish(metadata, deadline.Token, token, grant.Token, expiresAt), deadline.Token).ConfigureAwait(false);
                                 // Freeze before releasing checkpoint admission or returning a result to Lua.
-                                if (published.Status == "committed") context.CheckpointPublished?.Invoke(record);
+                                if (published.Status == "committed") context.CheckpointPublished?.Invoke(attempt, record);
                                 return published;
                             }
                             catch (OperationCanceledException) when (context.IsBusinessClosed || context.Cancellation.IsCancellationRequested) { throw; }

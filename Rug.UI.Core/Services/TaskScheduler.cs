@@ -316,7 +316,7 @@ public sealed partial class TaskScheduler : ITaskScheduler
                 var code = runtime.LoadedCode ?? throw new InvalidOperationException("Runtime lacks immutable code snapshot.");
                 context.CheckpointMetadata = new(ticket.Installation, CheckpointJson.InstallationId(ticket.Installation), source.Version,
                     code, configRevision, CheckpointJson.ConfigHash(configuration));
-                context.CheckpointPublished = record => RuntimeUpdates.Published(context, record);
+                context.CheckpointPublished = (attempt, record) => RuntimeUpdates.Published(context, attempt, record);
                 runtime.ConfigureCheckpointHandler(async (node, state, actions) =>
                 {
                     var result = await (_checkpoints ?? throw new InvalidOperationException("Host checkpoint coordinator is not configured.")).CommitAsync(context, node, state, actions).ConfigureAwait(false);

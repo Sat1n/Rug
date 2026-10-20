@@ -23,6 +23,7 @@ if (args.Contains("--checkpoint-restore-native")) { await NativeCheckpointRestor
 if (args.Contains("--checkpoint-restore-tests")) { await CheckpointTests.RunRestoreAsync(); return; }
 if (args.Contains("--plugin-update-tests")) { await CheckpointTests.RunPluginUpdatesAsync(); return; }
 if (args.Contains("--runtime-update-tests")) { await CheckpointTests.RunRuntimeUpdatesAsync(); return; }
+if (args.Contains("--runtime-update-late-tests")) { await CheckpointTests.RunLateCheckpointResultsAsync(); return; }
 if (args.Contains("--runtime-update-ui")) { await RuntimeUpdateUi.RunAsync(); return; }
 if (args.Contains("--checkpoint-child-read")) { await CheckpointTests.ChildReadAsync(args); return; }
 if (args.Contains("--checkpoint-tests")) { await CheckpointTests.RunAsync(); return; }

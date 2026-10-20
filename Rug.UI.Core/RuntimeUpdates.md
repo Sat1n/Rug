@@ -83,8 +83,13 @@ Direct original-token checks at both freeze and acknowledgement avoid relying
 on cancellation propagation. Cancellation before the freeze decision cannot
 install a hold; after that decision it releases only the matching hold. A newer
 validated candidate, reverting to effective content, or successful UI replacement
-invalidates the old plan. Receipt ID/sequence and update ID prevent old completions
-and old cancel requests from touching a new plan. These are process-local
+invalidates the old plan. Each checkpoint invocation captures a host-only attempt
+identity, full source identity and owning update ID before parsing or validation.
+Publication and every returned outcome (including rejection, timeout and cancellation)
+must match that owner before touching a plan; a late result cannot adopt a newer
+plan on the same instance. Successful acknowledgements also match receipt ID/sequence.
+Attempt attribution is neither persisted nor exposed to Lua. Old cancel requests
+likewise cannot touch a new plan. These are process-local
 decisions, not a filesystem/OS transaction.
 
 Bounds: eight pending installations (at most 32 MiB of candidate bytes), 32 sources
@@ -113,6 +118,10 @@ use Fake input/observation, real checkpoint files and controlled validation/IO
 barriers for history, cancellation propagation, pause, stop, revocation, candidate
 replacement, multi-source timeout, unsupported states, duplicate requests and
 repeated cleanup. They do not claim physical input or human acceptance.
+`--runtime-update-late-tests` isolates actual-Lua validation barriers: cancel A,
+prepare B, then deliver A's rejection/timeout/cancellation/success. B's revision
+and waiting state stay unchanged; its next valid submission freezes B, and cancel
+continues the original coroutine exactly once without leaked plan subscriptions.
 The opt-in UI fixture creates a separate green target, temporary `update_probe`,
 isolated record root and real WinUI host. UI Automation binds the target and
 explicitly invokes the permission dialog; real WGC validates nodes. Lua log counts
@@ -144,3 +153,13 @@ Existing HotReloadUiSmoke (481ms update), GenericInstanceUiSmoke,
 LifecycleUiSmoke and Phase3E2E (490ms update) passed. These are automation results,
 not new real-human or independent Hook-gap acceptance. No new human keyboard/mouse
 test was run; this unit leaves input classification/takeover policy unchanged.
+
+Ownership-race fix: the new actual-Lua barrier regression first reproduced A's
+late validation rejection failing B. After the fix, rejected/timed-out/cancelled/
+committed old attempts leave B's waiting snapshot unchanged; B then freezes on its
+next valid checkpoint and cancellation continues AFTER once. Debug/Release x64
+WinUI, script-test and UI-test builds passed with zero warnings/errors. Both full
+script suites and Schema/state/hot-reload suites passed. Actual WinUI/fresh WGC
+prepare/freeze/cancel/same-run/Stop passed (one INIT/STOP, no stopped AFTER). Fake
+input assertions are not physical-input evidence; no new human test was needed
+or run, and the independent Hook gap remains open.

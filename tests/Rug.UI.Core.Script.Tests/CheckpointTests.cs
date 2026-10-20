@@ -166,7 +166,7 @@ internal static partial class CheckpointTests
         public IInputArbiter Arbiter=null!;
         public readonly Logger Log=new();public IDisposable? NodeRegistration;
         public Action<TaskExecutionContext>? OnReady;
-        public static async Task<Fixture> CreateAsync(ICheckpointFilePublisher? publisher=null,Func<CancellationToken,Task>? beforePublish=null,TimeSpan? timeout=null,bool checkpoint=true,string? script=null,string version="1",bool input=false,bool agent=false,IAnomalyLogger? anomalyLogger=null)
+        public static async Task<Fixture> CreateAsync(ICheckpointFilePublisher? publisher=null,Func<CancellationToken,Task>? beforePublish=null,TimeSpan? timeout=null,bool checkpoint=true,string? script=null,string version="1",bool input=false,bool agent=false,IAnomalyLogger? anomalyLogger=null,Func<CheckpointCoordinator,ICheckpointCoordinator>? checkpointHost=null)
         {
             string root=Path.Combine(AppContext.BaseDirectory,"checkpoint-test-"+Guid.NewGuid().ToString("N"));string dir=Path.Combine(root,"plugins","probe");Directory.CreateDirectory(dir);
             var permissions=new List<string>{Permission.Capture,Permission.Timer};if(checkpoint)permissions.Add(Permission.Checkpoint);
@@ -182,7 +182,7 @@ internal static partial class CheckpointTests
             f.Scheduler=new(new PluginManager(NullLogger<PluginManager>.Instance),Path.Combine(root,"plugins"),
                 ()=>{var c=new Capture{Fail=f.CaptureFailure,Hold=f.HoldCapture};f.Captures.Add(c);return c;},()=>{var i=new FakeInput();f.Inputs.Add(i);return i;},
                 (c,i)=>new LuaRuntime(c,new FakeOcr(),i,f.Log,new FakeCoordinateMapper(),ensureForeground:_=>true,commandBus:f.Bus),NullLogger<Scheduler>.Instance,anomalyLogger??new NoAnomaly(),
-                commandBus:f.Bus,authorization:f.Authorization,inputArbiter:f.Arbiter,checkpoints:f.Coordinator,
+                commandBus:f.Bus,authorization:f.Authorization,inputArbiter:f.Arbiter,checkpoints:checkpointHost?.Invoke(f.Coordinator)??f.Coordinator,
                 checkpointStore:f.Store,checkpointRestores:f.Registry);
             return f;
         }

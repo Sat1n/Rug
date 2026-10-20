@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Rug.UI.Core.Abstractions;
 using Rug.UI.Core.Models;
 using Rug.UI.Core.Services;
 
@@ -49,12 +50,97 @@ internal static partial class CheckpointTests
     }
     public static async Task RunRuntimeUpdatesAsync()
     {
+        await RunLateCheckpointResultsAsync();
         foreach (string mode in new[] { "cancel", "pause", "stop", "revoke", "takeover", "target", "supersede", "caller-cancel" }) await FreezeLifecycleAsync(mode);
         await FreezeMultipleAsync();
         foreach (string mode in new[] { "reject", "timeout", "no-validator", "io-fault", "late-stop", "late-cancel", "late-new-plan" }) await FreezePublicationAsync(mode);
         await FreezeAdmissionAsync();
         await FreezeBlockedCancellationAsync(); await FreezeRepeatedPlansAsync(); await FreezeRecoveryAdmissionAsync();
         Console.WriteLine("Runtime update freeze PASS: actual Lua BEFORE/checkpoint/AFTER, retained identity/coroutine, no publication/restart, multi-run rollback, admission, Pause/Stop/revoke/candidate/late-IO barriers and cleanup");
+    }
+    public static async Task RunLateCheckpointResultsAsync()
+    {
+        foreach (string outcome in new[] { "rejected", "timed_out", "cancelled", "committed" }) await LateCheckpointResultAsync(outcome);
+        Console.WriteLine("Late checkpoint ownership PASS: actual Lua old reject/timeout/cancel/success preserve plan B; next valid submission freezes B");
+    }
+    private sealed class CancellableCheckpointHost(CheckpointCoordinator inner, CancellationToken token) : ICheckpointCoordinator
+    {
+        public bool SupportsUpdateFreeze(TaskExecutionContext context) => inner.SupportsUpdateFreeze(context);
+        public Task<CheckpointResult> CommitAsync(TaskExecutionContext context,string node,string state,string actions,CancellationToken unused=default) =>
+            inner.CommitAsync(context,node,state,actions,state=="{\"step\":1}"?token:unused);
+    }
+    private sealed class LateResultValidator(bool firstValid) : ICheckpointValidator
+    {
+        public readonly TaskCompletionSource Entered=Signal(), Release=Signal();
+        private int _calls;
+        public async Task<bool> ValidateAsync(CheckpointObservation observation,CheckpointSubmission submission,CancellationToken token)
+        {
+            if (Interlocked.Increment(ref _calls)==1)
+            {
+                Entered.TrySetResult(); await Release.Task.WaitAsync(token);
+                if (!firstValid) return false;
+            }
+            var frame=await observation.CaptureFreshAsync(); return frame.Pixels[1]==200;
+        }
+    }
+    private static async Task LateCheckpointResultAsync(string outcome)
+    {
+        const string script="""
+            function on_init() rug.set_state('init',1) end
+            function on_tick()
+              assert(rug.checkpoint.commit('ready','{"step":0}','["panel-ready"]').status=='committed')
+              rug.set_state('history',true)
+              while not rug.get_state('go') do rug.sleep(5) end
+              local retained=42
+              rug.press_key(66,1)
+              local first=rug.checkpoint.commit('ready','{"step":1}','["panel-ready"]')
+              rug.set_state('first_result',first.status)
+              while not rug.get_state('second_go') do rug.sleep(5) end
+              rug.press_key(66,1)
+              local second=rug.checkpoint.commit('ready','{"step":2}','["panel-ready"]')
+              assert(retained==42 and second.status=='committed')
+              rug.press_key(67,1); rug.set_state('after',1)
+              rug.sleep(60000)
+            end
+            """;
+        using var checkpointCancellation=new CancellationTokenSource();
+        await using var f=await Fixture.CreateAsync(script:script,input:true,
+            timeout:outcome=="timed_out"?TimeSpan.FromSeconds(1):null,
+            checkpointHost:inner=>new CancellableCheckpointHost(inner,checkpointCancellation.Token));
+        await f.Scheduler.GetPluginSnapshotsAsync(); var c=await f.StartAsync();
+        await Until(()=>f.StoreState.GetState(c.InstanceScope,"history",false));
+        var validator=new LateResultValidator(outcome=="committed");
+        f.NodeRegistration!.Dispose(); var metadata=c.CheckpointMetadata!;
+        f.NodeRegistration=f.Registry.Register(new(metadata.Installation,metadata.PluginVersion,metadata.Code.ContentHash,"ready",1,Array.AsReadOnly(new[]{"panel-ready"})),validator);
+        await PendingFreezeAsync(f);
+        var a=await PrepareFreezeAsync(f); f.StoreState.SetState(c.InstanceScope,"go",true); await Bound(validator.Entered.Task);
+        try
+        {
+            await UpdateControlAsync(f,AutomationOperation.CancelRuntimeUpdate,a.UpdateId);
+            var b=await PrepareFreezeAsync(f);
+            Check(b.Stage==RuntimeUpdateStage.WaitingCheckpoint && b.UpdateId!=a.UpdateId,"plan B did not start waiting");
+            if(outcome=="cancelled") checkpointCancellation.Cancel();
+            else if(outcome!="timed_out") validator.Release.TrySetResult();
+            await Until(()=>f.StoreState.Contains(c.InstanceScope,"first_result"));
+            Check(f.StoreState.GetState(c.InstanceScope,"first_result","")==outcome,"wrong late checkpoint outcome");
+            var unchanged=FreezeView(f,c);
+            Check(unchanged.UpdateId==b.UpdateId && unchanged.Stage==RuntimeUpdateStage.WaitingCheckpoint && unchanged.Revision==b.Revision &&
+                unchanged.Instances.Single().Checkpoint is null && f.Scheduler.RuntimeUpdates.ActivePlanCount==1,
+                "late "+outcome+" from plan A changed plan B");
+            validator.Release.TrySetResult();
+            await Until(()=>f.Coordinator.ValidatorsInFlight==0);
+            f.StoreState.SetState(c.InstanceScope,"second_go",true);
+            await Until(()=>FreezeView(f,c).Stage==RuntimeUpdateStage.Frozen);
+            Check(FreezeView(f,c).UpdateId==b.UpdateId && FreezeView(f,c).Instances.Single().Checkpoint is {SubmissionSequence:3} &&
+                f.Inputs[0].KeyDownCalls==2 && !f.StoreState.Contains(c.InstanceScope,"after"),"plan B did not freeze only its next valid submission");
+            await UpdateControlAsync(f,AutomationOperation.CancelRuntimeUpdate,b.UpdateId);
+            await Until(()=>f.StoreState.GetState(c.InstanceScope,"after",0)==1);
+            Check(f.Scheduler.Instances.Single().Identity==c.Identity && f.StoreState.GetState(c.InstanceScope,"init",0)==1 &&
+                f.Inputs[0].KeyDownCalls==3 && f.Inputs[0].KeyUpCalls==3,"ownership fix restarted/replayed Lua");
+            await Until(()=>f.Scheduler.RuntimeUpdates.MonitorCount==0);
+            Check(f.Scheduler.RuntimeUpdates.SubscriptionCount==0,"late result left plan subscriptions");
+        }
+        finally {validator.Release.TrySetResult();}
     }
     private static async Task FreezeLifecycleAsync(string mode)
     {

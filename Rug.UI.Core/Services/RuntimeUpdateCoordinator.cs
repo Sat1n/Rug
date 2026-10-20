@@ -165,16 +165,19 @@ public sealed class RuntimeUpdateCoordinator : IRuntimeUpdateCoordinator
         { run.LifecycleChanged -= plan.Handler; run.ReleaseUpdate(plan.Id); }
         plan.Ended.TrySetResult();
     }
-    internal void Published(TaskExecutionContext context, CheckpointRecord record)
+    private static bool OwnsAttempt(Plan plan, TaskExecutionContext context, CheckpointUpdateAttempt? attempt) =>
+        attempt is not null && attempt.UpdateId == plan.Id && attempt.Source == context.Identity && plan.Runs.Contains(context);
+
+    internal void Published(TaskExecutionContext context, CheckpointUpdateAttempt attempt, CheckpointRecord record)
     {
         var installation = context.CheckpointMetadata!.Installation;
         // Real authorization/target checks never execute under the plan/transition lock.
-        lock (_gate) if (!_slots.TryGetValue(installation, out var current) || current.Plan is null) return;
+        lock (_gate) if (!_slots.TryGetValue(installation, out var current) || current.Plan is not { } owner || !OwnsAttempt(owner, context, attempt)) return;
         context.ValidateRecovery?.Invoke();
         RuntimeUpdateSnapshot? changed = null;
         lock (_gate)
         {
-            if (!_slots.TryGetValue(installation, out var slot) || slot.Plan is not { } plan || !plan.Runs.Contains(context)) return;
+            if (!_slots.TryGetValue(installation, out var slot) || slot.Plan is not { } plan || !OwnsAttempt(plan, context, attempt)) return;
             if (plan.Original.IsCancellationRequested || DateTimeOffset.UtcNow >= plan.Deadline)
             { EndLocked(slot, RuntimeUpdateStage.Cancelled, OperationError.Cancelled, "Cancelled before freeze"); changed = slot.Snapshot; }
             else if (context.FreezeUpdate(plan.Id, record))
@@ -193,7 +196,7 @@ public sealed class RuntimeUpdateCoordinator : IRuntimeUpdateCoordinator
         RuntimeUpdateSnapshot? rejected = null;
         lock (_gate)
         {
-            if (!_slots.TryGetValue(installation, out var slot) || slot.Plan is not { } plan || !plan.Runs.Contains(context)) return;
+            if (!_slots.TryGetValue(installation, out var slot) || slot.Plan is not { } plan || !OwnsAttempt(plan, context, result.UpdateAttempt)) return;
             id = plan.Id;
             if (result.Status != "committed")
             { EndLocked(slot, RuntimeUpdateStage.Failed, OperationError.CheckpointIncompatible, "Checkpoint rejected: " + result.Error); rejected = slot.Snapshot; }

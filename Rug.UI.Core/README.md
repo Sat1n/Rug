@@ -363,7 +363,8 @@ The Hook gap and frozen native artifacts remain; 05B-02 human UI acceptance is u
 * [07B-01 preparation](RuntimeUpdates.md) adds trusted Gateway prepare/query/cancel,
   complete source-set reservations and new-checkpoint freezes. Cancellation releases
   only the plan's hold in the original coroutine; user pause/Stop/fault precedence
-  remains. Frozen is not code publication or a new generation.
+  remains. Every checkpoint outcome is bound to its invocation's plan/source,
+  including failed attempts without receipts. Frozen is not code publication or a new generation.
 * The per-plugin start lease serializes validated publication. The shell and future starts use the applied snapshot, not fresh disk reads. Staged UI construction rolls back on failure and releases old subscriptions only after success. Ready precedes host activation; dispose the watcher before the scheduler. Notifications distinguish pending, unchanged, applied, superseded and failed outcomes.
 
 ## Script-only demo tasks (Task 3.4)

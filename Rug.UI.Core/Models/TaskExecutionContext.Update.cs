@@ -9,7 +9,9 @@ public sealed partial class TaskExecutionContext
     private bool _updateFrozen;
     private long _updateAfterSequence;
     private TaskCompletionSource _updateReleased = Completed();
-    internal Action<CheckpointRecord>? CheckpointPublished { get; set; }
+    internal Action<CheckpointUpdateAttempt, CheckpointRecord>? CheckpointPublished { get; set; }
+    internal CheckpointUpdateAttempt CaptureCheckpointAttempt()
+    { lock (_gate) return new(Guid.NewGuid(), Identity, _updateId); }
     internal bool ArmUpdate(Guid id)
     {
         lock (_gate)
