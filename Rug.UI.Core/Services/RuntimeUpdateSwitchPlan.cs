@@ -121,7 +121,7 @@ public sealed partial class RuntimeUpdateCoordinator
         return snapshot; // Scheduler publishes after releasing candidate/catalog transition locks.
     }
     internal void PublishSwitchSnapshot(RuntimeUpdateSnapshot snapshot) => Notify(snapshot);
-    internal RuntimeUpdateSnapshot FinishSwitch(RuntimeSwitchWork work, bool success, OperationError error, string reason)
+    internal RuntimeUpdateSnapshot FinishSwitch(RuntimeSwitchWork work, bool success, OperationError error, string reason, bool notify = true)
     {
         RuntimeUpdateSnapshot snapshot;
         lock (_gate)
@@ -136,6 +136,7 @@ public sealed partial class RuntimeUpdateCoordinator
             foreach (var source in plan.Runs) { source.LifecycleChanged -= plan.Handler; source.ReleaseUpdate(plan.Id); }
             slot.Plan = null; slot.Expires = DateTimeOffset.UtcNow.AddMinutes(10); plan.Ended.TrySetResult();
         }
-        Notify(snapshot); return snapshot;
+        if (notify) Notify(snapshot);
+        return snapshot;
     }
 }

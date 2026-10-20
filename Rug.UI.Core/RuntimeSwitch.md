@@ -92,8 +92,12 @@ deadline. Staged UI builds happen during preparation; failed construction retain
 the old tree/subscriptions/config. UI commit/rollback/disposal runs outside
 transition locks; defaults and old subscription disposal happen only on success.
 
-Group publication holds the short plugin/catalog transition lease and fixed-order
-candidate lifecycle locks, then the plan lock. It directly checks raw cancellation,
+Group publication holds the short plugin/catalog transition lease, the scheduler
+host-lifecycle lock, fixed-order candidate lifecycle locks, then the plan lock.
+The host-lifecycle lock is the same one that publishes shutdown in DisposeAsync:
+if shutdown has won, publication is refused even when its cancellation callbacks
+are blocked and linked tokens have not changed. Cancellation is still executed
+outside the lock. It directly checks raw cancellation,
 deadline, candidate status, grant/input epochs and rule tokens, publishes the
 fixed catalog snapshot, marks the complete candidate group prepared, records the
 committed result, then opens one shared business gate. Only assignments/token
@@ -107,6 +111,19 @@ commit from hook completion. A new hook fault or Stop before group restoration
 finishes safely stops its peers and reports NeedsHuman; normal Stop/takeover stays
 cancellation, not a fabricated Lua fault. No old instance is revived. Restored
 runs then follow the existing Gateway/input-arbiter/grant/takeover paths.
+
+The group guard is armed before opening business admission, independently of UI
+disposal. Member failure/Stop transitions latch interruption under the member's
+lifecycle lock, before any external notification or cancellation propagation.
+The latch closes the shared admission gate immediately; its asynchronous guard
+stops peers and waits real cleanup outside transition locks. It has no lifecycle
+subscriptions and is joined/discarded with the bounded switch worker.
+Retained first-hook success is not sufficient for RestoreCompleted: the final
+decision locks the complete member set in fixed identity order and rechecks actual
+fault/Stop state, cancellation and first-hook completion. Failure wins if already
+recorded before that decision; only then is restoration sealed and the plan
+published as complete. Notifications happen after all transition locks release.
+Faults after this completion decision follow ordinary instance lifecycle rules.
 
 ## Origin and Lua data
 
@@ -185,3 +202,24 @@ retained old UI/config/paused instance on staged conflicts; LifecycleUiSmoke pas
 These are agent automation results. The new manual procedure is NOT RUN / awaits
 user confirmation. Minecraft/local-model acceptance and independent Hook root-
 cause experiments were not run or changed by this task.
+
+## Focused race correction (2026-10-20)
+
+Two actual-Lua/Fake-input deterministic regressions reproduce the review findings
+against c767e2d: a completed member faults while peer restoration and UI disposal
+are pending; and host shutdown wins while a raw shutdown callback blocks linked
+cancellation and staged UI publication is held. The first must stop the peer even
+before UI disposal is released and finish NeedsHuman, never RestoreCompleted.
+The second must refuse publication with zero replacement input, drain resources,
+and keep the old coroutines stopped. These are concurrency evidence, separate
+from the previously supplied user screenshots/manual main-path observations.
+The independent Hook gap and existing human-input acceptance limitations remain.
+
+Correction verification: SDK 10.0.402; all six managed projects built Debug and
+Release x64 with zero warnings/errors. Both configurations passed the final full
+script regression (41 switch scenarios, including both new barriers) and the UI
+Schema/state/real-watcher tests. Actual Debug WinUI/WGC passed Switch, SwitchPause
+and SwitchReject. The two races first failed against the original implementation,
+then passed with the corrected boundaries; stopped peer cancellation remains
+Stopped while the original Lua fault is retained. No new human keyboard/mouse
+acceptance was run or required for these deterministic corrections.

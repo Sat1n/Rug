@@ -37,25 +37,43 @@ internal static partial class CheckpointTests
             "definition","missing-hook","second-scene","post-scene","stop-fault","restore-fault","cancel-pre","cancel-post",
             "stop-pre","stop-post","revoke","target","supersede","disk-config","live-config","record","timeout","blocked-cancel",
             "concurrent","rule-revoked","native-pre","native-post","ui-build","ui-publish","pause-cancel","double-restore-fault","takeover-after",
-            "supersede-post","revert-post","validator-timeout"})
+            "supersede-post","revert-post","validator-timeout","ui-cleanup-fault","shutdown-commit"})
         {
             await RuntimeSwitchAsync(mode); Console.WriteLine("Runtime switch scenario PASS: "+mode);
         }
         Console.WriteLine("Runtime switch PASS: actual Lua group AFTER-only, immutable receipts, direct compatibility, staged rollback, irreversible stop, pause inheritance, request races and cleanup");
     }
+    public static async Task RunRuntimeSwitchRaceAsync(string mode)
+    { await RuntimeSwitchAsync(mode); Console.WriteLine("Runtime switch race PASS: "+mode); }
     private static async Task RuntimeSwitchAsync(string mode)
     {
         string old=mode=="stop-fault"?FreezeScript.Replace("rug.log('freeze-stop')","error('old stop fault')"):FreezeScript;
         await using var f=await Fixture.CreateAsync(script:old,input:true);
         await f.Scheduler.GetPluginSnapshotsAsync();
         var sources=new List<TaskExecutionContext>{await f.StartAsync()};
-        if(mode is "double" or "second-scene" or "double-restore-fault" or "supersede-post" or "revert-post") sources.Add(await f.StartAsync());
+        if(mode is "double" or "second-scene" or "double-restore-fault" or "supersede-post" or "revert-post" or "ui-cleanup-fault") sources.Add(await f.StartAsync());
         await Until(()=>sources.All(s=>f.StoreState.GetState(s.InstanceScope,"history",false)));
         var effective=(await f.Scheduler.GetPluginSnapshotsAsync()).Single();
         string target=mode switch {"definition"=>"rug.set_state('illegal',true)\n"+SwitchTarget,"missing-hook"=>"function on_init() end",
             "restore-fault"=>SwitchTarget.Replace("rug.press_key(68,1)","error('restore fault')"),_=>SwitchTarget};
         if(mode=="double-restore-fault") target=SwitchTarget.Replace("rug.press_key(68,1)","if string.find(json,'\"sourceRunGeneration\":2',1,true) then error('second restore fault') end\n rug.press_key(68,1)");
         if(mode=="takeover-after") target=SwitchTarget.Replace("rug.set_state('restored',1)","rug.set_state('restored',1); rug.sleep(60000)");
+        if(mode=="ui-cleanup-fault") target="""
+            function on_init() error('on_init replay') end
+            function on_restore(json)
+              if string.find(json,'"sourceRunGeneration":2',1,true) then
+                rug.set_state('waiting_restore',true)
+                while not rug.get_state('release_restore') do rug.sleep(1) end
+                rug.press_key(68,1)
+              end
+              rug.set_state('restored',1)
+            end
+            function on_tick()
+              while not rug.get_state('fail_tick') do rug.sleep(1) end
+              error('post-restore Lua fault while peer restoring')
+            end
+            function on_stop() rug.log('new-stop') end
+            """;
         string dir=Path.Combine(f.Root,"plugins","probe");
         await File.WriteAllTextAsync(Path.Combine(dir,"main.lua"),target);
         if(mode=="permissions")
@@ -80,6 +98,9 @@ internal static partial class CheckpointTests
         plan=FreezeView(f,sources[0]);
         var originalFiles=Directory.GetFiles(f.LogRoot,"*.json",SearchOption.AllDirectories).ToDictionary(p=>p,File.ReadAllBytes);
         var entered=Signal();var release=Signal();
+        var stage=new HeldSwitchUi(mode=="shutdown-commit");
+        using var heldUi=mode is "ui-cleanup-fault" or "shutdown-commit" ?
+            f.Scheduler.RuntimeUpdates.RegisterUiHandler("probe",(_,_)=>Task.FromResult<IPluginUiUpdate>(stage)):null;
         using var ui=mode is "ui-build" or "ui-publish"?f.Scheduler.RuntimeUpdates.RegisterUiHandler("probe",(_,_)=>
             mode=="ui-build"?Task.FromException<IPluginUiUpdate>(new InvalidDataException("candidate UI type conflict")):Task.FromResult<IPluginUiUpdate>(new FailingSwitchUi())):null;
         bool barrier=mode is "pause" or "cancel-pre" or "cancel-post" or "stop-pre" or "stop-post" or "revoke" or "target" or "supersede" or "disk-config" or "live-config" or "record" or "timeout" or "blocked-cancel" or "concurrent" or "rule-revoked" or "pause-cancel" or "supersede-post" or "revert-post";
@@ -97,8 +118,55 @@ internal static partial class CheckpointTests
             Guid.NewGuid(),"switch-test",new("probe"),DateTimeOffset.UtcNow.AddSeconds(mode=="timeout"?2:30));
         var task=f.Scheduler.Gateway.ExecuteAsync(caller,request,cancellation.Token);
         Task<OperationResult>? concurrent=null;
+        Task? shutdown=null;
+        CancellationTokenRegistration shutdownCallback=default;
+        var unblockShutdown=Signal();
         try
         {
+            if(mode=="shutdown-commit")
+            {
+                await Bound(stage.Entered.Task);
+                // Block the ORIGINAL source before any linked-token callbacks can propagate.
+                var shutdownSource=(CancellationTokenSource)typeof(Rug.UI.Core.Services.TaskScheduler)
+                    .GetField("_shutdown",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic)!.GetValue(f.Scheduler)!;
+                var shutdownEntered=Signal();
+                shutdownCallback=shutdownSource.Token.Register(()=>{shutdownEntered.TrySetResult();unblockShutdown.Task.GetAwaiter().GetResult();});
+                shutdown=Task.Run(async()=>await f.Scheduler.DisposeAsync());
+                await Bound(shutdownEntered.Task);
+                Check(f.Scheduler.Instances.Where(c=>!sources.Contains(c)).All(c=>!c.LifetimeToken.IsCancellationRequested),
+                    "shutdown barrier did not isolate pre-propagation publication");
+                stage.Release.TrySetResult();
+                var stoppedResult=await task.WaitAsync(TimeSpan.FromSeconds(8));
+                Check(stoppedResult.Status!=OperationStatus.Success,"host shutdown accepted but group committed");
+                Check(FreezeView(f,sources[0]).Stage!=RuntimeUpdateStage.Committed && f.Inputs.Skip(sources.Count).All(i=>i.KeyDownCalls==0),
+                    "host shutdown published or executed replacement AFTER");
+                unblockShutdown.TrySetResult();await Bound(shutdown);
+                Check(f.Scheduler.Instances.Count==0 && f.Captures.All(c=>c.Disposed),"shutdown candidate resources leaked");
+                return;
+            }
+            if(mode=="ui-cleanup-fault")
+            {
+                Check((await task.WaitAsync(TimeSpan.FromSeconds(8))).Status==OperationStatus.Success,"race setup did not commit");
+                await Bound(stage.Entered.Task); // Group open; worker held in UI disposal.
+                var replacements=f.Scheduler.Instances.ToArray();
+                var a=replacements.Single(c=>c.CheckpointOrigin?.ParentInstanceId==sources[0].InstanceId);
+                var b=replacements.Single(c=>c.CheckpointOrigin?.ParentInstanceId==sources[1].InstanceId);
+                await Until(()=>a.FirstHookCompleted.Task.IsCompletedSuccessfully && f.StoreState.GetState(b.InstanceScope,"waiting_restore",false));
+                f.StoreState.SetState(a.InstanceScope,"fail_tick",true);
+                await Until(()=>a.LastError is not null);
+                await Bound(b.Completion); // Peer safe stop must not wait for UI disposal to finish.
+                // A's retained first-hook success must not hide its subsequent Lua fault.
+                stage.Release.TrySetResult();
+                await Until(()=>FreezeView(f,sources[0]).Stage is RuntimeUpdateStage.NeedsHuman or RuntimeUpdateStage.RestoreCompleted);
+                Check(FreezeView(f,sources[0]).Stage==RuntimeUpdateStage.NeedsHuman,"faulted group reported RestoreCompleted");
+                await Bound(b.Completion);
+                Check(a.LastError is not null && b.LastError is null && b.TaskStatus==AutomationTaskStatus.Stopped &&
+                    f.Scheduler.Instances.Count==0 && f.Captures.All(c=>c.Disposed),"group fault lost real error, faulted peer cancellation or leaked resources");
+                Check(f.Inputs.Take(sources.Count).All(i=>i.KeyDownCalls==1) && f.Inputs.Skip(sources.Count).All(i=>i.KeyDownCalls==0),"group race replayed business input");
+                await Until(()=>f.Scheduler.RuntimeUpdates.MonitorCount==0 && f.Scheduler.RuntimeUpdates.ActivePlanCount==0);
+                Check(f.Scheduler.RuntimeUpdates.SubscriptionCount==0,"group race leaked plan subscriptions");
+                return;
+            }
             if(mode is "native-pre" or "native-post")
             {
                 await Until(()=>f.Captures.Count>sources.Count);
@@ -220,7 +288,21 @@ internal static partial class CheckpointTests
             await Until(()=>f.Scheduler.RuntimeUpdates.MonitorCount==0);
             Check(f.Scheduler.RuntimeUpdates.SubscriptionCount==0,"switch subscriptions leaked");
         }
-        finally {release.TrySetResult();validator.Release.TrySetResult();}
+        finally
+        {
+            release.TrySetResult();validator.Release.TrySetResult();stage.Release.TrySetResult();unblockShutdown.TrySetResult();
+            if(shutdown is not null) await Bound(shutdown);
+            shutdownCallback.Dispose();
+        }
+    }
+    private sealed class HeldSwitchUi(bool holdCommit) : IPluginUiUpdate
+    {
+        public readonly TaskCompletionSource Entered=Signal(),Release=Signal();
+        public async Task CommitAsync(CancellationToken token)
+        {if(holdCommit){Entered.TrySetResult();await Release.Task;}}
+        public Task RollbackAsync()=>Task.CompletedTask;
+        public async ValueTask DisposeAsync()
+        {if(!holdCommit){Entered.TrySetResult();await Release.Task;}}
     }
     private sealed class FailingSwitchUi : IPluginUiUpdate
     {

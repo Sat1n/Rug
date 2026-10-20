@@ -24,6 +24,7 @@ if (args.Contains("--checkpoint-restore-tests")) { await CheckpointTests.RunRest
 if (args.Contains("--plugin-update-tests")) { await CheckpointTests.RunPluginUpdatesAsync(); return; }
 if (args.Contains("--runtime-update-tests")) { await CheckpointTests.RunRuntimeUpdatesAsync(); return; }
 if (args.Contains("--runtime-switch-tests")) { await CheckpointTests.RunRuntimeSwitchesAsync(); return; }
+if (args.Contains("--runtime-switch-race")) { await CheckpointTests.RunRuntimeSwitchRaceAsync(args.Last()); return; }
 if (args.Contains("--runtime-update-late-tests")) { await CheckpointTests.RunLateCheckpointResultsAsync(); return; }
 if (args.Contains("--runtime-update-ui")) { await RuntimeUpdateUi.RunAsync(); return; }
 if (args.Contains("--runtime-switch-ui")) { await RuntimeUpdateUi.RunAsync("Switch"); await RuntimeUpdateUi.RunAsync("SwitchPause"); await RuntimeUpdateUi.RunAsync("SwitchReject"); return; }

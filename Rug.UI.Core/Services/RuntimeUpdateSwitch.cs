@@ -43,6 +43,8 @@ public sealed partial class TaskScheduler
     {
         var candidates = new List<(TaskExecutionContext Source, TaskExecutionContext New, CheckpointStartPlan Plan, RuntimeUpdateCompatibility Rule)>();
         var uiStages = new List<IPluginUiUpdate>();
+        var observationFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task groupGuard = Task.CompletedTask;
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(execution, _shutdown.Token);
         _ = work.Aborted.Task.ContinueWith(_ => { try { lifetime.Cancel(); } catch (ObjectDisposedException) { } },
             CancellationToken.None, TaskContinuationOptions.None, System.Threading.Tasks.TaskScheduler.Default);
@@ -97,6 +99,8 @@ public sealed partial class TaskScheduler
             // Final external checks happen outside all plan/lifecycle locks.
             await CheckUpdateGroupAsync(work, candidates, original, lifetime.Token, deadline).ConfigureAwait(false);
             foreach (var pair in candidates) Gateway.CompleteStartingRun(pair.New.InstanceId);
+            // Fault/Stop observation is live before the shared gate opens, including during slow UI disposal.
+            groupGuard = GuardRestoringGroupAsync(candidates.Select(p => p.New).ToArray(), work.Group, observationFinished.Task);
             RuntimeUpdateSnapshot? committed = null;
             await using (await AcquirePluginReloadAsync(work.Candidate.PluginId, lifetime.Token).ConfigureAwait(false))
             {
@@ -108,13 +112,18 @@ public sealed partial class TaskScheduler
                 {
                     var snapshots = new Dictionary<string, PluginSnapshot>(_snapshots!, StringComparer.OrdinalIgnoreCase) { [work.Candidate.PluginId] = work.Candidate };
                     var catalog = new Dictionary<string, PluginManifest>(_catalog!, StringComparer.OrdinalIgnoreCase) { [work.Candidate.PluginId] = work.Candidate.Manifest };
-                    TaskExecutionContext.CommitSwitchCandidates(candidates.Select(p => p.New).ToArray(), () =>
+                    // Same decision lock as DisposeAsync's _disposed publication, before cancellation callbacks run.
+                    lock (_lifecycleGate)
                     {
-                        foreach (var pair in candidates) pair.Rule.RegistrationToken.ThrowIfCancellationRequested();
-                        committed = RuntimeUpdates.CommitSwitch(work, original, lifetime.Token, deadline,
-                            () => { _snapshots = snapshots; _catalog = catalog; foreach (var pair in candidates) pair.New.Prepared = true; },
-                            boundary.CommitResult);
-                    });
+                        if (_disposed) throw new OperationCanceledException("Host shutdown won before group publication.");
+                        TaskExecutionContext.CommitSwitchCandidates(candidates.Select(p => p.New).ToArray(), () =>
+                        {
+                            foreach (var pair in candidates) pair.Rule.RegistrationToken.ThrowIfCancellationRequested();
+                            committed = RuntimeUpdates.CommitSwitch(work, original, lifetime.Token, deadline,
+                                () => { _snapshots = snapshots; _catalog = catalog; foreach (var pair in candidates) pair.New.Prepared = true; },
+                                boundary.CommitResult);
+                        });
+                    }
                     work.Result.TrySetResult(committed!);
                 }
                 finally { _catalogGate.Release(); }
@@ -156,6 +165,8 @@ public sealed partial class TaskScheduler
         }
         finally
         {
+            observationFinished.TrySetResult();
+            await groupGuard.ConfigureAwait(false);
             foreach (var stage in uiStages.AsEnumerable().Reverse())
             {
                 try { if (!work.Committed) await stage.RollbackAsync().ConfigureAwait(false); await stage.DisposeAsync().ConfigureAwait(false); }
@@ -164,14 +175,24 @@ public sealed partial class TaskScheduler
             lock (_lifecycleGate) if (--_starting == 0) _startsDrained.TrySetResult(true);
         }
     }
+    /// <summary>Armed before publication; lifecycle transitions signal directly, never wait for peer Stop.
+    /// @shape replacements: fixed one-to-one group, <=32; finished: bounded worker lifetime.
+    /// @source group: Models/RuntimeSwitchModels.cs#class:RuntimeSwitchGroup</summary>
+    private static async Task GuardRestoringGroupAsync(TaskExecutionContext[] replacements, RuntimeSwitchGroup group, Task finished)
+    {
+        await Task.WhenAny(group.Interrupted.Task, finished).ConfigureAwait(false);
+        if (!group.IsInterrupted) return;
+        foreach (var replacement in replacements) replacement.Cancel();
+        await Task.WhenAll(replacements.Select(c => c.Completion)).ConfigureAwait(false);
+    }
     private async Task ObserveRestoredGroupAsync(RuntimeSwitchWork work, TaskExecutionContext[] replacements)
     {
         var pending = replacements.Select(c => c.FirstHookCompleted.Task).ToList();
         var ended = Task.WhenAny(replacements.Select(c => c.Completion));
         while (pending.Count > 0)
         {
-            var next = await Task.WhenAny(pending.Cast<Task>().Append(ended)).ConfigureAwait(false);
-            if (next == ended)
+            var next = await Task.WhenAny(pending.Cast<Task>().Append(ended).Append(work.Group.Interrupted.Task)).ConfigureAwait(false);
+            if (next == ended || work.Group.IsInterrupted)
             {
                 if (replacements.Any(c => c.LastError is not null)) throw new InvalidOperationException("Replacement failed before group restoration completed.");
                 throw new OperationCanceledException("Replacement stopped before group restoration completed.");
@@ -183,7 +204,15 @@ public sealed partial class TaskScheduler
                 throw new OperationCanceledException("Replacement restore stopped.");
             }
         }
-        RuntimeUpdates.FinishSwitch(work, true, OperationError.None, "All restore hooks completed; sources remain stopped");
+        RuntimeUpdateSnapshot? completed = null;
+        lock (_lifecycleGate)
+        {
+            if (_disposed) throw new OperationCanceledException("Host shutdown before restoration completed.");
+            TaskExecutionContext.CompleteSwitchRestoration(replacements, work.Group, () =>
+                completed = RuntimeUpdates.FinishSwitch(work, true, OperationError.None,
+                    "All restore hooks completed; sources remain stopped", notify: false));
+        }
+        RuntimeUpdates.PublishSwitchSnapshot(completed!);
     }
     private async Task<(CheckpointStartPlan Plan, RuntimeUpdateCompatibility Rule)> PrepareUpdateRestoreAsync(
         RuntimeSwitchWork work, TaskExecutionContext source, CancellationToken token)

@@ -114,7 +114,7 @@ public sealed partial class TaskExecutionContext
             if (!legal) return;
             _status = status; _revision++;
             if (status is AutomationTaskStatus.Stopping or AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted)
-            { _stopping.TrySetResult(); _preservedForHuman = false; _pauseRequested = _resumeRequested = false; _resume.TrySetResult(); _pauseSignal.TrySetResult(); PulseActivation(); }
+            { SwitchGroup?.Interrupt(); _stopping.TrySetResult(); _preservedForHuman = false; _pauseRequested = _resumeRequested = false; _resume.TrySetResult(); _pauseSignal.TrySetResult(); PulseActivation(); }
         }
         Notify();
     }
@@ -247,7 +247,7 @@ public sealed partial class TaskExecutionContext
     // before Notify/Cancel run outside it; cancellation propagation is not admission.
     internal bool IsBusinessClosed
     {
-        get { lock (_gate) return _status is AutomationTaskStatus.Stopping or AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted; }
+        get { lock (_gate) return SwitchGroup is { IsInterrupted: true } || _status is AutomationTaskStatus.Stopping or AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted; }
     }
     internal void ValidateBusiness()
     {
@@ -260,7 +260,7 @@ public sealed partial class TaskExecutionContext
     }
     private void ValidateBusinessLocked(bool preparation = false)
     {
-        if ((!preparation && SwitchGroup is { IsOpen: false }) || _updateFrozen || _status is AutomationTaskStatus.Stopping or AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted or AutomationTaskStatus.Recovering or AutomationTaskStatus.AwaitingHuman)
+        if (SwitchGroup is { IsInterrupted: true } || (!preparation && SwitchGroup is { IsOpen: false }) || _updateFrozen || _status is AutomationTaskStatus.Stopping or AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted or AutomationTaskStatus.Recovering or AutomationTaskStatus.AwaitingHuman)
             throw new AutomationGateway.GatewayRejectedException(OperationError.InvalidLifecycleState);
     }
     internal (IDisposable Work, long Sequence) EnterCheckpoint(bool preparation = false)
@@ -454,6 +454,7 @@ public sealed partial class TaskExecutionContext
         {
             if (LastError is not null) return;
             LastError = error; _revision++;
+            SwitchGroup?.Interrupt(); // Signal only, before external lifecycle observers or cancellation callbacks.
         }
         Notify();
     }

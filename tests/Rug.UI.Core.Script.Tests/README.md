@@ -13,6 +13,12 @@ single/double AFTER-only, host rule/config/permission/node/hash/action checks,
 preparation rollback, post-stop scene failure, real fault preservation, direct
 original-token cancellation barriers, concurrent/deduplicated switches, paused
 continuation, uncooperative capture lifetime, UI staging failures and takeover.
+The suite also holds UI disposal while a restored member faults and another is
+still restoring, and holds shutdown cancellation propagation across the final
+publication boundary. Run either deterministic race independently with
+`--runtime-switch-race ui-cleanup-fault` or `--runtime-switch-race shutdown-commit`.
+Peers stop before UI disposal finishes; shutdown prevents group publication and
+replacement input. Tests use actual source/parent identities, not enumeration order.
 `--runtime-switch-ui` uses real WinUI/WGC for success, inherited Pause and red-scene
 failure. `--runtime-switch-manual` is the self-contained user fixture with update/
 red/green/done commands. See [contract/manual steps](../../Rug.UI.Core/RuntimeSwitch.md).

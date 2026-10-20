@@ -16,7 +16,15 @@ public sealed record RuntimeUpdateOrigin(Guid UpdateId, string RuleId, string Ch
 internal sealed class RuntimeSwitchGroup
 {
     public readonly TaskCompletionSource Opened = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    public bool IsOpen => Opened.Task.IsCompletedSuccessfully;
+    public readonly TaskCompletionSource Interrupted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _restoreDecision; // 0 observing, 1 interrupted, 2 restore completion committed.
+    public bool IsInterrupted => Volatile.Read(ref _restoreDecision) == 1;
+    public bool IsOpen => Opened.Task.IsCompletedSuccessfully && !IsInterrupted;
+    public void Interrupt()
+    {
+        if (Interlocked.CompareExchange(ref _restoreDecision, 1, 0) == 0) Interrupted.TrySetResult();
+    }
+    public bool CompleteRestoration() => Interlocked.CompareExchange(ref _restoreDecision, 2, 0) == 0;
 }
 internal sealed record RuntimeSwitchCandidate(RuntimeSwitchGroup Group, RuntimeUpdateOrigin Origin);
 internal sealed class RuntimeSwitchWork(Guid id, PluginSnapshot effective, PluginSnapshot candidate,

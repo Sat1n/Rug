@@ -31,14 +31,9 @@ public sealed partial class TaskExecutionContext
         Notify(); Cancel(); return paused;
     }
     internal static void CommitSwitchCandidates(TaskExecutionContext[] candidates, Action publish)
-    {
-        // Fixed identity order; no IO/service/UI callbacks under the transition locks.
-        var ordered = candidates.OrderBy(c => c.InstanceId).ToArray();
-        int entered = 0;
-        try
+        => WithSwitchCandidatesLocked(candidates, () =>
         {
-            foreach (var candidate in ordered) { Monitor.Enter(candidate._gate); entered++; }
-            foreach (var candidate in ordered)
+            foreach (var candidate in candidates)
             {
                 if (candidate._status != AutomationTaskStatus.Starting || candidate.LastError is not null) throw new HostStopWakeCancellation();
                 candidate.LifetimeToken.ThrowIfCancellationRequested();
@@ -46,6 +41,29 @@ public sealed partial class TaskExecutionContext
                 candidate.InputEpochToken.ThrowIfCancellationRequested();
                 candidate.InputSession?.Token.ThrowIfCancellationRequested();
             }
+            publish();
+        });
+    /// <summary>Fault/Stop and completion share the complete fixed-order lifecycle lock set.
+    /// @shape candidates: exact prepared replacement group; publish: pure plan mutation, no notifications.
+    /// @source group: Models/RuntimeSwitchModels.cs#class:RuntimeSwitchGroup</summary>
+    internal static void CompleteSwitchRestoration(TaskExecutionContext[] candidates, RuntimeSwitchGroup group, Action publish)
+        => WithSwitchCandidatesLocked(candidates, () =>
+        {
+            // First-hook success is retained even if a later tick fails. Read actual lifecycle under the same locks as failure/Stop.
+            if (candidates.Any(c => c.LastError is not null)) throw new InvalidOperationException("Replacement failed before group restoration completed.");
+            if (candidates.Any(c => c.IsTerminalLocked() || c._status == AutomationTaskStatus.Stopping ||
+                c.LifetimeToken.IsCancellationRequested || !c.FirstHookCompleted.Task.IsCompletedSuccessfully || !c.FirstHookCompleted.Task.Result) ||
+                !group.CompleteRestoration()) throw new HostStopWakeCancellation();
+            publish();
+        });
+    private static void WithSwitchCandidatesLocked(TaskExecutionContext[] candidates, Action publish)
+    {
+        // Fixed identity order; no IO/service/UI callbacks under the transition locks.
+        var ordered = candidates.OrderBy(c => c.InstanceId).ToArray();
+        int entered = 0;
+        try
+        {
+            foreach (var candidate in ordered) { Monitor.Enter(candidate._gate); entered++; }
             publish();
         }
         finally { for (int i = entered - 1; i >= 0; i--) Monitor.Exit(ordered[i]._gate); }
