@@ -14,6 +14,16 @@ public sealed partial class TaskExecutionContext
     internal InputTarget? VerifiedTarget { get; set; }
     internal RuntimeSwitchGroup? SwitchGroup { get; set; }
     internal TaskCompletionSource<bool> FirstHookCompleted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    /// <summary>Publication is pure pool mutation; Stop shares this boundary, without waiting for cancellation propagation.</summary>
+    internal void PublishObservation(Action publish, CancellationToken token)
+    {
+        lock (_gate)
+        {
+            ValidateBusinessLocked(); token.ThrowIfCancellationRequested(); LifetimeToken.ThrowIfCancellationRequested();
+            AuthorizationLease?.Token.ThrowIfCancellationRequested();
+            publish();
+        }
+    }
     internal bool CloseForUpdate()
     {
         bool paused;

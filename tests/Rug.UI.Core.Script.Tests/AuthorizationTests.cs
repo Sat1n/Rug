@@ -161,7 +161,8 @@ internal static class AuthorizationTests
         var ocr = new FakeOcr();
         var match = new FakeTemplateMatch();
         var input = new FakeInput();
-        using (var visual = new VisualEngineBridge(capture, ocr, match, new PermissionInterceptor(manifest, NullLogger.Instance, auth), root))
+        using (var visual = new VisualEngineBridge(capture, ocr, match, new PermissionInterceptor(manifest, NullLogger.Instance, auth),
+            new RunIdentity(manifest.Id, Guid.NewGuid(), 1, null, 0), root))
         {
             try { await visual.CaptureAsync(); throw new Exception("unapproved bridge captured"); }
             catch (PermissionDeniedException) { }

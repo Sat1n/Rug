@@ -8,6 +8,15 @@ tags: [lua, tests, input]
 
 # Lua coroutine bridge tests
 
+08A-01 adds `--observation-tests` (also in the full suite): host-only identity,
+frame/reference/cache provenance, held A while B publishes, padded stride/ROI,
+global byte/operation/frame/session limits, clock jumps, cancellation/Stop/late
+capture and actual Lua metadata compatibility/cleanup. Existing 07A tests retain
+the frame through paused UI-only updates; switching tests require a new frame.
+`--observation-native` separately uses actual WGC, WinRT OCR and OpenCV on one
+isolated window with matching source IDs; no fake or human-input verdict is used.
+See [observation contract](../../Rug.UI.Core/Observations.md) for limits and commands.
+
 07B-02 adds `--runtime-switch-tests` (also in the full suite): actual Lua/real files,
 single/double AFTER-only, host rule/config/permission/node/hash/action checks,
 preparation rollback, post-stop scene failure, real fault preservation, direct

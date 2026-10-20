@@ -92,7 +92,8 @@ internal static class GatewayRepairTests
         capture.Late.TrySetResult(new CapturedFrame([0, 0, 0, 255], 1, 1, 4));
         await UntilAsync(() => gateway.ActiveWorkCount == 0);
         var ocrResult = await gateway.ExecuteAsync(caller, Request(AutomationOperation.Ocr, identity, new { language = "zh-CN" }));
-        Expect(ocrResult.Status == OperationStatus.Success && ReferenceEquals(ocr.LastFrame, capture.Fresh), "late A overwrote B before OCR");
+        Expect(ocrResult.Status == OperationStatus.Success && ocr.LastFrame is not null &&
+            ocr.LastFrame.Pixels.SequenceEqual(capture.Fresh.Pixels), "late A overwrote B before OCR");
         await File.WriteAllBytesAsync(Path.Combine(root, "cache-template.png"), [137, 80, 78, 71]);
         var match = await gateway.ExecuteAsync(caller, Request(AutomationOperation.FindImage, identity, new { path = "cache-template.png" }));
         Expect(match is { Status: OperationStatus.Success, Value: ImageFindResult { X: 2 } } && matcher.LastWidth == 3,

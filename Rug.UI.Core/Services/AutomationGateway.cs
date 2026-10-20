@@ -329,11 +329,18 @@ public sealed class AutomationGateway : IAutomationGateway
                         if (!inputOperation && request.Operation is not (AutomationOperation.RestoreCheckpoint or AutomationOperation.SwitchRuntimeUpdate)) Volatile.Write(ref started, 1);
                         var previousBoundary = InputExecutionBoundary.Started.Value;
                         var previousCaller = InputExecutionBoundary.Caller.Value;
+                        var previousObservation = ObservationCallBoundary.Current.Value;
                         InputExecutionBoundary.Started.Value = () => Volatile.Write(ref started, 1);
                         InputExecutionBoundary.Caller.Value = caller;
+                        if (request.Operation is AutomationOperation.Capture or AutomationOperation.Ocr or AutomationOperation.FindImage)
+                            ObservationCallBoundary.Current.Value = new(callerToken, request.Deadline, _clock);
                         object? value;
                         try { value = await DispatchAsync(caller, request, run, dispatchToken.Token, callerToken, restoreBoundary).ConfigureAwait(false); }
-                        finally { InputExecutionBoundary.Started.Value = previousBoundary; InputExecutionBoundary.Caller.Value = previousCaller; }
+                        finally
+                        {
+                            InputExecutionBoundary.Started.Value = previousBoundary; InputExecutionBoundary.Caller.Value = previousCaller;
+                            ObservationCallBoundary.Current.Value = previousObservation;
+                        }
                         if (restoreBoundary.CommittedResult is null) dispatchToken.Token.ThrowIfCancellationRequested();
                         return value;
                     }
@@ -372,6 +379,8 @@ public sealed class AutomationGateway : IAutomationGateway
             MissingPermissions: error.Missing); }
         catch (PermissionDeniedException error) { result = new(OperationStatus.Rejected, OperationError.PermissionDenied, DeniedPermission: error.Permission, MissingPermissions: error.MissingPermissions); }
         catch (InputUnavailableException) { result = new(OperationStatus.Rejected, OperationError.InputUnavailable); }
+        catch (ObservationCapacityException) { result = new(OperationStatus.Rejected, OperationError.CapacityExceeded); }
+        catch (ObservationDeadlineException) { result = new(OperationStatus.TimedOut, OperationError.DeadlineExceeded); }
         catch (KeyNotFoundException) { result = new(OperationStatus.Rejected, OperationError.InvalidParameters); }
         catch (Exception error) when (error is ArgumentException or JsonException or InvalidCastException or FormatException or OverflowException)
         { result = new(OperationStatus.Rejected, OperationError.InvalidParameters); }

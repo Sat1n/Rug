@@ -27,12 +27,16 @@ internal static partial class CheckpointTests
     }
     private static async Task UpdatePreservesAsync()
     {
-        await using var f = await Fixture.CreateAsync(script: UpdateScript);
+        await using var f = await Fixture.CreateAsync(script: UpdateScript, vision: true);
         string dir = Path.Combine(f.Root, "plugins", "probe"), ui = Path.Combine(dir, "ui.json");
         await File.WriteAllTextAsync(ui, UpdateUi("Before"));
         var baseline = (await f.Scheduler.GetPluginSnapshotsAsync()).Single();
         var logs = new List<string>(); f.Log.Intercept = text => { lock (logs) logs.Add(text); };
         var run = await f.StartAsync(); await Until(() => f.StoreState.GetState(run.InstanceScope, "started", false));
+        var visionCaller = await f.Scheduler.Gateway.CreateContextAsync("probe", "ui-observation", AutomationSource.PluginUI);
+        OperationRequest VisionRequest(AutomationOperation op) => new(op, System.Text.Json.JsonSerializer.SerializeToElement(new { }),
+            Guid.NewGuid(), "ui-observation", OperationTarget.ForRun(run.Identity), DateTimeOffset.UtcNow.AddSeconds(10));
+        var cached = (CapturedFrameMetadata)(await f.Scheduler.Gateway.ExecuteAsync(visionCaller, VisionRequest(AutomationOperation.Capture))).Value!;
         var result = Channel.CreateUnbounded<HotReloadEventArgs>(); var failure = Channel.CreateUnbounded<HotReloadFailedEventArgs>();
         await using var service = new HotReloadService(Path.Combine(f.Root, "plugins"), f.Scheduler, NullLogger<HotReloadService>.Instance, TimeSpan.FromMilliseconds(50)) { WatchFiles = false };
         service.Reloaded += (_, e) => result.Writer.TryWrite(e); service.ReloadFailed += (_, e) => failure.Writer.TryWrite(e);
@@ -63,6 +67,9 @@ internal static partial class CheckpointTests
         await File.WriteAllTextAsync(ui, UpdateUi("After")); service.RequestReload(dir);
         Check((await NextUpdate(result.Reader)).Status == PluginUpdateStatus.UiApplied && visible == "After" && stages == 0 &&
             run.TaskStatus == AutomationTaskStatus.Paused && f.StoreState.GetState(run.InstanceScope, "retained", "") == "value", "UI update lost paused run state");
+        var recognized = (VisionOcrResult)(await f.Scheduler.Gateway.ExecuteAsync(visionCaller, VisionRequest(AutomationOperation.Ocr))).Value!;
+        Check(recognized.Observation.FrameId == cached.Observation.FrameId && recognized.Observation.Run == ObservationRun.From(run.Identity),
+            "UI-only reload replaced original runtime/cache/observation identity");
         service.RequestReload(dir); Check((await NextUpdate(result.Reader)).Status == PluginUpdateStatus.Unchanged && commits == 1, "unchanged content reapplied");
         foreach (bool afterBuild in new[] { false, true })
         {

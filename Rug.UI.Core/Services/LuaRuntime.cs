@@ -131,6 +131,7 @@ public sealed class LuaRuntime : IScriptRuntime
     private TaskExecutionContext? _context;
     private IInputArbiter _inputArbiter = InputArbiter.Shared;
     private VisualEngineBridge? _visual;
+    private readonly ObservationFramePool _observationFrames;
     private Lua? _lua;
     private LuaFunction? _drive;
     private LuaFunction? _prepareInit;
@@ -158,9 +159,11 @@ public sealed class LuaRuntime : IScriptRuntime
 
     public LuaRuntime(ICaptureService capture, IOcrService ocr, IInputService input, ILogger<LuaRuntime> logger,
         ICoordinateMapper? coordinateMapper = null, Func<nint, bool>? ensureForeground = null,
-        ITemplateMatchService? templateMatcher = null, ICommandBus? commandBus = null, IPluginAuthorization? authorization = null)
+        ITemplateMatchService? templateMatcher = null, ICommandBus? commandBus = null, IPluginAuthorization? authorization = null,
+        ObservationFramePool? observationFrames = null)
     {
         _authorization = authorization ?? new PluginAuthorization();
+        _observationFrames = observationFrames ?? ObservationFramePool.Shared;
         _capture = capture;
         _ocr = ocr;
         _matcher = templateMatcher ?? new TemplateMatchService();
@@ -258,7 +261,8 @@ public sealed class LuaRuntime : IScriptRuntime
             ? CancellationTokenSource.CreateLinkedTokenSource(ct, _authorizationLease.Token, _inputArbiter.AutomationToken)
             : CancellationTokenSource.CreateLinkedTokenSource(ct, _authorizationLease.Token);
         _permissions = new PermissionInterceptor(manifest, _logger, _gateway.Authorization, _caller.Authorization);
-        _visual = new VisualEngineBridge(_capture, _ocr, _matcher, _permissions, manifest.PluginDirectory);
+        _visual = new VisualEngineBridge(_capture, _ocr, _matcher, _permissions, _identity, manifest.PluginDirectory,
+            _observationFrames, _context, () => { _context?.ValidateBusiness(); _lifetime.Token.ThrowIfCancellationRequested(); });
         _inputBridge = new InputBridge(_input, _permissions, _coordinateMapper, _ensureForeground,
             _inputArbiter, InputOwner.ForRun(_identity), () =>
             {
@@ -825,9 +829,7 @@ public sealed class LuaRuntime : IScriptRuntime
 
     private async Task<object?> CaptureAsync(CancellationToken ct)
     {
-        CapturedFrame? frame = await _visual!.CaptureAsync(ct).ConfigureAwait(false);
-        // Cache descriptors for deduplication; the visual bridge owns the current pixel buffer.
-        return frame is null ? null : new CapturedFrameMetadata(frame.Width, frame.Height, frame.Stride);
+        return await _visual!.CaptureAsync(ct).ConfigureAwait(false);
     }
 
     private async Task<object?> FindImageAsync(JsonElement parameters, CancellationToken ct)
@@ -897,6 +899,7 @@ public sealed class LuaRuntime : IScriptRuntime
             table["width"] = frame.Width;
             table["height"] = frame.Height;
             table["stride"] = frame.Stride;
+            table["observation"] = ObservationTable(frame.Observation);
             return table;
         }
         if (value is ImageFindResult hit)
@@ -905,6 +908,7 @@ public sealed class LuaRuntime : IScriptRuntime
             table["x"] = hit.X;
             table["y"] = hit.Y;
             table["similarity"] = hit.Similarity;
+            table["observation"] = ObservationTable(hit.Observation);
             return table;
         }
         if (value is VisionOcrResult recognized)
@@ -912,6 +916,7 @@ public sealed class LuaRuntime : IScriptRuntime
             LuaTable table = NewTable();
             LuaTable blockTable = NewTable();
             table["text"] = recognized.Text;
+            table["observation"] = ObservationTable(recognized.Observation);
             for (int i = 0; i < recognized.Blocks.Count; i++)
             {
                 OcrTextBlock block = recognized.Blocks[i];
@@ -948,6 +953,8 @@ public sealed class LuaRuntime : IScriptRuntime
     }
 
     private LuaTable NewTable() => (LuaTable)_lua!.DoString("return {}")![0];
+    private static readonly JsonSerializerOptions ObservationJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    private object? ObservationTable(ObservationEnvelope observation) => ToLuaJson(JsonSerializer.SerializeToElement(observation, ObservationJson));
 
     private async Task<object?> ClickAsync(int x, int y, MouseButton button, InputDeliveryMode? mode, CancellationToken ct)
     {
@@ -977,6 +984,7 @@ public sealed class LuaRuntime : IScriptRuntime
 
     public void Stop()
     {
+        _visual?.Dispose(); // Invalidate references before potentially blocked cancellation callbacks; active leases drain independently.
         // A scheduler-owned run remains addressable for Stop until host cleanup
         // completes. Business admission is already closed by its lifecycle/token.
         if (_context is null && _identity is not null) _gateway?.EndRun(_identity.InstanceId);

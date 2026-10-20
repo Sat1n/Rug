@@ -21,6 +21,8 @@ if (args.Contains("--checkpoint-restore-manual")) { await ManualCheckpointRestor
 if (args.Contains("--checkpoint-restore-ui")) { await ManualCheckpointRestore.RunAsync(automated: true); return; }
 if (args.Contains("--checkpoint-restore-native")) { await NativeCheckpointRestore.RunAsync(); return; }
 if (args.Contains("--checkpoint-restore-tests")) { await CheckpointTests.RunRestoreAsync(); return; }
+if (args.Contains("--observation-tests")) { await CheckpointTests.RunObservationsAsync(); return; }
+if (args.Contains("--observation-native")) { await ObservationNativeSmoke.RunAsync(); return; }
 if (args.Contains("--plugin-update-tests")) { await CheckpointTests.RunPluginUpdatesAsync(); return; }
 if (args.Contains("--runtime-update-tests")) { await CheckpointTests.RunRuntimeUpdatesAsync(); return; }
 if (args.Contains("--runtime-switch-tests")) { await CheckpointTests.RunRuntimeSwitchesAsync(); return; }
@@ -168,7 +170,8 @@ try
     var matcher = new FakeTemplateMatch();
     var ocr = new FakeOcr();
     var directCapture = new SequenceCapture(_ => VisualFrame(true));
-    using (var visual = new VisualEngineBridge(directCapture, ocr, matcher, visionGate, visionRoot))
+    using (var visual = new VisualEngineBridge(directCapture, ocr, matcher, visionGate,
+        new RunIdentity("visual-test", Guid.NewGuid(), 1, null, 0), visionRoot))
     {
         Check((await visual.CaptureAsync())?.Width == 4, "visual capture did not cache the WGC frame");
         ImageFindResult? hit = await visual.FindImageAsync("template.png", 0.9f, new Rect(1, 1, 3, 2));
@@ -193,7 +196,8 @@ try
     }
 
     using (var deniedVisual = new VisualEngineBridge(new SequenceCapture(_ => VisualFrame(true)),
-        new FakeOcr(), matcher, TestAuthorizationHost.Gate(new PluginManifest([]), NullLogger.Instance), visionRoot))
+        new FakeOcr(), matcher, TestAuthorizationHost.Gate(new PluginManifest([]), NullLogger.Instance),
+        new RunIdentity("visual-test", Guid.NewGuid(), 1, null, 0), visionRoot))
     {
         try { await deniedVisual.CaptureAsync(); throw new Exception("capture without grant succeeded"); }
         catch (PermissionDeniedException ex) when (ex.Permission == Permission.VisionCapture) { }
@@ -263,7 +267,7 @@ try
     });
     var repeatedMatch = new FakeTemplateMatch();
     using (var visual = new VisualEngineBridge(repeatedCapture, new FakeOcr(), repeatedMatch,
-        visionGate, visionRoot))
+        visionGate, new RunIdentity("visual-test", Guid.NewGuid(), 1, null, 0), visionRoot))
     {
         for (int i = 0; i < 1000; i++)
         {
@@ -1128,6 +1132,7 @@ await CheckpointTests.RunAsync();
 await CheckpointTests.RunPluginUpdatesAsync();
 await CheckpointTests.RunRuntimeUpdatesAsync();
 await CheckpointTests.RunRuntimeSwitchesAsync();
+await CheckpointTests.RunObservationsAsync();
 await LifecycleTests.RunAsync();
 await AuthorizationTests.RunAsync();
 await InputArbitrationTests.RunAsync();

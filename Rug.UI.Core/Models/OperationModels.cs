@@ -12,7 +12,7 @@ public enum OperationError { None, InvalidParameters, PermissionDenied, Instance
     CheckpointChanged, CheckpointIncompatible, RestoreUnavailable, SourceStillActive, Busy, SceneRejected,
     NoPendingUpdate, UpdateUnavailable, UpdatePreparing, UpdateSuperseded, UpdateIncompatible, UpdateIrreversible }
 public enum AutomationSource { PluginUI, Lua, Agent, Mcp }
-public sealed record CapturedFrameMetadata(int Width, int Height, int Stride);
+public sealed record CapturedFrameMetadata(int Width, int Height, int Stride, ObservationEnvelope Observation);
 
 /// <summary>Untrusted operation data. Target carries no HWND, principal or permission grants.</summary>
 public sealed record OperationTarget(string PluginId, Guid? InstanceId = null,

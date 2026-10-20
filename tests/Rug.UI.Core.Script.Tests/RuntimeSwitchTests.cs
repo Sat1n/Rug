@@ -37,7 +37,7 @@ internal static partial class CheckpointTests
             "definition","missing-hook","second-scene","post-scene","stop-fault","restore-fault","cancel-pre","cancel-post",
             "stop-pre","stop-post","revoke","target","supersede","disk-config","live-config","record","timeout","blocked-cancel",
             "concurrent","rule-revoked","native-pre","native-post","ui-build","ui-publish","pause-cancel","double-restore-fault","takeover-after",
-            "supersede-post","revert-post","validator-timeout","ui-cleanup-fault","shutdown-commit"})
+            "supersede-post","revert-post","validator-timeout","ui-cleanup-fault","shutdown-commit","observations"})
         {
             await RuntimeSwitchAsync(mode); Console.WriteLine("Runtime switch scenario PASS: "+mode);
         }
@@ -48,16 +48,19 @@ internal static partial class CheckpointTests
     private static async Task RuntimeSwitchAsync(string mode)
     {
         string old=mode=="stop-fault"?FreezeScript.Replace("rug.log('freeze-stop')","error('old stop fault')"):FreezeScript;
+        if(mode=="observations")old=old.Replace("rug.set_state('init',1)","rug.set_state('init',1); local f=rug.capture(); rug.set_state('old_frame',f.observation.frameId)");
         await using var f=await Fixture.CreateAsync(script:old,input:true);
         await f.Scheduler.GetPluginSnapshotsAsync();
         var sources=new List<TaskExecutionContext>{await f.StartAsync()};
         if(mode is "double" or "second-scene" or "double-restore-fault" or "supersede-post" or "revert-post" or "ui-cleanup-fault") sources.Add(await f.StartAsync());
         await Until(()=>sources.All(s=>f.StoreState.GetState(s.InstanceScope,"history",false)));
+        string oldFrame=f.StoreState.GetState(sources[0].InstanceScope,"old_frame","");
         var effective=(await f.Scheduler.GetPluginSnapshotsAsync()).Single();
         string target=mode switch {"definition"=>"rug.set_state('illegal',true)\n"+SwitchTarget,"missing-hook"=>"function on_init() end",
             "restore-fault"=>SwitchTarget.Replace("rug.press_key(68,1)","error('restore fault')"),_=>SwitchTarget};
         if(mode=="double-restore-fault") target=SwitchTarget.Replace("rug.press_key(68,1)","if string.find(json,'\"sourceRunGeneration\":2',1,true) then error('second restore fault') end\n rug.press_key(68,1)");
         if(mode=="takeover-after") target=SwitchTarget.Replace("rug.set_state('restored',1)","rug.set_state('restored',1); rug.sleep(60000)");
+        if(mode=="observations")target=target.Replace("rug.press_key(68,1)","local f=rug.capture(); rug.set_state('new_frame',f.observation.frameId); rug.set_state('frame_owner',f.observation.run.instanceId); rug.press_key(68,1)");
         if(mode=="ui-cleanup-fault") target="""
             function on_init() error('on_init replay') end
             function on_restore(json)
@@ -219,7 +222,7 @@ internal static partial class CheckpointTests
                 release.TrySetResult();
             }
             var result=await task;
-            if(mode is "success" or "double" or "pause" or "restore-fault" or "double-restore-fault" or "takeover-after" or "concurrent")
+            if(mode is "success" or "double" or "pause" or "restore-fault" or "double-restore-fault" or "takeover-after" or "concurrent" or "observations")
             {
                 Check(result.Status==OperationStatus.Success && result.Value is RuntimeUpdateSnapshot{Stage:RuntimeUpdateStage.Committed},"switch did not commit: "+result.Error+"/"+FreezeView(f,sources[0]).Reason);
                 var snapshot=(RuntimeUpdateSnapshot)result.Value!;
@@ -250,6 +253,8 @@ internal static partial class CheckpointTests
                             restored.RuntimeUpdateOrigin!.CheckpointFingerprint==progress.Checkpoint!.Fingerprint && restored.InstanceId!=progress.Identity.InstanceId &&
                             restored.RunGeneration>progress.Identity.RunGeneration && restored.TargetBindingId!=progress.Identity.TargetBindingId,"wrong new source/identity metadata");
                         Check(f.StoreState.GetState(restored.InstanceScope,"restored",0)==1 && !f.StoreState.Contains(restored.InstanceScope,"init"),"restore state/init replay");
+                        if(mode=="observations")Check(oldFrame.Length>0 && f.StoreState.GetState(restored.InstanceScope,"new_frame","")!=oldFrame &&
+                            f.StoreState.GetState(restored.InstanceScope,"frame_owner","")==restored.InstanceId.ToString(),"switched runtime inherited old frame identity");
                     }
                     Check(f.Inputs.Skip(sources.Count).All(i=>i.KeyDownCalls==1 && i.KeyUpCalls==1),"AFTER not once per replacement");
                 }

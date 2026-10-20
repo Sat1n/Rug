@@ -11,7 +11,7 @@ namespace Rug.UI.Core.Services;
 /// and frees the native buffer deterministically. Native calls run on a background
 /// (MTA) thread via Task.Run — the WGC/WinRT path requires MTA.
 /// </summary>
-public sealed class CaptureService : ICaptureService
+public sealed class CaptureService : ICaptureService, IBoundedFrameCapture
 {
     private readonly object _gate = new();
     private CapturerHandle? _capturer;
@@ -41,13 +41,30 @@ public sealed class CaptureService : ICaptureService
         }, cancellationToken);
 
     public Task<CapturedFrame?> GrabFrameAsync(CancellationToken cancellationToken = default)
-        => Task.Run(() => GrabFrame(), cancellationToken);
+        => GrabFrameBoundedAsync(64L * 1024 * 1024, cancellationToken);
+    Task<CapturedFrame?> IBoundedFrameCapture.GrabFrameBoundedAsync(long maxBytes, CancellationToken cancellationToken)
+        => GrabFrameBoundedAsync(maxBytes, cancellationToken);
+    private Task<CapturedFrame?> GrabFrameBoundedAsync(long maxBytes, CancellationToken cancellationToken)
+    {
+        if (maxBytes <= 0 || maxBytes > 64L * 1024 * 1024) throw new ArgumentOutOfRangeException(nameof(maxBytes));
+        return Task.Run(() => GrabFrame(maxBytes), cancellationToken);
+    }
 
-    private CapturedFrame? GrabFrame()
+    private CapturedFrame? GrabFrame(long maxBytes)
     {
         CapturerHandle? capturer;
-        lock (_gate) capturer = _capturer;
-        if (capturer is null || capturer.IsInvalid || capturer.IsClosed) return null;
+        bool retained = false;
+        lock (_gate)
+        {
+            capturer = _capturer;
+            if (capturer is null || capturer.IsInvalid || capturer.IsClosed) return null;
+            capturer.DangerousAddRef(ref retained);
+        }
+        try { return GrabRetained(capturer, maxBytes); }
+        finally { if (retained) capturer.DangerousRelease(); }
+    }
+    private static CapturedFrame? GrabRetained(CapturerHandle capturer, long maxBytes)
+    {
 
         int rc = RugCoreNative.Rug_GrabFrame(capturer.DangerousGetHandle(), out RugFrame frame);
         if (!HasFrame(rc)) return null;
@@ -55,10 +72,7 @@ public sealed class CaptureService : ICaptureService
 
         try
         {
-            if (frame.Format != RugPixelFormat.Bgra8 || frame.Width <= 0 || frame.Height <= 0)
-                throw new InvalidDataException("Native capture frame layout is invalid.");
-
-            int bytes = (int)frame.DataLength;
+            int bytes = ValidateLayout(frame, maxBytes);
             var pixels = new byte[bytes];
             System.Runtime.InteropServices.Marshal.Copy(frame.Data, pixels, 0, bytes);
             return new CapturedFrame(pixels, frame.Width, frame.Height, frame.Stride);
@@ -67,6 +81,14 @@ public sealed class CaptureService : ICaptureService
         {
             RugCoreNative.Rug_FreeBuffer(frame.Data);  // native new[] buffer
         }
+    }
+    internal static int ValidateLayout(RugFrame frame, long maxBytes = 64L * 1024 * 1024)
+    {
+        if (frame.Format != RugPixelFormat.Bgra8 || frame.Width <= 0 || frame.Height <= 0 ||
+            frame.Stride < (long)frame.Width * 4 || (long)frame.Stride * frame.Height > frame.DataLength || frame.DataLength == 0)
+            throw new InvalidDataException("Native capture frame layout is invalid.");
+        if (frame.DataLength > maxBytes) throw new ObservationCapacityException("Native frame exceeds the host's managed-copy byte limit.");
+        return checked((int)frame.DataLength);
     }
     internal static bool HasFrame(int status)
     {
