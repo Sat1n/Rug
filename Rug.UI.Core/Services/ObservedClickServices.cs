@@ -80,7 +80,12 @@ internal sealed class ObservedClickTransaction : IDisposable
     }
     internal ObservedClickResult Result(string status, string reason) => new(status,reason,_source.Observation.ObservationId,
         _source.Observation.FrameId,Point,_policy.Id,Array.AsReadOnly(_validations.ToArray()));
-    internal void PublishDetails(string stage) => InputExecutionBoundary.Observation.Value?.Invoke(Result("pending",stage));
+    internal void PublishDetails(string stage)
+    {
+        var details=Result("pending",stage);
+        InputExecutionBoundary.Observation.Value?.Invoke(details);
+        ExecutionTraceScope.Current.Value?.Emit(TraceEventKind.Validation,reason:stage,observation:ExecutionTraceScope.Observation(details));
+    }
     internal void Validate(CancellationToken token, Action? validateInput = null)
     {
         CheckAdmission(token);
@@ -147,6 +152,7 @@ internal sealed class ObservedClickTransaction : IDisposable
             if(_validations.Count>3) throw new InvalidOperationException("Unexpected observed verification stage.");
             PublishDetails(stage);
             Compare(_source.Frame,owned);
+            PublishDetails(stage+":roi-passed");
             Validate(token); CheckVerificationDeadline(started); linked.Token.ThrowIfCancellationRequested();
         }
         catch(ObservationCapacityException) { throw new ObservedClickException(ObservedClickReason.ValidationUnavailable); }

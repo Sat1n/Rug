@@ -27,9 +27,11 @@ public sealed class ManifestAutomationPermissionChecker : IAutomationPermissionC
 public sealed class AutomationGateway : IAutomationGateway
 {
     private sealed record Run(RunIdentity Identity, PluginInstallation Installation, string[] Permissions, CancellationToken Token,
-        Func<AutomationOperation, JsonElement, CancellationToken, Task<object?>> Execute, TaskExecutionContext? Lifecycle, bool Preparing = false);
-    private sealed class Entry(string fingerprint)
+        Func<AutomationOperation, JsonElement, CancellationToken, Task<object?>> Execute, TaskExecutionContext? Lifecycle, bool Preparing = false,
+        ExecutionTraceHandle? Trace = null);
+    private sealed class Entry(string fingerprint, TraceOperation trace)
     {
+        public TraceOperation Trace { get; } = trace;
         public string Fingerprint { get; } = fingerprint;
         public DateTimeOffset CompletedAt { get; set; }
         public bool WorkInFlight { get; set; }
@@ -63,14 +65,17 @@ public sealed class AutomationGateway : IAutomationGateway
         Func<string, CancellationToken, Task<PluginManifest>>? getPlugin = null,
         Func<string, nint, IReadOnlyDictionary<string, object?>, Action<RunIdentity>?, CancellationToken, Task<RunIdentity>>? start = null,
         Func<Guid, Task>? stop = null, Func<Guid, bool>? pause = null, Func<Guid, bool>? resume = null,
-        TimeProvider? clock = null, IPluginAuthorization? authorization = null, Func<Task>? waitForDispatch = null, Func<Guid, Guid, DateTimeOffset, CancellationToken, Task<RecoveryResult>>? verifyRecovery = null)
+        TimeProvider? clock = null, IPluginAuthorization? authorization = null, Func<Task>? waitForDispatch = null, Func<Guid, Guid, DateTimeOffset, CancellationToken, Task<RecoveryResult>>? verifyRecovery = null,
+        ExecutionTraceRecorder? traces = null)
     {
         _logger = logger; _permissions = permissions ?? new ManifestAutomationPermissionChecker();
         _getPlugin = getPlugin; _start = start; _stop = stop; _pause = pause; _resume = resume;
         _clock = clock ?? TimeProvider.System;
         Authorization = authorization ?? new PluginAuthorization();
         _waitForDispatch = waitForDispatch; _verifyRecovery = verifyRecovery;
+        Traces=traces??ExecutionTraceRecorder.Disabled();
     }
+    public ExecutionTraceRecorder Traces { get; }
     public IPluginAuthorization Authorization { get; }
     public int RetainedOperationCount { get { lock (_gate) { Prune(); return _entries.Count; } } }
     public int RegisteredRunCount { get { lock (_gate) return _runs.Count; } }
@@ -101,7 +106,8 @@ public sealed class AutomationGateway : IAutomationGateway
         lock (_gate)
         {
             token.ThrowIfCancellationRequested();
-            var run = new Run(identity, PluginInstallation.From(manifest), manifest.Permissions.ToArray(), token, execute, lifecycle);
+            var trace=lifecycle?.Trace??Traces.OpenRun(identity);
+            var run = new Run(identity, PluginInstallation.From(manifest), manifest.Permissions.ToArray(), token, execute, lifecycle,Trace:trace);
             if (_runs.TryGetValue(identity.InstanceId, out var preparing) && preparing.Preparing &&
                 preparing.Identity == identity && ReferenceEquals(preparing.Lifecycle, lifecycle)) _runs[identity.InstanceId] = run with { Preparing = true };
             else _runs.Add(identity.InstanceId, run);
@@ -115,7 +121,7 @@ public sealed class AutomationGateway : IAutomationGateway
             if (context.TaskStatus == AutomationTaskStatus.Stopping) throw new OperationCanceledException();
             _runs.Add(context.InstanceId, new(context.Identity, PluginInstallation.From(manifest), manifest.Permissions.ToArray(),
                 context.Cancellation.Token, (_, _, _) => Task.FromException<object?>(new GatewayRejectedException(OperationError.UnsupportedOperation)),
-                context, Preparing: true));
+                context, Preparing: true,Trace:context.Trace));
         }
     }
     internal void CompleteStartingRun(Guid instanceId)
@@ -159,9 +165,8 @@ public sealed class AutomationGateway : IAutomationGateway
         }
         return [required];
     }
-    private IReadOnlyList<string> Missing(AutomationCallContext caller, OperationRequest request, Run? run)
+    private IReadOnlyList<string> Missing(AutomationCallContext caller, OperationRequest request, Run? run, string[] required)
     {
-        var required = Required(caller, request).ToArray();
         return Authorization.Missing(caller.Authorization, required).Concat(
             required.Where(p => run is not null && !run.Permissions.Contains(p))).Concat(
             _permissions.IsAllowed(caller, run?.Permissions ?? caller.Permissions, request.Operation) ? [] : required)
@@ -169,9 +174,9 @@ public sealed class AutomationGateway : IAutomationGateway
     }
     /// <summary>@shape caller: host capability; request: untrusted JSON/target; run: registered executor or null.
     /// @source identity: Models/RunIdentity.cs#class:RunIdentity</summary>
-    private OperationError Validate(AutomationCallContext caller, OperationRequest request, out Run? run, out string[] missing)
+    private OperationError Validate(AutomationCallContext caller, OperationRequest request, out Run? run, out string[] missing, out TraceAuthorization? decision)
     {
-        run = null; missing = [];
+        run = null; missing = []; decision=null;
         if (!ReferenceEquals(caller.Owner, this) || !SamePlugin(caller.PluginId, request.Target.PluginId))
             return OperationError.InvalidCaller;
         if (!Enum.IsDefined(request.Operation)) return OperationError.UnsupportedOperation;
@@ -214,10 +219,15 @@ public sealed class AutomationGateway : IAutomationGateway
                 return OperationError.InvalidLifecycleState;
             if (request.Operation != AutomationOperation.Stop && run.Token.IsCancellationRequested) return OperationError.InstanceNotFound;
         }
-        missing = Missing(caller, request, run).ToArray();
+        var required=Required(caller,request).ToArray();
+        missing = Missing(caller, request, run,required).ToArray();
+        decision=new(missing.Length>0?"denied":"prechecked",Array.AsReadOnly(required),null,Array.AsReadOnly(missing));
         if (missing.Length > 0) return OperationError.PermissionDenied;
         if (!_permissions.IsAllowed(caller, run?.Permissions ?? caller.Permissions, request.Operation))
+        {
+            decision=decision with{Decision="denied"};
             return OperationError.PermissionDenied;
+        }
         return OperationError.None;
     }
 
@@ -232,16 +242,19 @@ public sealed class AutomationGateway : IAutomationGateway
         lock (_gate)
         {
             Prune();
-            OperationError error = Validate(caller, request, out run, out var missing);
-            if (error != OperationError.None) return FinishImmediate(caller, request, OperationStatus.Rejected, error, missing);
+            OperationError error = Validate(caller, request, out run, out var missing,out var decision);
+            if (error != OperationError.None) return FinishImmediate(caller, request, OperationStatus.Rejected, error, missing,decision);
             key = new(caller.Principal, caller.Source, caller.Authorization.Installation, caller.PluginId.ToUpperInvariant(), caller.BoundRun?.InstanceId,
                 request.Target.InstanceId, request.Target.RunGeneration, request.Target.TargetBindingId, request.OperationId);
             string fingerprint = request.Operation + ":" + request.Parameters.GetRawText();
             if (request.Operation == AutomationOperation.RestoreCheckpoint)
                 fingerprint += ":" + caller.RestoreTarget!.Hwnd + ":" + caller.RestoreTarget.WindowStamp;
             if (_entries.TryGetValue(key, out entry!))
+            {
+                entry.Trace.Emit(TraceEventKind.RepeatedRequest,reason:entry.Fingerprint==fingerprint?"Reuse original execution/result":"Deduplication conflict");
                 return entry.Fingerprint == fingerprint ? entry.Completion.Task :
                     FinishImmediate(caller, request, OperationStatus.Rejected, OperationError.DeduplicationConflict);
+            }
             if (!OperationParameterValidator.IsValid(request.Operation, request.Parameters))
                 return FinishImmediate(caller, request, OperationStatus.Rejected, OperationError.InvalidParameters);
             if (request.Deadline <= _clock.GetUtcNow())
@@ -250,18 +263,25 @@ public sealed class AutomationGateway : IAutomationGateway
                 return FinishImmediate(caller, request, OperationStatus.Cancelled, OperationError.Cancelled);
             if (_entries.Count >= Capacity || _activeWork >= ActiveCapacity)
                 return FinishImmediate(caller, request, OperationStatus.Rejected, OperationError.CapacityExceeded);
-            entry = new(fingerprint); _entries.Add(key, entry);
+            entry = new(fingerprint,Traces.Operation(run?.Trace,caller,request)); _entries.Add(key, entry);
+            entry.Trace.Emit(TraceEventKind.Request);
             request = request with { Parameters = request.Parameters.Clone() };
         }
         _ = ExecuteCoreAsync(caller, request, run, key, entry, cancellationToken);
         return entry.Completion.Task;
     }
     private Task<OperationResult> FinishImmediate(AutomationCallContext caller, OperationRequest request,
-        OperationStatus status, OperationError error, string[]? missing = null)
+        OperationStatus status, OperationError error, string[]? missing = null,TraceAuthorization? decision=null)
     {
         missing ??= [];
+        var trace=Traces.Operation(null,caller,request,actual:false);
+        trace.Emit(TraceEventKind.Request);
+        trace.Emit(TraceEventKind.Rejected,status:status.ToString(),error:error.ToString(),uncertain:false,
+            authorization:decision);
         var result = new OperationResult(status, error, DeniedPermission: missing.FirstOrDefault(),
-            MissingPermissions: Array.AsReadOnly(missing)); Record(caller, request, result); return Task.FromResult(result);
+            MissingPermissions: Array.AsReadOnly(missing)); Record(caller, request, result);
+        trace.Emit(TraceEventKind.CallerReturned,status:status.ToString(),error:error.ToString(),uncertain:false);
+        return Task.FromResult(result);
     }
     /// <summary>@shape entry: one deduplication completion; work: cancellable or noncooperative service Task.
     /// @source request: AutomationGateway.ExecuteAsync</summary>
@@ -287,7 +307,8 @@ public sealed class AutomationGateway : IAutomationGateway
             Task<object?> work;
             lock (_gate)
             {
-                OperationError error = Validate(caller, request, out _, out var missing);
+                OperationError error = Validate(caller, request, out _, out var missing,out var decision);
+                if(error!=OperationError.None)entry.Trace.Emit(TraceEventKind.Rejected,error:error.ToString(),authorization:decision);
                 if (error != OperationError.None) throw new GatewayRejectedException(error, missing);
                 linked.Token.ThrowIfCancellationRequested();
                 if (request.Deadline <= _clock.GetUtcNow())
@@ -301,6 +322,7 @@ public sealed class AutomationGateway : IAutomationGateway
                 var lifetime = business ? run?.Lifecycle?.EnterOperation(
                     request.Operation is AutomationOperation.Click or AutomationOperation.PressKey or AutomationOperation.ClickObserved) : null;
                 // Admission is atomic with EndRun; service code never runs while holding the registry gate.
+                entry.Trace.Emit(TraceEventKind.WorkStarted);
                 work = Task.Run(async () =>
                 {
                     using var actualLifetime = lifetime;
@@ -319,11 +341,22 @@ public sealed class AutomationGateway : IAutomationGateway
                         executionToken.ThrowIfCancellationRequested();
                         lock (_gate)
                         {
-                            OperationError error = Validate(caller, request, out _, out var missing);
+                            OperationError error = Validate(caller, request, out _, out var missing,out var decision);
+                            if(error!=OperationError.None)entry.Trace.Emit(TraceEventKind.Rejected,error:error.ToString(),authorization:decision);
                             if (error != OperationError.None) throw new GatewayRejectedException(error, missing);
                         }
                         // Acquisition is the actual admission boundary; no handler runs under the authorization lock.
-                        using var admission = Authorization.Admit(caller.Authorization, Required(caller, request));
+                        var required=Required(caller,request).ToArray();
+                        AuthorizationLease admitted;
+                        try{admitted=Authorization.Admit(caller.Authorization,required);}
+                        catch(PermissionDeniedException denied)
+                        {
+                            entry.Trace.Emit(TraceEventKind.Rejected,error:OperationError.PermissionDenied.ToString(),
+                                authorization:new("denied",Array.AsReadOnly(required),null,denied.MissingPermissions));
+                            throw;
+                        }
+                        using var admission = admitted;
+                        entry.Trace.Emit(TraceEventKind.Authorized,authorization:new("allowed",Array.AsReadOnly(admission.Permissions),admission.Revision));
                         using var dispatchToken = CancellationTokenSource.CreateLinkedTokenSource(executionToken, admission.Token);
                         dispatchToken.Token.ThrowIfCancellationRequested();
                         if (business) run?.Lifecycle?.ValidateBusiness();
@@ -333,6 +366,8 @@ public sealed class AutomationGateway : IAutomationGateway
                         var previousCaller = InputExecutionBoundary.Caller.Value;
                         var previousObservation = ObservationCallBoundary.Current.Value;
                         var previousDetails = InputExecutionBoundary.Observation.Value;
+                        var previousTrace = ExecutionTraceScope.Current.Value;
+                        ExecutionTraceScope.Current.Value=entry.Trace;
                         InputExecutionBoundary.Started.Value = () => Volatile.Write(ref started, 1);
                         InputExecutionBoundary.Caller.Value = caller;
                         InputExecutionBoundary.Observation.Value = request.Operation == AutomationOperation.ClickObserved
@@ -340,12 +375,25 @@ public sealed class AutomationGateway : IAutomationGateway
                         if (request.Operation is AutomationOperation.Capture or AutomationOperation.Ocr or AutomationOperation.FindImage or AutomationOperation.ClickObserved)
                             ObservationCallBoundary.Current.Value = new(callerToken, request.Deadline, _clock);
                         object? value;
-                        try { value = await DispatchAsync(caller, request, run, dispatchToken.Token, callerToken, restoreBoundary).ConfigureAwait(false); }
+                        try
+                        {
+                            entry.Trace.Emit(TraceEventKind.Dispatch);
+                            value = await DispatchAsync(caller, request, run, dispatchToken.Token, callerToken, restoreBoundary).ConfigureAwait(false);
+                            if(ExecutionTraceScope.Observation(value) is {} observation)
+                                entry.Trace.Emit(TraceEventKind.Observation,observation:observation);
+                            if(value is RunIdentity created)
+                            {
+                                ExecutionTraceHandle? linkedTrace;
+                                lock(_gate)linkedTrace=_runs.GetValueOrDefault(created.InstanceId)?.Lifecycle?.Trace;
+                                linkedTrace?.Emit(TraceEventKind.RunLinked,entry.Trace,reason:"Host-created run linked to control execution");
+                            }
+                        }
                         finally
                         {
                             InputExecutionBoundary.Started.Value = previousBoundary; InputExecutionBoundary.Caller.Value = previousCaller;
                             ObservationCallBoundary.Current.Value = previousObservation;
                             InputExecutionBoundary.Observation.Value = previousDetails;
+                            ExecutionTraceScope.Current.Value=previousTrace;
                         }
                         if (restoreBoundary.CommittedResult is null) dispatchToken.Token.ThrowIfCancellationRequested();
                         return value;
@@ -358,6 +406,10 @@ public sealed class AutomationGateway : IAutomationGateway
             _ = work.ContinueWith(task =>
             {
                 _ = task.Exception;
+                entry.Trace.Emit(TraceEventKind.WorkCompleted,status:task.IsFaulted?"failed":task.IsCanceled?"cancelled":"completed",
+                    error:task.Exception?.GetBaseException().GetType().Name,
+                    reason:entry.Completion.Task.IsCompleted?"Actual work ended after caller return":"Actual work ended",
+                    uncertain:Volatile.Read(ref started)!=0);
                 if (task.IsFaulted && entry.Completion.Task.IsCompleted)
                     _logger.LogError(task.Exception, "Late automation work failed operation={OperationId} type={Type}",
                         request.OperationId, request.Operation);
@@ -416,10 +468,14 @@ public sealed class AutomationGateway : IAutomationGateway
         if (request.Operation == AutomationOperation.ClickObserved && result.Value is not ObservedClickResult && Volatile.Read(ref observedDetails) is { } details)
             result = result with { Value = details with { Status = result.Status.ToString().ToLowerInvariant(), Reason = result.Error.ToString() } };
         if (result.Value is ObservedClickResult observed) result=result with { Value=observed with { OutcomeUncertain=result.OutcomeUncertain } };
+        if(result.Status==OperationStatus.Rejected)entry.Trace.Emit(TraceEventKind.Rejected,error:result.Error.ToString());
         lock (_gate)
         {
             Record(caller, request, result);
             entry.CompletedAt = _clock.GetUtcNow();
+            entry.Trace.Emit(TraceEventKind.CallerReturned,status:result.Status.ToString(),error:result.Error.ToString(),
+                reason:result.Value is ObservedClickResult detail?detail.Reason:null,uncertain:result.OutcomeUncertain,
+                observation:ExecutionTraceScope.Observation(result.Value));
             entry.Completion.TrySetResult(result);
             if (key.Instance is { } id && !_runs.ContainsKey(id)) _entries.Remove(key);
         }

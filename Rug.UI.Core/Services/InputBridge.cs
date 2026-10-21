@@ -222,6 +222,7 @@ public sealed class InputBridge : IAsyncDisposable
         try { await release().ConfigureAwait(false); }
         catch (Exception error)
         {
+            ExecutionTraceScope.Current.Value?.Emit(TraceEventKind.ReleaseFailed,error:error.GetType().Name,uncertain:true);
             lease.CleanupFailed(error);
             throw new InputCleanupException("Input release failed; resources remain quarantined.", error);
         }

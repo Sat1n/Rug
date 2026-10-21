@@ -42,11 +42,11 @@ internal static partial class CheckpointTests
         public Task<OperationResult> Click(InputDeliveryMode mode=InputDeliveryMode.Win32PostMessage,CancellationToken token=default)=>Send(AutomationOperation.ClickObserved,ClickParameters(Source,mode),token);
         public async Task Observe()
         {Source=((CapturedFrameMetadata)(await Send(AutomationOperation.Capture)).RequireSuccess()!).Observation;}
-        public static async Task<ClickFixture> Create(ObservationLimits? limits=null,int timeout=750)
+        public static async Task<ClickFixture> Create(ObservationLimits? limits=null,int timeout=750,ExecutionTraceRecorder? traces=null)
         {
             var env=new ClickEnvironment();var pool=new ObservationFramePool(limits??new(65536,1024*1024));
             var host=await Fixture.CreateAsync(input:true,vision:true,checkpoint:false,script:"function on_tick() rug.sleep(60000) end",
-                observationFrames:pool,observedClicks:new([new(VerificationTimeoutMs:timeout)],env));
+                observationFrames:pool,observedClicks:new([new(VerificationTimeoutMs:timeout)],env),traces:traces);
             host.CaptureNext=()=>Task.FromResult<CapturedFrame?>(env.Frame());
             var run=await host.StartAsync();await Until(()=>run.TaskStatus==AutomationTaskStatus.Running);
             var caller=await host.Scheduler.Gateway.CreateContextAsync("probe","observed",AutomationSource.PluginUI);

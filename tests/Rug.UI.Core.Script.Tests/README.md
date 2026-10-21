@@ -533,3 +533,59 @@ counts stable=(1,1), changed=(0,0), resize=(0,0), exact stable down/up=(90,80),
 source DPI=144 and drained resources. Native code was unchanged and its existing
 matching-configuration DLLs were reused, not rebuilt for this focused fix.
 No new real SendInput or human acceptance was performed; the Hook gap remains open.
+
+## 08B-01 structured execution traces
+
+Run at repository root with SDK 10.0.402 and matching built x64 artifacts:
+
+```powershell
+dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64 --no-build -- --execution-trace-tests
+dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64 --no-build -- --execution-trace-native F:/Cardinal/Rug/Rug/.codex/trace-native-debug
+```
+
+Replace Debug/root suffix with Release for matching Release Native/managed code.
+The first mode is also part of the complete suite. It tests actual Lua/Gateway
+contexts, dual runs, trusted origin links, authorizations and OCR sources;
+in-flight dedup plus replay; cancellation/deadline before actual work ends and late
+IO failure; Stop/takeover/revocation and failed release; concurrent sequence/page
+isolation and immutable snapshots; UTC reversal; memory/queue/file quotas,
+retention, corruption, half-line, summary temporary and unsupported version.
+Writer IO failure, access denial, summary replacement failure and a permanently
+blocked append through the entire Stop/close interval cannot alter click decisions,
+delay actual run cleanup or retain frame leases. The barrier is released only for
+test teardown; bounded close has already returned FlushIncomplete. Dropped events
+remain Incomplete on disk. A real subprocess reopens the finished trace without
+creating a task or restoring permissions; this is offline read, not Native sensing.
+
+The second mode reuses the isolated 08A click target with production recorder,
+actual Lua/Gateway/arbiter/fresh WGC and PostMessage. It leaves complete files at
+the supplied host-owned export root and verifies them after scheduler shutdown:
+stable target down/up=(1,1), changed content/resize=(0,0), source and validation
+IDs, rejection reason, input boundary, actual-work completion and cleanup state.
+No Hooks/Raw fixture or global SendInput is used. The committed
+[sample](../samples/execution-trace/README.md) comes from that real controlled run,
+not Fake observations. No viewer or human acceptance is implied.
+
+Read the committed sample or an exported run without creating any task:
+
+```powershell
+dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64 --no-build -- --execution-trace-export tests/samples/execution-trace 24965bef-6638-4ff3-b61a-1ee030bc0b39 10c54170-f37a-4923-b3b6-12109863cdad
+```
+
+Final agent verification (2026-10-21), using freshly built managed artifacts:
+
+| Evidence | Debug x64 | Release x64 |
+| --- | --- | --- |
+| WinUI + script-test builds (Core dependency included) | 0 warnings / 0 errors | 0 warnings / 0 errors |
+| Complete script regression, including trace suite and restarted offline reader | PASS | PASS |
+| UI lifecycle + Schema/state/hot reload | PASS | PASS |
+| Production trace + real Lua/WGC/PostMessage stable / changed / resize | (1,1) / (0,0) / (0,0), offline Valid | (1,1) / (0,0) / (0,0), offline Valid |
+
+Existing matching Native DLLs were reused; no Native implementation changed or
+new Native build was needed. Real SendInput, new human takeover acceptance and
+a WinUI trace viewer were NOT RUN/not delivered. UI/input policy is unchanged.
+
+Read-only export/query examples and all default bounds are in the
+[Core trace contract](../../Rug.UI.Core/ExecutionTraces.md). Images, configuration,
+checkpoint state and Lua context are excluded. Existing anomaly archive failures,
+takeover rules and the independent Hook gap retain their original contracts.

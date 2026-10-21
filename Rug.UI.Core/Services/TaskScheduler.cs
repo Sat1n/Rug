@@ -48,7 +48,7 @@ public sealed partial class TaskScheduler : ITaskScheduler
         IInputArbiter? inputArbiter = null, IInputInterventionCoordinator? intervention = null,
         IRecoveryCoordinator? recovery = null, ICheckpointCoordinator? checkpoints = null,
         ICheckpointStore? checkpointStore = null, ICheckpointRestoreRegistry? checkpointRestores = null,
-        IRuntimeUpdateCompatibilityRegistry? updateCompatibility = null)
+        IRuntimeUpdateCompatibilityRegistry? updateCompatibility = null, ExecutionTraceRecorder? traces = null)
     {
         _plugins = plugins ?? throw new ArgumentNullException(nameof(plugins));
         _anomalies = anomalies ?? throw new ArgumentNullException(nameof(anomalies));
@@ -73,7 +73,7 @@ public sealed partial class TaskScheduler : ITaskScheduler
                 await StartTaskWithReadyAsync(plugin, hwnd, inputs,
                     identity => { started = identity; ready?.Invoke(identity); }, token).ConfigureAwait(false);
                 return started!;
-            }, stop: StopTaskAsync, pause: PauseTask, resume: ResumeTask, authorization: authorization, verifyRecovery: VerifyRecoveryAsync);
+            }, stop: StopTaskAsync, pause: PauseTask, resume: ResumeTask, authorization: authorization, verifyRecovery: VerifyRecoveryAsync, traces:traces);
         _recovery = recovery ?? new RecoveryCoordinator(anomalies, Gateway.Authorization, new RecoveryValidatorRegistry());
         _checkpoints = checkpoints;
         _checkpointStore = checkpointStore; _checkpointRestores = checkpointRestores;
@@ -249,6 +249,9 @@ public sealed partial class TaskScheduler : ITaskScheduler
             context.SwitchGroup = switchCandidate?.Group;
             context.RuntimeUpdateOrigin = switchCandidate?.Origin;
             if (restore is not null) context.CheckpointOrigin = new(restore.Record.SourceInstanceId, restore.Record.CheckpointId, restore.Record.SubmissionSequence, restore.Record.NodeId);
+            context.Trace=Gateway.Traces.OpenRun(identity,context.CheckpointOrigin,context.RuntimeUpdateOrigin);
+            context.Trace.Emit(TraceEventKind.RunCreated,ExecutionTraceScope.Current.Value,
+                reason:context.RuntimeUpdateOrigin is {} update?"Runtime update "+update.UpdateId:"Host-created run");
             context.ValidateResume = () =>
             {
                 cancellation.Token.ThrowIfCancellationRequested();
@@ -428,6 +431,8 @@ public sealed partial class TaskScheduler : ITaskScheduler
     public async Task StopTaskAsync(Guid instanceId)
     {
         if (!_instances.TryGetValue(instanceId, out TaskExecutionContext? context)) return;
+        if(StopReason(context)=="Unknown")Interlocked.CompareExchange(ref context.TraceStopCause,"HostStop",null);
+        context.Trace?.Emit(TraceEventKind.StopRequested,reason:StopReason(context));
         context.Cancel();
         await context.Completion.ConfigureAwait(false);
     }
@@ -568,7 +573,16 @@ public sealed partial class TaskScheduler : ITaskScheduler
             finally
             {
                 try { Gateway.EndRun(context.InstanceId); }
-                finally { context.Complete(); }
+                finally
+                {
+                    if(context.Trace is {} trace)
+                    {
+                        Gateway.Traces.CloseRun(trace);
+                        trace.Emit(TraceEventKind.CleanupCompleted,status:context.TaskStatus.ToString(),
+                            error:context.LastError?.GetType().Name,reason:StopReason(context));
+                    }
+                    context.Complete();
+                }
             }
             void TryCleanup(Action action, string stage)
             { try { action(); } catch (Exception error) { RecordCleanupError(context, error, stage); } }
@@ -577,6 +591,8 @@ public sealed partial class TaskScheduler : ITaskScheduler
 
     private void ForwardLifecycle(object? sender, LifecycleChangedEventArgs args)
     {
+        if(sender is TaskExecutionContext context)context.Trace?.Emit(TraceEventKind.Lifecycle,status:args.Snapshot.Status.ToString(),
+            error:context.LastError?.GetType().Name,reason:$"revision={args.Snapshot.Revision};pauseRequested={args.Snapshot.PauseRequested};cause={StopReason(context)}");
         foreach (EventHandler<LifecycleChangedEventArgs> handler in LifecycleChanged?.GetInvocationList() ?? [])
             try { handler(this, args); } catch (Exception error) { _logger.LogWarning(error, "Lifecycle notification failed"); }
     }
@@ -589,6 +605,7 @@ public sealed partial class TaskScheduler : ITaskScheduler
 
     private void RecordCleanupError(TaskExecutionContext context, Exception ex, string stage)
     {
+        context.Trace?.Emit(TraceEventKind.CleanupFailed,error:ex.GetType().Name,reason:stage);
         context.RecordFailure(ex);
         _logger.LogError(ex, "Automation instance {InstanceId} failed during {Stage}", context.InstanceId, stage);
     }
@@ -616,6 +633,16 @@ public sealed partial class TaskScheduler : ITaskScheduler
         _inputStopRegistration.Dispose();
         _catalogGate.Dispose();
         _shutdown.Dispose();
+        await Gateway.Traces.DisposeAsync().ConfigureAwait(false);
+    }
+    private string StopReason(TaskExecutionContext context)
+    {
+        if(Volatile.Read(ref context.TraceStopCause) is {} cause)return cause;
+        string observed=context.LastError is not null?"ExecutionFault":
+            context.AuthorizationLease?.Token.IsCancellationRequested==true?"AuthorizationRevoked":
+            _disposed?"HostShutdown":_inputArbiter.Snapshot.State is InputControlState.TakingOver or InputControlState.ManualControl?"ManualTakeover":"Unknown";
+        if(context.IsBusinessClosed)Interlocked.CompareExchange(ref context.TraceStopCause,observed,null);
+        return Volatile.Read(ref context.TraceStopCause)??observed;
     }
 
     private static TaskCompletionSource<bool> CompletedSignal()

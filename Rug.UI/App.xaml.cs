@@ -123,6 +123,9 @@ public partial class App : Application
                     () => dispatcher.HasThreadAccess);
             });
 
+            services.AddSingleton(_ => new ExecutionTraceRecorder(
+                Environment.GetEnvironmentVariable("RUG_TRACE_ROOT")??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Rug","traces"),
+                enabled:Environment.GetEnvironmentVariable("RUG_TRACE_DISABLED")!="1"));
             services.AddSingleton<ITaskScheduler>(provider => new Rug.UI.Core.Services.TaskScheduler(
                 provider.GetRequiredService<IPluginManager>(), PluginsRoot,
                 () => new CaptureService(),
@@ -143,7 +146,8 @@ public partial class App : Application
                 checkpoints: provider.GetRequiredService<ICheckpointCoordinator>(),
                 checkpointStore: provider.GetRequiredService<ICheckpointStore>(),
                 checkpointRestores: provider.GetRequiredService<ICheckpointRestoreRegistry>(),
-                updateCompatibility: provider.GetRequiredService<IRuntimeUpdateCompatibilityRegistry>()));
+                updateCompatibility: provider.GetRequiredService<IRuntimeUpdateCompatibilityRegistry>(),
+                traces:provider.GetRequiredService<ExecutionTraceRecorder>()));
             services.AddSingleton<IAutomationGateway>(provider => provider.GetRequiredService<ITaskScheduler>().Gateway);
             services.AddSingleton<IHotReloadService>(provider => new HotReloadService(
                 PluginsRoot, provider.GetRequiredService<ITaskScheduler>(),

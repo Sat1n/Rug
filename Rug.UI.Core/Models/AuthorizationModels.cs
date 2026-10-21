@@ -45,8 +45,9 @@ public sealed class AuthorizationLease : IDisposable
     private readonly CancellationTokenSource _cancellation = new();
     private int _disposed;
     /// <summary>For trusted authorization implementations; disposal unregisters this lease.</summary>
-    public AuthorizationLease(string[] permissions, Action<AuthorizationLease> release)
-    { Permissions = permissions.ToArray(); _release = release; Token = _cancellation.Token; }
+    public AuthorizationLease(string[] permissions, Action<AuthorizationLease> release, long? revision = null)
+    { Permissions = permissions.ToArray(); _release = release; Token = _cancellation.Token; Revision=revision; }
+    public long? Revision { get; }
     internal string[] Permissions { get; }
     public void Cancel()
     {

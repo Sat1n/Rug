@@ -48,6 +48,8 @@ public sealed partial class TaskExecutionContext
     internal CancellationToken LifetimeToken { get; }
 
     public RunIdentity Identity { get; }
+    internal ExecutionTraceHandle? Trace { get; set; }
+    internal string? TraceStopCause;
     public CheckpointOrigin? CheckpointOrigin { get; internal set; }
     internal void CommitCheckpointStart(CheckpointStartBoundary boundary, CancellationToken original,
         CancellationToken execution, CancellationToken grant, DateTimeOffset deadline)

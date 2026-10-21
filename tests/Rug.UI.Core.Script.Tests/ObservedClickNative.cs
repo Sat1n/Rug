@@ -11,7 +11,7 @@ internal static class ObservedClickNative
 {
     private sealed class NoAnomaly : IAnomalyLogger
     {public Task<string> LogAnomalyAsync(TaskExecutionContext c,string reason,string context)=>throw new NotSupportedException();}
-    public static async Task RunAsync()
+    public static async Task RunAsync(string? traceRoot=null)
     {
         DirectoryInfo? repo=new(AppContext.BaseDirectory);
         while(repo is not null&&!File.Exists(Path.Combine(repo.FullName,"Rug.slnx")))repo=repo.Parent;
@@ -19,11 +19,11 @@ internal static class ObservedClickNative
         var assembly=typeof(InputService).Assembly;
         nint module=NativeLibrary.Load(Path.Combine(repo!.FullName,"x64",config,"Rug.Core.dll"),assembly,DllImportSearchPath.UseDllDirectoryForDependencies);
         NativeLibrary.SetDllImportResolver(assembly,(name,_,_)=>name is "Rug.Core" or "Rug.Core.dll"?module:0);
-        foreach(string mode in new[]{"stable","changed","resize"})await Case(mode);
+        foreach(string mode in new[]{"stable","changed","resize"})await Case(mode,traceRoot);
         Console.WriteLine("Observed Native PASS: actual Lua -> Gateway -> arbiter -> fresh exact-window WGC/ROI -> native PostMessage; stable target down/up=(1,1), changed/resize=(0,0), all resources drained.");
         Console.WriteLine("SendInput and human takeover acceptance NOT RUN here; no Hooks/Raw source in fixture, existing acceptance/independent Hook gap unchanged.");
     }
-    private static async Task Case(string mode)
+    private static async Task Case(string mode,string? traceRoot)
     {
         using var target=new CaptureGeometryDiagnosticWindow();nint hwnd=await target.Ready;
         string root=Path.Combine(AppContext.BaseDirectory,"observed-native-"+Guid.NewGuid().ToString("N"));
@@ -47,13 +47,16 @@ internal static class ObservedClickNative
                 """);
             var grants=new PluginAuthorization();TestAuthorizationHost.ApproveCatalog(grants,Path.Combine(root,"plugins"));
             var state=new StateStore();using var bus=new CommandBus(state);var pool=new ObservationFramePool();
+            await using var traces=traceRoot is null?ExecutionTraceRecorder.Disabled():new ExecutionTraceRecorder(Path.Combine(traceRoot,mode),limits:new(FlushMilliseconds:2000));
+            Guid traceId=Guid.Empty;
             await using(var scheduler=new Scheduler(new PluginManager(NullLogger<PluginManager>.Instance),Path.Combine(root,"plugins"),
                 ()=>new CaptureService(exactBoundWindow:true),()=>new InputService(),
                 (c,i)=>new LuaRuntime(c,new FakeOcr(),i,NullLogger<LuaRuntime>.Instance,commandBus:bus,observationFrames:pool),
-                NullLogger<Scheduler>.Instance,new NoAnomaly(),commandBus:bus,authorization:grants,inputArbiter:new InputArbiter()))
+                NullLogger<Scheduler>.Instance,new NoAnomaly(),commandBus:bus,authorization:grants,inputArbiter:new InputArbiter(),traces:traces))
             {
                 var id=await scheduler.StartTaskAsync("observed",hwnd);
                 var run=scheduler.Instances.Single(c=>c.InstanceId==id);
+                traceId=run.Trace!.TraceId;
                 await RecoveryTests.Until(()=>state.GetState(run.InstanceScope,"captured",false)||run.IsBusinessClosed);
                 RecoveryTests.Check(!run.IsBusinessClosed,"native capture failed: "+run.LastError);
                 if(mode=="changed")target.ChangeMarker();if(mode=="resize")target.Resize(730,470);
@@ -70,6 +73,17 @@ internal static class ObservedClickNative
                 if(mode=="stable")RecoveryTests.Check(target.LastDown==(90,80)&&target.LastUp==(90,80),$"native observed client point expected (90,80), actual {target.LastDown}/{target.LastUp}");
                 await scheduler.StopTaskAsync(id);
                 Console.WriteLine($"Observed Native {mode}: {status}/{reason}; actual target down/up={target.ClickCounts}; last client down/up={target.LastDown}/{target.LastUp}; source DPI={sourceDpi}");
+            }
+            if(traceRoot is not null)
+            {
+                var page=new TraceFileStore(Path.Combine(traceRoot,mode)).Read(traces.HostSessionId,traceId,limit:256);
+                RecoveryTests.Check(page.Status==TraceReadStatus.Valid&&page.Summary is {RunCleanupCompleted:true,ActualWorkOutstanding:0},"native trace incomplete: "+page.Status);
+                var click=page.Events.Where(e=>e.Operation=="ClickObserved").ToArray();
+                RecoveryTests.Check(click.Any(e=>e.Kind==TraceEventKind.CallerReturned&&e.Observation is not null&&
+                    (mode=="stable"?e.Status=="Success":e.Status=="Rejected"&&e.Reason==(mode=="changed"?"SceneChanged":"GeometryChanged"))),"native trace result/source missing");
+                RecoveryTests.Check(mode!="stable"||click.Any(e=>e.Kind==TraceEventKind.Validation&&e.Reason!.EndsWith(":roi-passed")&&e.Observation!.ValidationFrames!.Count>0)&&
+                    click.Any(e=>e.Kind==TraceEventKind.InputSideEffect),"native trace validation/input missing");
+                Console.WriteLine($"Trace offline {mode}: {traces.HostSessionId}/{traceId}; Valid, cleanup completed, no actual work outstanding");
             }
             RecoveryTests.Check(pool.Usage==new ObservationUsage(0,0,0,0,0)&&pool.ActionUsage.ActiveInputs==0,"native observation leaked resources");
         }

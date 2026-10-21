@@ -91,6 +91,8 @@ public sealed class VisualEngineBridge : IDisposable
         long started = _frames.Timestamp;
         CheckCancellation(cancellationToken); _validateRun?.Invoke();
         IReadOnlyList<TemplateMatchResult> hits;
+        ExecutionTraceScope.Current.Value?.Emit(TraceEventKind.Observation,reason:"template input leased",
+            observation:new(lease.Observation.ObservationId,lease.Observation.FrameId));
         try
         {
             hits = await _matcher.MatchFrameAsync(target, path, threshold, cancellationToken).ConfigureAwait(false);
@@ -121,6 +123,8 @@ public sealed class VisualEngineBridge : IDisposable
         CapturedFrame target = Crop(source, region);
         long started = _frames.Timestamp;
         CheckCancellation(cancellationToken); _validateRun?.Invoke();
+        ExecutionTraceScope.Current.Value?.Emit(TraceEventKind.Observation,reason:"ocr input leased",
+            observation:new(lease.Observation.ObservationId,lease.Observation.FrameId));
         IReadOnlyList<OcrTextBlock> local = await _ocr.RecognizeFrameAsync(
             target, engine, language, cancellationToken).ConfigureAwait(false);
         CheckCancellation(cancellationToken); _validateRun?.Invoke(); ThrowIfDisposed();

@@ -112,7 +112,7 @@ public sealed class PluginAuthorization : IPluginAuthorization
             var missing = MissingCore(ticket, names);
             if (missing.Length > 0) throw new PermissionDeniedException(ticket.Installation.PluginId, missing[0], "authorization admission", missing);
             var e = _entries[ticket.Installation];
-            var lease = new AuthorizationLease(names, l => { lock (_gate) e.Leases.Remove(l); });
+            var lease = new AuthorizationLease(names, l => { lock (_gate) e.Leases.Remove(l); }, e.Revision);
             e.Leases.Add(lease);
             return lease;
         }

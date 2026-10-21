@@ -22,6 +22,14 @@ if (args.Contains("--checkpoint-restore-ui")) { await ManualCheckpointRestore.Ru
 if (args.Contains("--checkpoint-restore-native")) { await NativeCheckpointRestore.RunAsync(); return; }
 if (args.Contains("--checkpoint-restore-tests")) { await CheckpointTests.RunRestoreAsync(); return; }
 if (args.Contains("--observed-click-tests")) { await CheckpointTests.RunObservedClicksAsync(); return; }
+if (args.Contains("--execution-trace-tests")) { await CheckpointTests.RunExecutionTracesAsync(); return; }
+if (args.Contains("--execution-trace-read")) { CheckpointTests.TraceReadChild(args); return; }
+if (args.Contains("--execution-trace-export"))
+{
+    var page=new TraceFileStore(args[1]).Read(Guid.Parse(args[2]),Guid.Parse(args[3]),limit:256);
+    Console.WriteLine(JsonSerializer.Serialize(page,new JsonSerializerOptions{WriteIndented=true,Converters={new System.Text.Json.Serialization.JsonStringEnumConverter()}}));return;
+}
+if (args.Contains("--execution-trace-native")) { await ObservedClickNative.RunAsync(args[^1]); return; }
 if (args.Contains("--observed-click-native")) { await ObservedClickNative.RunAsync(); return; }
 if (args.Contains("--observation-tests")) { await CheckpointTests.RunObservationsAsync(); return; }
 if (args.Contains("--observation-native")) { await ObservationNativeSmoke.RunAsync(); return; }
@@ -1137,6 +1145,7 @@ await CheckpointTests.RunRuntimeUpdatesAsync();
 await CheckpointTests.RunRuntimeSwitchesAsync();
 await CheckpointTests.RunObservationsAsync();
 await CheckpointTests.RunObservedClicksAsync();
+await CheckpointTests.RunExecutionTracesAsync();
 await LifecycleTests.RunAsync();
 await AuthorizationTests.RunAsync();
 await InputArbitrationTests.RunAsync();
