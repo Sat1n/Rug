@@ -8,4 +8,5 @@ namespace Rug.UI.Core.Models;
 public sealed record CapturedFrame(byte[] Pixels, int Width, int Height, int Stride)
 {
     public CaptureFacts? CaptureFacts { get; init; }
+    internal Rug.UI.Core.Native.RugCaptureFacts? NativeCaptureFacts { get; init; }
 }

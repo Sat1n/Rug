@@ -12,6 +12,12 @@ C# WinUI 3 desktop shell: views, view-models, navigation/activation and theming.
 renders the dynamic UI and forwards user intent to `Rug.UI.Core` host logic; it owns
 no automation pipeline and no native interop itself.
 
+08A-02B: DevTools input tests enter the Core frame pool's trusted external-input
+scope after acquiring the existing input lease. This retires observation action
+qualification and prevents captures during that sequence from becoming actionable.
+It adds no input lock, detector policy or interop to UI; see
+[observed click contract](../Rug.UI.Core/ObservedClicks.md).
+
 > **Status:** WinUI 3 template scaffold (activation, services, VMs, views) plus the
 > **Dev Tools sandbox** (Task 1.6): `Views/DevToolsPage.xaml(.cs)` +
 > `ViewModels/DevToolsViewModel.cs` visualize WGC capture, OCR overlay, the Spy++-style

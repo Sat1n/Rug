@@ -22,6 +22,7 @@ internal static class OperationParameterValidator
             parameters.TryGetProperty("selectionId", out var selection) && selection.ValueKind == JsonValueKind.String &&
             selection.TryGetGuid(out var selectionId) && selectionId != Guid.Empty,
         AutomationOperation.VerifyRecovery => parameters.TryGetProperty("recoveryId", out var id) && id.ValueKind == JsonValueKind.String && id.TryGetGuid(out var recoveryId) && recoveryId != Guid.Empty,
+        AutomationOperation.ClickObserved => Observed(parameters),
         AutomationOperation.Sleep => Integer(parameters, "ms", 0, int.MaxValue),
         AutomationOperation.Click => Integer(parameters, "x", 0, int.MaxValue) && Integer(parameters, "y", 0, int.MaxValue) &&
             EnumValue<MouseButton>(parameters, "button") && EnumValue<InputDeliveryMode>(parameters, "mode"),
@@ -31,6 +32,11 @@ internal static class OperationParameterValidator
         AutomationOperation.Start => LaunchInputs(parameters),
         _ => true
     };
+    private static bool Observed(JsonElement p)
+    {
+        try { _=ObservedClickRequest.Parse(p); return true; }
+        catch(Exception e) when(e is ArgumentException or InvalidOperationException or KeyNotFoundException or FormatException or OverflowException) { return false; }
+    }
     private static bool Integer(JsonElement parameters, string key, int min, int max, bool optional = false)
     {
         if (!parameters.TryGetProperty(key, out var value) || value.ValueKind == JsonValueKind.Null) return optional;

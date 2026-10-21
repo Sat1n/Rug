@@ -15,7 +15,7 @@ public sealed class ManifestAutomationPermissionChecker : IAutomationPermissionC
         AutomationOperation.Capture => Permission.Capture,
         AutomationOperation.Ocr => Permission.VisionOcr,
         AutomationOperation.FindImage => Permission.VisionMatch,
-        AutomationOperation.Click or AutomationOperation.PressKey => Permission.ControlInput,
+        AutomationOperation.Click or AutomationOperation.PressKey or AutomationOperation.ClickObserved => Permission.ControlInput,
         _ => null
     };
     public bool IsAllowed(AutomationCallContext caller, IReadOnlyList<string> permissions,
@@ -135,6 +135,7 @@ public sealed class AutomationGateway : IAutomationGateway
     private static bool SamePlugin(string first, string second) => string.Equals(first, second, StringComparison.OrdinalIgnoreCase);
     private IEnumerable<string> Required(AutomationCallContext caller, OperationRequest request)
     {
+        if (request.Operation == AutomationOperation.ClickObserved) return [Permission.ControlInput,Permission.Capture];
         if (request.Operation == AutomationOperation.SwitchRuntimeUpdate)
             return Authorization.Query(caller.Authorization.Installation).Requested.Concat([Permission.Checkpoint, Permission.Capture]).Distinct(StringComparer.Ordinal);
         if (request.Operation == AutomationOperation.PrepareRuntimeUpdate)
@@ -272,6 +273,7 @@ public sealed class AutomationGateway : IAutomationGateway
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(callerToken, deadline.Token,
             request.Operation == AutomationOperation.Stop ? CancellationToken.None : run?.Token ?? CancellationToken.None);
         int started = 0;
+        ObservedClickResult? observedDetails = null;
         var restoreBoundary = new CheckpointStartBoundary();
         CancellationToken executionToken = linked.Token;
         try
@@ -297,7 +299,7 @@ public sealed class AutomationGateway : IAutomationGateway
                 bool business = !UpdateControl(request.Operation) && request.Operation is not (AutomationOperation.Start or AutomationOperation.Stop or AutomationOperation.Pause or AutomationOperation.Resume or AutomationOperation.VerifyRecovery or AutomationOperation.RestoreCheckpoint);
                 if (business && run?.Preparing == true) throw new GatewayRejectedException(OperationError.InvalidLifecycleState);
                 var lifetime = business ? run?.Lifecycle?.EnterOperation(
-                    request.Operation is AutomationOperation.Click or AutomationOperation.PressKey) : null;
+                    request.Operation is AutomationOperation.Click or AutomationOperation.PressKey or AutomationOperation.ClickObserved) : null;
                 // Admission is atomic with EndRun; service code never runs while holding the registry gate.
                 work = Task.Run(async () =>
                 {
@@ -325,14 +327,17 @@ public sealed class AutomationGateway : IAutomationGateway
                         using var dispatchToken = CancellationTokenSource.CreateLinkedTokenSource(executionToken, admission.Token);
                         dispatchToken.Token.ThrowIfCancellationRequested();
                         if (business) run?.Lifecycle?.ValidateBusiness();
-                        bool inputOperation = request.Operation is AutomationOperation.Click or AutomationOperation.PressKey;
+                        bool inputOperation = request.Operation is AutomationOperation.Click or AutomationOperation.PressKey or AutomationOperation.ClickObserved;
                         if (!inputOperation && request.Operation is not (AutomationOperation.RestoreCheckpoint or AutomationOperation.SwitchRuntimeUpdate)) Volatile.Write(ref started, 1);
                         var previousBoundary = InputExecutionBoundary.Started.Value;
                         var previousCaller = InputExecutionBoundary.Caller.Value;
                         var previousObservation = ObservationCallBoundary.Current.Value;
+                        var previousDetails = InputExecutionBoundary.Observation.Value;
                         InputExecutionBoundary.Started.Value = () => Volatile.Write(ref started, 1);
                         InputExecutionBoundary.Caller.Value = caller;
-                        if (request.Operation is AutomationOperation.Capture or AutomationOperation.Ocr or AutomationOperation.FindImage)
+                        InputExecutionBoundary.Observation.Value = request.Operation == AutomationOperation.ClickObserved
+                            ? details => Volatile.Write(ref observedDetails, details) : null;
+                        if (request.Operation is AutomationOperation.Capture or AutomationOperation.Ocr or AutomationOperation.FindImage or AutomationOperation.ClickObserved)
                             ObservationCallBoundary.Current.Value = new(callerToken, request.Deadline, _clock);
                         object? value;
                         try { value = await DispatchAsync(caller, request, run, dispatchToken.Token, callerToken, restoreBoundary).ConfigureAwait(false); }
@@ -340,6 +345,7 @@ public sealed class AutomationGateway : IAutomationGateway
                         {
                             InputExecutionBoundary.Started.Value = previousBoundary; InputExecutionBoundary.Caller.Value = previousCaller;
                             ObservationCallBoundary.Current.Value = previousObservation;
+                            InputExecutionBoundary.Observation.Value = previousDetails;
                         }
                         if (restoreBoundary.CommittedResult is null) dispatchToken.Token.ThrowIfCancellationRequested();
                         return value;
@@ -379,6 +385,15 @@ public sealed class AutomationGateway : IAutomationGateway
             MissingPermissions: error.Missing); }
         catch (PermissionDeniedException error) { result = new(OperationStatus.Rejected, OperationError.PermissionDenied, DeniedPermission: error.Permission, MissingPermissions: error.MissingPermissions); }
         catch (InputUnavailableException) { result = new(OperationStatus.Rejected, OperationError.InputUnavailable); }
+        catch (ObservedClickException error) { result = new(OperationStatus.Rejected, error.Reason switch {
+            ObservedClickReason.InvalidReference => OperationError.ObservationInvalid,
+            ObservedClickReason.Stale => OperationError.ObservationStale,
+            ObservedClickReason.TimeUnavailable => OperationError.ObservationTimeUnavailable,
+            ObservedClickReason.GeometryChanged or ObservedClickReason.WindowInvalid => OperationError.ObservationGeometryChanged,
+            ObservedClickReason.SceneChanged => OperationError.ObservationSceneChanged,
+            ObservedClickReason.CoordinateInvalid => OperationError.ObservationCoordinateInvalid,
+            ObservedClickReason.PolicyUnavailable => OperationError.ObservationPolicyUnavailable,
+            _ => OperationError.ObservationValidationUnavailable }, Value:error.Result); }
         catch (ObservationCapacityException) { result = new(OperationStatus.Rejected, OperationError.CapacityExceeded); }
         catch (ObservationDeadlineException) { result = new(OperationStatus.TimedOut, OperationError.DeadlineExceeded); }
         catch (KeyNotFoundException) { result = new(OperationStatus.Rejected, OperationError.InvalidParameters); }
@@ -396,8 +411,11 @@ public sealed class AutomationGateway : IAutomationGateway
             result = new(OperationStatus.Failed, OperationError.ExecutionFailed, Value: failedRecovery.Result);
         // Rejection describes why the action ended, not whether earlier input had effects.
         // Keep every input failure mapping aligned with the same execution boundary.
-        if (request.Operation is AutomationOperation.Click or AutomationOperation.PressKey && result.Status != OperationStatus.Success)
+        if (request.Operation is AutomationOperation.Click or AutomationOperation.PressKey or AutomationOperation.ClickObserved && result.Status != OperationStatus.Success)
             result = result with { OutcomeUncertain = Volatile.Read(ref started) != 0 };
+        if (request.Operation == AutomationOperation.ClickObserved && result.Value is not ObservedClickResult && Volatile.Read(ref observedDetails) is { } details)
+            result = result with { Value = details with { Status = result.Status.ToString().ToLowerInvariant(), Reason = result.Error.ToString() } };
+        if (result.Value is ObservedClickResult observed) result=result with { Value=observed with { OutcomeUncertain=result.OutcomeUncertain } };
         lock (_gate)
         {
             Record(caller, request, result);

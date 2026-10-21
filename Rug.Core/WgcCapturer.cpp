@@ -389,6 +389,24 @@ struct WgcCapturer::Impl {
 // -----------------------------------------------------------------------------
 // WgcCapturer
 // -----------------------------------------------------------------------------
+int32_t CheckCaptureGeometry(HWND bound, const RugCaptureFacts& f) {
+    if (!bound || reinterpret_cast<uintptr_t>(bound)!=f.boundWindow || f.boundWindow!=f.capturedWindow ||
+        !f.boundLifetime || !f.capturedLifetime || !IsWindow(bound) ||
+        WindowLifetime(bound,false)!=f.boundLifetime || WindowLifetime(bound,false)!=f.capturedLifetime) return RUG_ERR_WINDOW_IDENTITY;
+    if ((f.flags & 6)!=6 || f.geometryStatus!=1) return RUG_ERR_CAPTURE_FAILED;
+    const auto s=SampleWindow(bound);
+    if (s.lifetime!=f.capturedLifetime) return RUG_ERR_WINDOW_IDENTITY;
+    if (!s.valid) return RUG_ERR_CAPTURE_FAILED;
+    if ((s.style & WS_OVERLAPPEDWINDOW)!=WS_OVERLAPPEDWINDOW || (s.style & WS_CHILD) ||
+        (s.exStyle & (WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_LAYOUTRTL)) ||
+        s.dpi!=static_cast<UINT>(f.dpi) || s.client.right!=f.clientWidth || s.client.bottom!=f.clientHeight ||
+        s.origin.x!=f.clientScreenX || s.origin.y!=f.clientScreenY ||
+        s.origin.x-s.bounds.left!=f.imageClientX || s.origin.y-s.bounds.top!=f.imageClientY ||
+        s.bounds.right-s.bounds.left!=f.contentWidth || s.bounds.bottom-s.bounds.top!=f.contentHeight ||
+        f.contentWidth!=f.bufferWidth || f.contentHeight!=f.bufferHeight) return RUG_ERR_CAPTURE_FAILED;
+    return IsWindow(bound) && WindowLifetime(bound,false)==f.boundLifetime ? RUG_OK : RUG_ERR_WINDOW_IDENTITY;
+}
+
 WgcCapturer::WgcCapturer(Config config)
     : m_impl(std::make_unique<Impl>()) {
     m_impl->cfg = config;

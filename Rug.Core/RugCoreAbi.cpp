@@ -182,6 +182,11 @@ RUGCORE_API int32_t RUGCORE_CALL Rug_GrabFrame(RugCapturerHandle handle,
     return RUG_OK;
 }
 
+RUGCORE_API int32_t RUGCORE_CALL Rug_CheckCaptureGeometry(void* boundWindow, const RugCaptureFacts* facts) {
+    if(!facts || facts->structSize!=sizeof(*facts) || facts->version!=1) return RUG_ERR_INVALID_PARAM;
+    try { return rug::core::CheckCaptureGeometry(static_cast<HWND>(boundWindow),*facts); }
+    catch (...) { return RUG_ERR_CAPTURE_FAILED; }
+}
 RUGCORE_API int32_t RUGCORE_CALL Rug_CreateCapturerExact(const RugCaptureConfig* config, RugCapturerHandle* outHandle) {
     if (outHandle) *outHandle = nullptr;
     if (!config || !config->targetWindow || !outHandle) return RUG_ERR_INVALID_PARAM;

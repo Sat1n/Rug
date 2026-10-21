@@ -11,7 +11,12 @@ internal sealed class CaptureGeometryDiagnosticWindow : IDisposable
     private readonly WindowProc _callback;
     private readonly TaskCompletionSource<nint> _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private nint _hwnd, _red, _green;
-    private int _disposed, _tick;
+    private int _disposed, _tick, _downs, _ups;
+    private int _downX,_downY,_upX,_upY;
+    public (int Down,int Up) ClickCounts => (Volatile.Read(ref _downs),Volatile.Read(ref _ups));
+    public (int X,int Y) LastDown => (Volatile.Read(ref _downX),Volatile.Read(ref _downY));
+    public (int X,int Y) LastUp => (Volatile.Read(ref _upX),Volatile.Read(ref _upY));
+    public void ChangeMarker() => SendMessageW(_hwnd,0x8004,0,0);
     private nint _marker;
     private Exception? _failure;
     public Task<nint> Ready => _ready.Task;
@@ -84,6 +89,9 @@ internal sealed class CaptureGeometryDiagnosticWindow : IDisposable
     }
     private nint Message(nint hwnd, uint id, nuint w, nint l)
     {
+        if (id == 0x201) { _downX=unchecked((short)(long)l);_downY=unchecked((short)((long)l>>16));Interlocked.Increment(ref _downs); return 0; }
+        if (id == 0x202) { _upX=unchecked((short)(long)l);_upY=unchecked((short)((long)l>>16));Interlocked.Increment(ref _ups); return 0; }
+        if (id == 0x8004) { var old=_marker;_marker=CreateSolidBrush(0x00FF0000);DeleteObject(old);InvalidateRect(hwnd,0,true);UpdateWindow(hwnd);return 0; }
         if (id == 0x8002) { SetWindowPos(hwnd, 0, 0, 0, (int)w, (int)l, 0x16); return 0; }
         if (id == 0x8003) { SetWindowPos(hwnd, 0, unchecked((int)w), (int)l, 0, 0, 0x15); return 0; }
         if (id == 0x2e0)

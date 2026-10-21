@@ -4,13 +4,14 @@ using Rug.UI.Core.Services;
 
 namespace Rug.UI.Core.Models;
 
-public enum AutomationOperation { Start, Stop, Pause, Resume, Sleep, Capture, Ocr, FindImage, Click, PressKey, VerifyRecovery, RestoreCheckpoint, PrepareRuntimeUpdate, QueryRuntimeUpdate, CancelRuntimeUpdate, SwitchRuntimeUpdate }
+public enum AutomationOperation { Start, Stop, Pause, Resume, Sleep, Capture, Ocr, FindImage, Click, PressKey, VerifyRecovery, RestoreCheckpoint, PrepareRuntimeUpdate, QueryRuntimeUpdate, CancelRuntimeUpdate, SwitchRuntimeUpdate, ClickObserved }
 public enum OperationStatus { Success, Rejected, Cancelled, TimedOut, Failed }
 public enum OperationError { None, InvalidParameters, PermissionDenied, InstanceNotFound, StaleRun,
     BindingMismatch, UnsupportedOperation, DeduplicationConflict, DeadlineExceeded, Cancelled,
     ExecutionFailed, CapacityExceeded, InvalidCaller, InputUnavailable, InvalidLifecycleState,
     CheckpointChanged, CheckpointIncompatible, RestoreUnavailable, SourceStillActive, Busy, SceneRejected,
-    NoPendingUpdate, UpdateUnavailable, UpdatePreparing, UpdateSuperseded, UpdateIncompatible, UpdateIrreversible }
+    NoPendingUpdate, UpdateUnavailable, UpdatePreparing, UpdateSuperseded, UpdateIncompatible, UpdateIrreversible, ObservationInvalid, ObservationStale, ObservationTimeUnavailable,
+    ObservationGeometryChanged, ObservationSceneChanged, ObservationValidationUnavailable, ObservationCoordinateInvalid, ObservationPolicyUnavailable }
 public enum AutomationSource { PluginUI, Lua, Agent, Mcp }
 public sealed record CapturedFrameMetadata(int Width, int Height, int Stride, ObservationEnvelope Observation);
 

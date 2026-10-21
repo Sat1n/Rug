@@ -179,3 +179,16 @@ against the rebuilt production Debug DLL; those timed runs supplement, rather
 than replace, the barrier cases. No successful old-token frame is returned.
 Full script regressions and WinUI x64 builds also pass in Debug/Release; native
 and WinUI builds report no warnings/errors. Input/Hook policies are unchanged.
+
+## Current geometry check (08A-02B)
+
+`Rug_CheckCaptureGeometry(boundWindow, facts)` is additive; RugFrame and V1 facts
+layout remain unchanged. The caller retains facts by value and owns no new memory.
+Size/version must match; invalid arguments return -2. The supplied HWND must be the
+original bound AND actual captured window, with both nonzero lifetime tokens still
+matching. Identity loss returns `RUG_ERR_WINDOW_IDENTITY` (-12); unsupported or
+changed geometry returns -4; matching sampled facts return 0. Current PMv2 client
+size/origin, DPI, supported styles and DWM/client crop basis are checked, followed
+by another lifetime check. Unknown lifetime or alternate-window capture cannot be
+used for an observed click. This is a current sample, not proof of uninterrupted
+window stability or atomicity with a later OS input call.

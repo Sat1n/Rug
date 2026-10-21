@@ -72,7 +72,8 @@ typedef enum RugStatus {
     RUG_ERR_UNSUPPORTED      = -8,  // Requested feature/format/mode not supported.
     RUG_ERR_BUFFER_TOO_SMALL = -9,  // Caller-provided buffer is too small.
     RUG_ERR_TIMEOUT          = -10, // Operation exceeded its time budget.
-    RUG_ERR_OCR_MODEL_NOT_FOUND = -11  // Model file required by the engine is missing.
+    RUG_ERR_OCR_MODEL_NOT_FOUND = -11, // Model file required by the engine is missing.
+    RUG_ERR_WINDOW_IDENTITY = -12 // Captured window identity no longer matches.
 } RugStatus;
 
 // -----------------------------------------------------------------------------
@@ -245,6 +246,9 @@ RUGCORE_API int32_t RUGCORE_CALL Rug_CreateCapturerExact(const RugCaptureConfig*
 // Pixels and facts belong to the same final frame, including black-frame retries.
 RUGCORE_API int32_t RUGCORE_CALL Rug_GrabFrameWithFacts(RugCapturerHandle handle,
                                                      RugFrame* outFrame, RugCaptureFacts* facts);
+// No ownership transfer. 0=current supported mapping, -12=window identity lost,
+// -4=geometry changed/unavailable, -2=invalid version/size. No input is executed.
+RUGCORE_API int32_t RUGCORE_CALL Rug_CheckCaptureGeometry(void* boundWindow, const RugCaptureFacts* facts);
 
 // -----------------------------------------------------------------------------
 // OCR API

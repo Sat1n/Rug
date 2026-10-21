@@ -56,6 +56,7 @@ public sealed class LuaRuntime : IScriptRuntime
             sleep(min(interval, remaining))
           end
         end
+        function rug.click_observed(requestJson) return luaYield('__rug', 'click_observed', requestJson) end
         function rug.click(x, y, button, mode) return luaYield('__rug', 'click', x, y, button, mode) end
         function rug.press_key(key, duration_ms) return luaYield('__rug', 'press_key', key, duration_ms) end
         rug.agent = {}
@@ -104,6 +105,7 @@ public sealed class LuaRuntime : IScriptRuntime
         end
         """;
 
+    private readonly ObservedClickServices _observedClicks;
     private readonly ICaptureService _capture;
     private readonly IOcrService _ocr;
     private readonly ITemplateMatchService _matcher;
@@ -160,8 +162,9 @@ public sealed class LuaRuntime : IScriptRuntime
     public LuaRuntime(ICaptureService capture, IOcrService ocr, IInputService input, ILogger<LuaRuntime> logger,
         ICoordinateMapper? coordinateMapper = null, Func<nint, bool>? ensureForeground = null,
         ITemplateMatchService? templateMatcher = null, ICommandBus? commandBus = null, IPluginAuthorization? authorization = null,
-        ObservationFramePool? observationFrames = null)
+        ObservationFramePool? observationFrames = null, ObservedClickServices? observedClicks = null)
     {
+        _observedClicks = observedClicks ?? new ObservedClickServices();
         _authorization = authorization ?? new PluginAuthorization();
         _observationFrames = observationFrames ?? ObservationFramePool.Shared;
         _capture = capture;
@@ -270,7 +273,7 @@ public sealed class LuaRuntime : IScriptRuntime
                 // Mandatory releases bypass this business check.
                 _context?.ValidateInputBusiness();
                 _lifetime.Token.ThrowIfCancellationRequested();
-            });
+            }, sideEffects: _visual.InputSideEffect, beginInput: _visual.BeginInput);
         if (manifest.Permissions.Contains(Permission.ControlInput))
             await _inputBridge.BindAsync(manifest.TargetWindow,
                 manifest.InputDelivery ?? (manifest.BackgroundInput ? InputDeliveryMode.Win32PostMessage : InputDeliveryMode.Win32SendInput),
@@ -635,6 +638,7 @@ public sealed class LuaRuntime : IScriptRuntime
         {
             "sleep" => AutomationOperation.Sleep, "capture" => AutomationOperation.Capture,
             "ocr" => AutomationOperation.Ocr, "find_image" => AutomationOperation.FindImage,
+            "click_observed" => AutomationOperation.ClickObserved,
             "click" => AutomationOperation.Click, "press_key" => AutomationOperation.PressKey,
             _ => (AutomationOperation)(-1)
         };
@@ -651,6 +655,11 @@ public sealed class LuaRuntime : IScriptRuntime
     private static JsonElement ParseOperationParameters(string operation, LuaTable args)
     {
         // Copy Lua arguments while holding the Lua gate; never retain a LuaTable in a request.
+        if(operation=="click_observed")
+        {
+            string json=HostString(args[4]); if(json.Length>2048) throw new ArgumentException("Observed click JSON too large.");
+            using var doc=JsonDocument.Parse(json); return doc.RootElement.Clone();
+        }
         object parameters = operation switch
         {
             "sleep" => new { ms = Int(args[4]) },
@@ -715,6 +724,11 @@ public sealed class LuaRuntime : IScriptRuntime
                     AutomationOperation.FindImage => "find_image", AutomationOperation.PressKey => "press_key",
                     _ => operation.ToString().ToLowerInvariant()
                 }));
+        if(operation==AutomationOperation.ClickObserved && result.Status==OperationStatus.Rejected &&
+            result.Error is (OperationError.ObservationInvalid or OperationError.ObservationStale or OperationError.ObservationTimeUnavailable or
+                OperationError.ObservationGeometryChanged or OperationError.ObservationSceneChanged or OperationError.ObservationValidationUnavailable or
+                OperationError.ObservationCoordinateInvalid or OperationError.ObservationPolicyUnavailable) && result.Value is ObservedClickResult observed)
+            return observed;
         return result.RequireSuccess();
     }
 
@@ -725,6 +739,7 @@ public sealed class LuaRuntime : IScriptRuntime
             AutomationOperation.Capture => CaptureAsync(ct),
             AutomationOperation.FindImage => FindImageAsync(parameters, ct),
             AutomationOperation.Ocr => OcrAsync(parameters, ct),
+            AutomationOperation.ClickObserved => ClickObservedAsync(parameters,ct),
             AutomationOperation.Click => ClickAsync(parameters.GetProperty("x").GetInt32(), parameters.GetProperty("y").GetInt32(),
                 ReadOptional<MouseButton>(parameters, "button") ?? MouseButton.Left, ReadOptional<InputDeliveryMode>(parameters, "mode"), ct),
             AutomationOperation.PressKey => PressKeyAsync(parameters.GetProperty("key").GetInt32(),
@@ -911,6 +926,7 @@ public sealed class LuaRuntime : IScriptRuntime
             table["observation"] = ObservationTable(hit.Observation);
             return table;
         }
+        if (value is ObservedClickResult observed) return ToLuaJson(JsonSerializer.SerializeToElement(observed,ObservationJson));
         if (value is VisionOcrResult recognized)
         {
             LuaTable table = NewTable();
@@ -955,6 +971,14 @@ public sealed class LuaRuntime : IScriptRuntime
     private LuaTable NewTable() => (LuaTable)_lua!.DoString("return {}")![0];
     private static readonly JsonSerializerOptions ObservationJson = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private object? ObservationTable(ObservationEnvelope observation) => ToLuaJson(JsonSerializer.SerializeToElement(observation, ObservationJson));
+
+    private async Task<object?> ClickObservedAsync(JsonElement parameters, CancellationToken ct)
+    {
+        using var action=_visual!.PrepareObservedClick(ObservedClickRequest.Parse(parameters),_observedClicks);
+        action.PublishDetails("SourceResolved");
+        try { await _inputBridge!.ClickObservedAsync(action,ct).ConfigureAwait(false); return action.Result("completed","RoiConsistent"); }
+        catch(ObservedClickException e) { throw new ObservedClickException(e.Reason,action.Result("rejected",e.Reason.ToString())); }
+    }
 
     private async Task<object?> ClickAsync(int x, int y, MouseButton button, InputDeliveryMode? mode, CancellationToken ct)
     {

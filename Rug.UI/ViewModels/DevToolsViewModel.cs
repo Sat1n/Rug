@@ -8,6 +8,7 @@ using Rug.UI.Core.Contracts.Services;
 using Rug.UI.Core.Abstractions;
 using Rug.UI.Core.Helpers;
 using Rug.UI.Core.Models;
+using Rug.UI.Core.Services;
 using Rug.UI.Models;
 
 namespace Rug.UI.ViewModels;
@@ -575,6 +576,7 @@ public partial class DevToolsViewModel : ObservableObject
             () => { if (BoundWindow?.Hwnd != target.Hwnd || UseBackgroundInput != background || _inputTarget != target)
                 throw new InputUnavailableException("DevTools target was rebound while queued."); }, session.Token);
         _validateInput = lease.Validate;
+        using var observationInput = ObservationFramePool.Shared.BeginExternalInput();
         try { await PrepareInputTargetAsync(window.Hwnd, background, lease.Token); await action(lease.Token); }
         catch (InputCleanupException error) { lease.CleanupFailed(error); throw; }
         finally { _validateInput = null; }

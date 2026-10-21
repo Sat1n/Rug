@@ -21,6 +21,8 @@ if (args.Contains("--checkpoint-restore-manual")) { await ManualCheckpointRestor
 if (args.Contains("--checkpoint-restore-ui")) { await ManualCheckpointRestore.RunAsync(automated: true); return; }
 if (args.Contains("--checkpoint-restore-native")) { await NativeCheckpointRestore.RunAsync(); return; }
 if (args.Contains("--checkpoint-restore-tests")) { await CheckpointTests.RunRestoreAsync(); return; }
+if (args.Contains("--observed-click-tests")) { await CheckpointTests.RunObservedClicksAsync(); return; }
+if (args.Contains("--observed-click-native")) { await ObservedClickNative.RunAsync(); return; }
 if (args.Contains("--observation-tests")) { await CheckpointTests.RunObservationsAsync(); return; }
 if (args.Contains("--observation-native")) { await ObservationNativeSmoke.RunAsync(); return; }
 if (args.Contains("--capture-geometry-native")) { await CaptureGeometryTests.RunNativeAsync(); return; }
@@ -1134,6 +1136,7 @@ await CheckpointTests.RunPluginUpdatesAsync();
 await CheckpointTests.RunRuntimeUpdatesAsync();
 await CheckpointTests.RunRuntimeSwitchesAsync();
 await CheckpointTests.RunObservationsAsync();
+await CheckpointTests.RunObservedClicksAsync();
 await LifecycleTests.RunAsync();
 await AuthorizationTests.RunAsync();
 await InputArbitrationTests.RunAsync();
@@ -1269,6 +1272,8 @@ sealed class FakeOcr : IOcrService
 
 sealed class FakeInput : IInputService
 {
+    public Func<Task>? OnMove,OnDown,OnUp=null;
+    public int MouseDownCalls,MouseUpCalls;
     public nint Target { get; private set; }
     public List<bool> TargetModes { get; } = [];
     public MouseButton Button { get; private set; }
@@ -1279,12 +1284,12 @@ sealed class FakeInput : IInputService
     public int MoveCalls { get; private set; }
     public int Key { get; private set; }
     public Task MoveMouseAsync(int x, int y, TrajectoryType trajectory = TrajectoryType.CubicBezier, bool smooth = true, CancellationToken cancellationToken = default)
-    { X = x; Y = y; MoveCalls++; return Task.CompletedTask; }
+    { X = x; Y = y; MoveCalls++; return OnMove?.Invoke()??Task.CompletedTask; }
     public Task MoveMouseRelativeAsync(int dx, int dy, TrajectoryType trajectory = TrajectoryType.CubicBezier, bool smooth = true, CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task ClickAsync(MouseButton button = MouseButton.Left, int holdMs = 0, CancellationToken cancellationToken = default)
     { Button = button; return Task.CompletedTask; }
-    public Task MouseDownAsync(MouseButton button, CancellationToken cancellationToken = default) => Task.CompletedTask;
-    public Task MouseUpAsync(MouseButton button, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task MouseDownAsync(MouseButton button, CancellationToken cancellationToken = default) {MouseDownCalls++;return OnDown?.Invoke()??Task.CompletedTask;}
+    public Task MouseUpAsync(MouseButton button, CancellationToken cancellationToken = default) {MouseUpCalls++;return OnUp?.Invoke()??Task.CompletedTask;}
     public Task DragAndDropAsync(int sx, int sy, int ex, int ey, TrajectoryType trajectory = TrajectoryType.CubicBezier, bool smooth = true, CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task KeyDownAsync(int virtualKey, CancellationToken cancellationToken = default)
     { Key = virtualKey; KeyDownCalls++; return Task.CompletedTask; }

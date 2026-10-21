@@ -22,6 +22,7 @@ public sealed class VisualEngineBridge : IDisposable
     private readonly ObservationFramePool.Session _session;
     private readonly TaskExecutionContext? _context;
     private readonly Action? _validateRun;
+    private readonly RunIdentity _identity;
     private volatile bool _disposed;
 
     public VisualEngineBridge(ICaptureService capture, IOcrService ocr,
@@ -35,6 +36,7 @@ public sealed class VisualEngineBridge : IDisposable
         _permissions = permissions ?? throw new ArgumentNullException(nameof(permissions));
         if (context is not null && context.Identity != identity) throw new ArgumentException("Observation lifecycle/identity mismatch.", nameof(identity));
         _frames = frames ?? ObservationFramePool.Shared;
+        _identity = identity;
         _context = context; _validateRun = validateRun;
         _pluginDirectory = string.IsNullOrWhiteSpace(pluginDirectory)
             ? null : Path.GetFullPath(pluginDirectory);
@@ -136,9 +138,28 @@ public sealed class VisualEngineBridge : IDisposable
             Recognized(lease.Observation, target, region, "ocr", started));
     }
     private ObservationEnvelope Recognized(ObservationEnvelope source, CapturedFrame input, Rect? region, string kind, long started)
-        => source with { ObservationId = Guid.NewGuid(), Processing = new(kind,
+        => _frames.RegisterRecognition(_session, source with { ObservationId = Guid.NewGuid(), Processing = new(kind,
             region ?? new Rect(0, 0, source.Image.Width, source.Image.Height), input.Width, input.Height, input.Stride,
-            region?.X ?? 0, region?.Y ?? 0, started, _frames.Timestamp) };
+            region?.X ?? 0, region?.Y ?? 0, started, _frames.Timestamp) });
+
+    internal IDisposable BeginInput() => _frames.BeginInput();
+    internal void InputSideEffect() => _frames.InvalidateActions();
+    internal ObservedClickTransaction PrepareObservedClick(ObservedClickRequest request, ObservedClickServices services)
+    {
+        ThrowIfDisposed(); _permissions.Demand(Permission.Capture,"rug.click_observed.verify"); _validateRun?.Invoke();
+        var source=_frames.ResolveAction(_session,request);
+        try
+        {
+            return new(_frames,_session,source,_capture,_identity,services,request,()=>_validateRun?.Invoke(),
+                ()=>_permissions.Demand(Permission.Capture,"rug.click_observed.verify"));
+        }
+        catch(ObservedClickException error)
+        {
+            var result=error.Result with { ObservationId=source.Observation.ObservationId, FrameId=source.Observation.FrameId };
+            source.Dispose(); throw new ObservedClickException(error.Reason,result);
+        }
+        catch { source.Dispose(); throw; }
+    }
 
     private string ResolveTemplatePath(string templatePath)
     {

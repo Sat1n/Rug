@@ -29,8 +29,11 @@ public sealed class InputService : IInputService
     public Task MoveMouseAsync(int x, int y,
         TrajectoryType trajectory = TrajectoryType.CubicBezier, bool smooth = true,
         CancellationToken cancellationToken = default)
-        => Task.Run(() => Check(RugCoreNative.Rug_Input_MouseMove(H, x, y, (int)trajectory, smooth ? 1 : 0),
-            nameof(RugCoreNative.Rug_Input_MouseMove)), cancellationToken);
+        => Task.Run(() =>
+        {
+            using var coordinates=ObservedInputCoordinates.ForNativeCall();
+            Check(RugCoreNative.Rug_Input_MouseMove(H, x, y, (int)trajectory, smooth ? 1 : 0),nameof(RugCoreNative.Rug_Input_MouseMove));
+        }, cancellationToken);
 
     public Task MoveMouseRelativeAsync(int dx, int dy,
         TrajectoryType trajectory = TrajectoryType.CubicBezier, bool smooth = true,
@@ -44,12 +47,18 @@ public sealed class InputService : IInputService
             nameof(RugCoreNative.Rug_Input_Click)), cancellationToken);
 
     public Task MouseDownAsync(MouseButton button, CancellationToken cancellationToken = default)
-        => Task.Run(() => Check(RugCoreNative.Rug_Input_MouseDown(H, (int)button),
-            nameof(RugCoreNative.Rug_Input_MouseDown)), cancellationToken);
+        => Task.Run(() =>
+        {
+            using var coordinates=ObservedInputCoordinates.ForNativeCall();
+            Check(RugCoreNative.Rug_Input_MouseDown(H, (int)button),nameof(RugCoreNative.Rug_Input_MouseDown));
+        }, cancellationToken);
 
     public Task MouseUpAsync(MouseButton button, CancellationToken cancellationToken = default)
-        => Task.Run(() => Check(RugCoreNative.Rug_Input_MouseUp(H, (int)button),
-            nameof(RugCoreNative.Rug_Input_MouseUp)), cancellationToken);
+        => Task.Run(() =>
+        {
+            using var coordinates=ObservedInputCoordinates.ForNativeCall();
+            Check(RugCoreNative.Rug_Input_MouseUp(H, (int)button),nameof(RugCoreNative.Rug_Input_MouseUp));
+        }, cancellationToken);
 
     public Task DragAndDropAsync(int sx, int sy, int ex, int ey,
         TrajectoryType trajectory = TrajectoryType.CubicBezier, bool smooth = true,

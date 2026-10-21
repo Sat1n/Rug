@@ -29,10 +29,13 @@ public sealed class InputBridge : IAsyncDisposable
     private InputDeliveryMode _activeMode;
     private bool _bound;
     private bool _disposed;
+    private readonly Action _sideEffects;
+    private readonly Func<IDisposable> _beginInput;
 
     public InputBridge(IInputService input, PermissionInterceptor permissions,
         ICoordinateMapper? mapper = null, Func<nint, bool>? ensureForeground = null,
-        IInputArbiter? arbiter = null, InputOwner? owner = null, Action? validateRun = null)
+        IInputArbiter? arbiter = null, InputOwner? owner = null, Action? validateRun = null,
+        Action? sideEffects = null, Func<IDisposable>? beginInput = null)
     {
         _input = input ?? throw new ArgumentNullException(nameof(input));
         _permissions = permissions ?? throw new ArgumentNullException(nameof(permissions));
@@ -41,6 +44,8 @@ public sealed class InputBridge : IAsyncDisposable
         _arbiter = arbiter ?? InputArbiter.Shared;
         _owner = owner ?? InputOwner.ForDevTools("host.input.bridge");
         _validateRun = validateRun ?? (() => { });
+        _sideEffects = sideEffects ?? ObservationFramePool.Shared.InvalidateActions;
+        _beginInput = beginInput ?? ObservationFramePool.Shared.BeginInput;
     }
 
     internal InputBridge(IInputService input, PermissionInterceptor permissions, IInputArbiter arbiter,
@@ -89,12 +94,13 @@ public sealed class InputBridge : IAsyncDisposable
             using var lease = await _arbiter.AcquireAsync(CurrentOwner, _target!, mode ?? _defaultMode,
                 ValidateAdmission, cancellationToken).ConfigureAwait(false);
             cancellationToken = lease.Token;
+            using var inputScope = _beginInput();
             // Validate in the same physical client coordinate space consumed by native.
             // Do not feed the screen point back to the bound native controller.
             LastMappedScreenPoint = _mapper.ClientToScreen(_hwnd, x, y);
             await SelectModeAsync(mode ?? _defaultMode, cancellationToken, lease).ConfigureAwait(false);
             lease.Validate();
-            InputExecutionBoundary.MarkStarted();
+            MarkStarted();
             await _input.MoveMouseAsync(x, y, cancellationToken: cancellationToken).ConfigureAwait(false);
             lease.Validate();
             try { await _input.ClickAsync(button, cancellationToken: cancellationToken).ConfigureAwait(false); }
@@ -118,18 +124,19 @@ public sealed class InputBridge : IAsyncDisposable
             using var lease = await _arbiter.AcquireAsync(CurrentOwner, _target!, _defaultMode,
                 ValidateAdmission, cancellationToken).ConfigureAwait(false);
             cancellationToken = lease.Token;
+            using var inputScope = _beginInput();
             await SelectModeAsync(_defaultMode, cancellationToken, lease).ConfigureAwait(false);
             lease.Validate();
             if (durationMs == 0)
             {
-                InputExecutionBoundary.MarkStarted();
+                MarkStarted();
                 try { await _input.KeyPressAsync(virtualKey, cancellationToken: cancellationToken).ConfigureAwait(false); }
                 finally { await ReleaseAsync(() => _input.KeyUpAsync(virtualKey), lease).ConfigureAwait(false); }
                 return;
             }
             try
             {
-                InputExecutionBoundary.MarkStarted();
+                MarkStarted();
                 await _input.KeyDownAsync(virtualKey, cancellationToken).ConfigureAwait(false);
                 await Task.Delay(durationMs, cancellationToken).ConfigureAwait(false);
             }
@@ -141,7 +148,43 @@ public sealed class InputBridge : IAsyncDisposable
     private InputOwner CurrentOwner => _owner.Run is { } run && InputExecutionBoundary.Caller.Value is { } caller
         ? InputOwner.ForCaller(caller, run) : _owner;
 
-    private async Task SelectModeAsync(InputDeliveryMode mode, CancellationToken ct, IInputLease lease)
+    private void MarkStarted() { _sideEffects(); InputExecutionBoundary.MarkStarted(); }
+
+    /// <summary>@shape action: trusted source lease and host ROI policy; native coordinates remain physical client pixels.
+    /// @source action: Services/ObservedClickServices.cs#class:ObservedClickTransaction</summary>
+    internal async Task ClickObservedAsync(ObservedClickTransaction action, CancellationToken token)
+    {
+        _permissions.Demand(Permission.ControlInput,"rug.click_observed");
+        action.Validate(token); // Before bridge and arbiter queues.
+        await _gate.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            ThrowIfUnbound();
+            using var lease=await _arbiter.AcquireAsync(CurrentOwner,_target!,action.Mode,ValidateAdmission,token).ConfigureAwait(false);
+            token=lease.Token;
+            using var inputScope=_beginInput();
+            using var coordinates=ObservedInputCoordinates.Request();
+            void Check() { lease.Validate(); action.Validate(token); lease.Validate(); }
+            Check();
+            LastMappedScreenPoint=_mapper.ClientToScreen(_hwnd,action.Point.X,action.Point.Y);
+            await action.VerifyAsync("lease",token).ConfigureAwait(false); Check();
+            await SelectModeAsync(action.Mode,token,lease,action.StartSideEffect).ConfigureAwait(false); Check();
+            if(action.Mode==InputDeliveryMode.Win32SendInput) { await action.VerifyAsync("foreground",token).ConfigureAwait(false); Check(); }
+            action.StartSideEffect();
+            await _input.MoveMouseAsync(action.Point.X,action.Point.Y,cancellationToken:token).ConfigureAwait(false); Check();
+            await action.VerifyAsync("after-move",token).ConfigureAwait(false); Check();
+            action.StartSideEffect();
+            try
+            {
+                await _input.MouseDownAsync(action.Button,token).ConfigureAwait(false);
+                await Task.Delay(20,token).ConfigureAwait(false);
+            }
+            finally { await ReleaseAsync(()=>_input.MouseUpAsync(action.Button),lease).ConfigureAwait(false); }
+        }
+        finally { _gate.Release(); }
+    }
+
+    private async Task SelectModeAsync(InputDeliveryMode mode, CancellationToken ct, IInputLease lease, Action? markStarted = null)
     {
         lease.Validate();
         if (_activeMode != mode)
@@ -154,7 +197,7 @@ public sealed class InputBridge : IAsyncDisposable
         {
             // Foreground activation may visibly change focus even if its subsequent
             // confirmation rejects or throws. It belongs to the input side-effect boundary.
-            InputExecutionBoundary.MarkStarted();
+            (markStarted ?? MarkStarted)();
             if (_ensureForeground is not null)
             {
                 if (!_ensureForeground(_hwnd))

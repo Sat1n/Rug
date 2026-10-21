@@ -447,3 +447,66 @@ See [exact human steps and boundaries](../../Rug.UI.Core/InputIntervention.md).
 05B-02 human-triggered WinUI scenarios are user-confirmed passed (not performed
 by the agent); see the acceptance record above. Existing 05B-01
 acceptance and frozen native/Hook discrepancy evidence remain separate.
+
+## 08A-02B observed click verification
+
+Run from the repository root (SDK 10.0.402), replacing Debug with Release:
+
+```powershell
+dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64 --no-build -- --observed-click-tests
+dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64 --no-build -- --observed-click-native
+```
+
+The first mode is also included in the full suite. It uses actual Lua/Gateway
+with trusted test clock/window seams, padded BGRA frames, real pixel consistency
+checks and controlled barriers. Coverage includes both delivery modes, dedup,
+forged IDs/fields and owner/binding/generation isolation; OCR ROI-once and template
+provenance; held late OCR; bounded 64-ID registration; queued age/cache/geometry/
+identity changes; foreground/move changes; same-size changed ROI; unknown/future/
+foreign-clock time; no frame, IO failure, QPC deadline, shared capacity; original
+cancellation with blocked propagation; concurrent same-source requests; legacy/
+DevTools invalidation; pause, Stop, revoke, takeover and necessary MouseUp;
+cleanup quarantine and drained frame/work counts. Simulation is not Native evidence.
+
+The native mode loads the matching configuration of Rug.Core.dll, creates its own
+normal bordered animated marker target and uses CaptureService(exactBoundWindow:
+true), real InputService, actual Lua, Gateway and shared arbiter. Stable client
+(90,80) produces exactly target down/up=(1,1); marker color change after source
+capture yields SceneChanged and (0,0); resize yields GeometryChanged and (0,0).
+Source capture and the test-host change are ordered by a Lua/state barrier. Every
+run stops and all pool resources drain. No Hooks/Raw source, SendInput or simulated
+human acceptance is involved. Production ROI comparison is not replaced by a
+Fake-success validator. This does not certify all applications, hover semantics
+or business success. Native SendInput/human/DPI action validation: NOT RUN; existing
+input acceptance and independent Hook gap remain unchanged.
+
+Final verification, 2026-10-21 (agent automation, not human acceptance):
+
+| Evidence | Debug x64 | Release x64 |
+| --- | --- | --- |
+| Native Core/test build + relevant managed projects/WinUI | 0 warnings, 0 errors | 0 warnings, 0 errors |
+| Complete script suite (observation, Gateway/grants, arbiter, lifecycle, recovery, checkpoint, updates/switch) | PASS | PASS |
+| UI lifecycle presentation + Schema/state/hot reload | PASS | PASS |
+| Native capture contract / controlled in-flight lifetime invalidation | PASS | PASS |
+| Exact WGC marker + resize + old/new ABI/current geometry checks | PASS | PASS |
+| Lua/Gateway/arbiter/WGC/PostMessage stable / changed / resize | (1,1) / (0,0) / (0,0) | (1,1) / (0,0) / (0,0) |
+| WGC -> WinRT OCR / OpenCV actual-frame provenance; managed C-ABI visual-only | PASS | PASS |
+
+The geometry smoke also reproduced a real monitor/DPI transition 144 -> 96; this
+is capture geometry evidence, not a cross-screen observed-input acceptance. The
+separate OCR/match smoke retains provenance on its unsupported geometry target
+(status 5); that does not qualify that target for an observed click. Positive
+observed clicks use the explicitly exact, normal bordered marker window instead.
+All normal/refusal/cancel paths release source and private verification frame
+leases; injected release failure intentionally retains the existing arbiter
+CleanupFailed quarantine (no unsafe lease recycling). No new human tests, native
+SendInput observed-click loop, Minecraft E2E or DevTools UI interaction were run.
+No UI presentation changed, and existing human/input/Hook acceptance is not
+expanded by these automated results.
+
+The final target assertion also checks both button coordinates exactly (90,80),
+at observed DPI 144. Adding this assertion initially exposed (135,121) in the
+DPI-unaware console host although message counts were correct. Observed mapping
+and actual Native move/button calls now enter/restore a per-call PMv2 context;
+legacy input defaults remain unchanged. The final matching-configuration smoke
+checks the exact physical point, not only counts.

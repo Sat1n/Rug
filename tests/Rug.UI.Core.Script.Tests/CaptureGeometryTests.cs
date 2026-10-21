@@ -76,7 +76,12 @@ internal static class CaptureGeometryTests
             Console.WriteLine($"WGC marker PASS: image=({minX},{minY}) -> client=(80,70), content={facts.ContentWidth}x{facts.ContentHeight}, buffer={c.Width}x{c.Height}, client={facts.Geometry.ClientWidth}x{facts.Geometry.ClientHeight}, dpi={facts.Dpi}, compositor100ns={facts.NativeTime!.SystemRelative100ns}, nativeSampleAge={facts.NativeTime.AgeAtNativeSample}");
         }
         var first = await Grab(); Validate(first);
+        var original=first.NativeCaptureFacts!.Value;
+        Check(RugCoreNative.Rug_CheckCaptureGeometry(hwnd,in original)==0,"current native geometry ABI");
+        var unsupported=original;unsupported.Version++;
+        Check(RugCoreNative.Rug_CheckCaptureGeometry(hwnd,in unsupported)==-2,"invalid geometry ABI version");
         target.Resize(800, 530);
+        Check(RugCoreNative.Rug_CheckCaptureGeometry(hwnd,in original)==RugStatus.ErrCaptureFailed,"resize accepted old geometry");
         CapturedFrame resized;
         do { resized = await Grab(); } while (resized.Width == first.Width);
         Validate(resized);
@@ -104,6 +109,7 @@ internal static class CaptureGeometryTests
         }
         finally { RugCoreNative.Rug_DestroyCapturer(old); }
         target.Dispose();
+        Check(RugCoreNative.Rug_CheckCaptureGeometry(hwnd,in original)==RugStatus.ErrWindowIdentity,"destroyed lifetime accepted by action check");
         Check(await capture.GrabFrameAsync() is null, "destroyed bound HWND retained capture identity");
         await capture.StopAsync(); Check(await capture.GrabFrameAsync() is null, "stop retained native capture");
         Console.WriteLine("WGC geometry PASS: ordinary bordered window + resize, old/new C-ABI, alternate selection and destroyed lifetime");

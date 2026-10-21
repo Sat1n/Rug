@@ -263,3 +263,12 @@ metadata, actual Lua compatibility, held A/native time while B publishes, UTC ju
 capacity/Stop/late publication and full Debug/Release script/UI-core regressions
 pass. WGC→OCR/matching retains final native time and source IDs. No action gate,
 input strategy change, Hook root-cause closure or new human acceptance is claimed.
+
+## 08A-02B action eligibility extension
+
+[Observed clicks](ObservedClicks.md) resolve capture, OCR and match observation IDs
+against the current owning frame. Provenance remains readable after qualification
+is retired; it is not an action capability by itself. Up to 64 IDs per current
+frame, shared resident/work limits and one-shot input epochs bound the registry.
+Verification uses private fresh captures with separate leases; it never replaces
+the script cache. Existing v2 metadata and old recognition coordinates are retained.

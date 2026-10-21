@@ -77,7 +77,7 @@ public sealed class CaptureService(bool exactBoundWindow = false) : ICaptureServ
             int bytes = ValidateLayout(frame, maxBytes);
             var pixels = new byte[bytes];
             System.Runtime.InteropServices.Marshal.Copy(frame.Data, pixels, 0, bytes);
-            return new CapturedFrame(pixels, frame.Width, frame.Height, frame.Stride) { CaptureFacts = ConvertFacts(facts, frame) };
+            return new CapturedFrame(pixels, frame.Width, frame.Height, frame.Stride) { CaptureFacts = ConvertFacts(facts, frame), NativeCaptureFacts = facts };
         }
         finally
         {

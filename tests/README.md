@@ -161,3 +161,8 @@ Real marker/resize validation runs via [managed geometry smoke](Rug.UI.Core.Scri
 - **Match:** best match `(x, y, w, h)` + `Score` + timing, or `[SKIP]`.
 - **Discovery:** lists every bundle under `models/ocr` (id/engine/version),
   creates the first by id, and confirms an unknown id reports model-not-found.
+
+08A-02B adds [observed click tests](Rug.UI.Core.Script.Tests/README.md): deterministic
+execution boundaries in both input modes and actual Lua/Gateway/WGC/PostMessage
+marker delivery/refusal. `Rug_CheckCaptureGeometry` is checked against live frames,
+resize, destroyed identity and unsupported ABI version by the geometry smoke.

@@ -26,6 +26,7 @@ public static class RugStatus
     public const int ErrBufferTooSmall = -9;
     public const int ErrTimeout = -10;
     public const int ErrOcrModelNotFound = -11;
+    public const int ErrWindowIdentity = -12;
 }
 
 /// <summary>Pixel formats mirrored from RugCoreAbi.h (RugPixelFormat).</summary>
@@ -178,6 +179,8 @@ public static partial class RugCoreNative
 
     [LibraryImport(Lib)]
     public static partial int Rug_GrabFrameWithFacts(nint handle, out RugFrame outFrame, ref RugCaptureFacts facts);
+    [LibraryImport(Lib)]
+    public static partial int Rug_CheckCaptureGeometry(nint boundWindow, in RugCaptureFacts facts);
 
     // --- Image I/O ---
     [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]

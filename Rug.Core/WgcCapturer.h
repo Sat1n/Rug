@@ -25,6 +25,8 @@
 #include "include/RugCoreAbi.h"
 
 namespace rug::core {
+// Recheck current window identity and the supported mapping basis; no capture/input.
+int32_t CheckCaptureGeometry(HWND bound, const RugCaptureFacts& facts);
 
 // A captured frame. `data` is a BGRA8 buffer allocated with new[] and MUST be
 // released with delete[] (the ABI frees it via Rug_FreeBuffer).

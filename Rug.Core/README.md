@@ -65,6 +65,9 @@ scripting, scheduling or plugin logic — those live above it.
 08A-02A adds `Rug_CreateCapturerExact` and `Rug_GrabFrameWithFacts` without changing
 RugFrame or old calls. [Capture facts contract](CaptureFacts.md) specifies V1 layout,
 QPC time, supported geometry, refusal and ownership.
+08A-02B adds `Rug_CheckCaptureGeometry`: a no-allocation current-window/lifetime
+and supported mapping check against the exact facts carried with the source frame.
+It does not re-capture or certify scene content; the host performs fresh ROI checks.
 Known window-lifetime loss/change rejects the complete frame at acquisition and
 the final delivery boundary; ordinary geometry changes can remain unverified.
 

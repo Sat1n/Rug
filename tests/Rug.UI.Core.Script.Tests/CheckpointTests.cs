@@ -134,6 +134,7 @@ internal static partial class CheckpointTests
     }
     private sealed class Capture : ICaptureService
     {
+        public Func<Task<CapturedFrame?>>? Next;
         public CaptureFacts? Facts;
         public bool Fail,Disposed,Hold;public int Calls;
         public readonly TaskCompletionSource Entered=Signal(),Release=Signal();
@@ -141,7 +142,7 @@ internal static partial class CheckpointTests
         public bool IsCapturing=>!Disposed;
         public Task StartAsync(nint hwnd,CancellationToken cancellationToken=default)=>Task.CompletedTask;
         public async Task<CapturedFrame?> GrabFrameAsync(CancellationToken cancellationToken=default)
-        {Calls++;Entered.TrySetResult();if(Hold){Blocked.TrySetResult();await Release.Task;}if(Fail)throw new IOException("capture fault");var pixels=new byte[8*8*4];for(int i=0;i<pixels.Length;i+=4){pixels[i+1]=200;pixels[i+3]=255;}return new CapturedFrame(pixels,8,8,32){CaptureFacts=Facts};}
+        {Calls++;Entered.TrySetResult();if(Hold){Blocked.TrySetResult();await Release.Task;}if(Fail)throw new IOException("capture fault");if(Next is not null)return await Next();var pixels=new byte[8*8*4];for(int i=0;i<pixels.Length;i+=4){pixels[i+1]=200;pixels[i+3]=255;}return new CapturedFrame(pixels,8,8,32){CaptureFacts=Facts};}
         public Task StopAsync()=>Task.CompletedTask;
         public ValueTask DisposeAsync(){Disposed=true;return ValueTask.CompletedTask;}
     }
@@ -165,13 +166,15 @@ internal static partial class CheckpointTests
         public readonly RuntimeUpdateCompatibilityRegistry UpdateRules=new();
         public readonly List<Capture> Captures=[];public bool Register=true,CaptureFailure,HoldCapture;
         public CaptureFacts? CaptureMetadata;
+        public Func<Task<CapturedFrame?>>? CaptureNext;
+        public Func<nint,bool>? Foreground;
         public readonly List<FakeInput> Inputs=[];
         public readonly WindowValidator Windows=new();
         public IInputArbiter Arbiter=null!;
         public readonly Logger Log=new();public IDisposable? NodeRegistration;
         public Action<TaskExecutionContext>? OnReady;
         public static async Task<Fixture> CreateAsync(ICheckpointFilePublisher? publisher=null,Func<CancellationToken,Task>? beforePublish=null,TimeSpan? timeout=null,bool checkpoint=true,string? script=null,string version="1",bool input=false,bool agent=false,IAnomalyLogger? anomalyLogger=null,Func<CheckpointCoordinator,ICheckpointCoordinator>? checkpointHost=null,
-            bool vision=false,ObservationFramePool? observationFrames=null)
+            bool vision=false,ObservationFramePool? observationFrames=null,ObservedClickServices? observedClicks=null)
         {
             string root=Path.Combine(AppContext.BaseDirectory,"checkpoint-test-"+Guid.NewGuid().ToString("N"));string dir=Path.Combine(root,"plugins","probe");Directory.CreateDirectory(dir);
             var permissions=new List<string>{Permission.Capture,Permission.Timer};if(checkpoint)permissions.Add(Permission.Checkpoint);
@@ -186,8 +189,8 @@ internal static partial class CheckpointTests
             f.Coordinator=new(f.Store,f.Registry,f.Authorization,timeout);
             f.Arbiter=new InputArbiter(f.Windows);
             f.Scheduler=new(new PluginManager(NullLogger<PluginManager>.Instance),Path.Combine(root,"plugins"),
-                ()=>{var c=new Capture{Fail=f.CaptureFailure,Hold=f.HoldCapture,Facts=f.CaptureMetadata};f.Captures.Add(c);return c;},()=>{var i=new FakeInput();f.Inputs.Add(i);return i;},
-                (c,i)=>new LuaRuntime(c,new FakeOcr(),i,f.Log,new FakeCoordinateMapper(),ensureForeground:_=>true,commandBus:f.Bus,observationFrames:observationFrames),NullLogger<Scheduler>.Instance,anomalyLogger??new NoAnomaly(),
+                ()=>{var c=new Capture{Fail=f.CaptureFailure,Hold=f.HoldCapture,Facts=f.CaptureMetadata,Next=f.CaptureNext};f.Captures.Add(c);return c;},()=>{var i=new FakeInput();f.Inputs.Add(i);return i;},
+                (c,i)=>new LuaRuntime(c,new FakeOcr(),i,f.Log,new FakeCoordinateMapper(),ensureForeground:h=>f.Foreground?.Invoke(h)??true,commandBus:f.Bus,observationFrames:observationFrames,observedClicks:observedClicks),NullLogger<Scheduler>.Instance,anomalyLogger??new NoAnomaly(),
                 commandBus:f.Bus,authorization:f.Authorization,inputArbiter:f.Arbiter,checkpoints:checkpointHost?.Invoke(f.Coordinator)??f.Coordinator,
                 checkpointStore:f.Store,checkpointRestores:f.Registry,updateCompatibility:f.UpdateRules);
             return f;
