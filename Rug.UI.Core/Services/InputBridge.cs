@@ -165,15 +165,16 @@ public sealed class InputBridge : IAsyncDisposable
             using var inputScope=_beginInput();
             using var coordinates=ObservedInputCoordinates.Request();
             void Check() { lease.Validate(); action.Validate(token); lease.Validate(); }
+            void StartSideEffect() => action.StartSideEffect(token,lease.Validate);
             Check();
             LastMappedScreenPoint=_mapper.ClientToScreen(_hwnd,action.Point.X,action.Point.Y);
             await action.VerifyAsync("lease",token).ConfigureAwait(false); Check();
-            await SelectModeAsync(action.Mode,token,lease,action.StartSideEffect).ConfigureAwait(false); Check();
+            await SelectModeAsync(action.Mode,token,lease,StartSideEffect).ConfigureAwait(false); Check();
             if(action.Mode==InputDeliveryMode.Win32SendInput) { await action.VerifyAsync("foreground",token).ConfigureAwait(false); Check(); }
-            action.StartSideEffect();
+            StartSideEffect();
             await _input.MoveMouseAsync(action.Point.X,action.Point.Y,cancellationToken:token).ConfigureAwait(false); Check();
             await action.VerifyAsync("after-move",token).ConfigureAwait(false); Check();
-            action.StartSideEffect();
+            StartSideEffect();
             try
             {
                 await _input.MouseDownAsync(action.Button,token).ConfigureAwait(false);

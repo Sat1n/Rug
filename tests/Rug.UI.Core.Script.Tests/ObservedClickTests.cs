@@ -8,9 +8,10 @@ internal static partial class CheckpointTests
     {
         public long Now=100_000_000;
         public ObservedClickReason? Invalid;
+        public Action? OnGeometry;
         public QpcReading ReadQpc()=>new(Now,10_000_000);
         public void ValidateGeometry(RunIdentity run,CapturedFrame frame)
-        {if(Invalid is {} reason)throw new ObservedClickException(reason);}
+        {if(Invalid is {} reason)throw new ObservedClickException(reason);OnGeometry?.Invoke();}
         public CapturedFrame Frame(byte value=80)
         {
             const int stride=272;
@@ -71,6 +72,7 @@ internal static partial class CheckpointTests
         foreach(string change in new[]{"age","cache","geometry","scene"})await ObservedMoveAsync(mode,change);
         await ObservedForegroundAsync();await ObservedFailuresAsync();await ObservedStopAsync();
         await ObservedOriginalCancelAsync();await ObservedReleaseAsync();await ObservedLateAsync();
+        await ObservedFinalGeometryAsync();
         await ObservedConcurrentAsync();await ObservedPauseAsync();await ObservedCleanupFailureAsync();await ObservedLuaAsync();
         Console.WriteLine("Observed clicks PASS: actual Lua/Gateway, input arbitration, trusted QPC/ROI, all execution boundaries, one-shot sources, cancellation/Stop/release and bounded resources");
     }
@@ -221,6 +223,62 @@ internal static partial class CheckpointTests
         f.Input.OnDown=()=>{source.Cancel();return Task.CompletedTask;};
         var result=await f.Click(token:source.Token);await Until(()=>f.Pool.Usage.Operations==0);
         Check(result.Status==OperationStatus.Cancelled&&result.OutcomeUncertain&&f.Input.MouseDownCalls==1&&f.Input.MouseUpCalls==1,"cancellation skipped necessary release");
+    }
+    private static async Task ObservedFinalGeometryAsync()
+    {
+        foreach(var mode in new[]{InputDeliveryMode.Win32PostMessage,InputDeliveryMode.Win32SendInput})
+        {
+            // Calibrate the last geometry query preceding each actual side effect in an
+            // unchanged control run. Do not pin the regression to incidental query counts.
+            var boundaries=new Dictionary<string,int>();int queries=0;
+            await using(var control=await ClickFixture.Create())
+            {
+                control.Clock.OnGeometry=()=>queries++;
+                control.Host.Foreground=_=>{boundaries["foreground"]=queries;return true;};
+                control.Input.OnMove=()=>{boundaries["move"]=queries;return Task.CompletedTask;};
+                control.Input.OnDown=()=>{boundaries["down"]=queries;return Task.CompletedTask;};
+                Check((await control.Click(mode)).Status==OperationStatus.Success,"geometry boundary control failed");
+            }
+            foreach(var boundary in boundaries)
+            foreach(string change in new[]{"cancel","age"})
+            {
+                await using var f=await ClickFixture.Create();using var caller=new CancellationTokenSource();
+                var blocked=Signal();var unblock=Signal();Task? cancelling=null;CancellationTokenRegistration registration=default;
+                int checks=0,foreground=0;bool injected=false;
+                f.Host.Foreground=_=>{foreground++;return true;};
+                f.Clock.OnGeometry=()=>
+                {
+                    if(++checks!=boundary.Value)return;
+                    injected=true;
+                    if(change=="age"){f.Clock.Now+=20_000_000;return;}
+                    // Registered after Gateway's links, so this callback blocks propagation
+                    // while the original token is already cancelled. No sleeps or real input.
+                    registration=caller.Token.Register(()=>{blocked.TrySetResult();unblock.Task.GetAwaiter().GetResult();});
+                    cancelling=Task.Run(caller.Cancel);
+                    blocked.Task.WaitAsync(TimeSpan.FromSeconds(8)).GetAwaiter().GetResult();
+                };
+                try
+                {
+                    var result=await f.Click(mode,caller.Token).WaitAsync(TimeSpan.FromSeconds(8));
+                    await Until(()=>f.Pool.Usage.Operations==0);
+                    bool moved=boundary.Key=="down";
+                    bool uncertain=moved||(mode==InputDeliveryMode.Win32SendInput&&boundary.Key=="move");
+                    Check(injected,$"geometry barrier not reached: {mode}/{boundary.Key}/{change}");
+                    if(change=="cancel")Check(result.Status==OperationStatus.Cancelled&&result.OutcomeUncertain==uncertain,
+                        $"final geometry cancellation: {mode}/{boundary.Key}: {result}");
+                    else ClickRejected(result,OperationError.ObservationStale,uncertain);
+                    Check(f.Input.MoveCalls==(moved?1:0)&&f.Input.MouseDownCalls==0&&f.Input.MouseUpCalls==0&&
+                        foreground==(mode==InputDeliveryMode.Win32SendInput&&boundary.Key!="foreground"?1:0),
+                        $"geometry query admitted a later side effect: {mode}/{boundary.Key}/{change}");
+                }
+                finally
+                {
+                    f.Clock.OnGeometry=null;unblock.TrySetResult();
+                    if(cancelling is not null)await Bound(cancelling);
+                    registration.Dispose();
+                }
+            }
+        }
     }
     private static async Task ObservedConcurrentAsync()
     {

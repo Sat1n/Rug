@@ -81,10 +81,19 @@ internal sealed class ObservedClickTransaction : IDisposable
     internal ObservedClickResult Result(string status, string reason) => new(status,reason,_source.Observation.ObservationId,
         _source.Observation.FrameId,Point,_policy.Id,Array.AsReadOnly(_validations.ToArray()));
     internal void PublishDetails(string stage) => InputExecutionBoundary.Observation.Value?.Invoke(Result("pending",stage));
-    internal void Validate(CancellationToken token)
+    internal void Validate(CancellationToken token, Action? validateInput = null)
+    {
+        CheckAdmission(token);
+        _source.Validate(); ValidateFrame(_source.Frame);
+        // Geometry can block in Native code. Its return is not an admission decision:
+        // recheck the lease/live input grant, original cancellation/deadline, run,
+        // capture grant and current QPC after it, without another geometry query.
+        validateInput?.Invoke();
+        CheckAdmission(token); CheckTime(_source.Frame); _source.Validate();
+    }
+    private void CheckAdmission(CancellationToken token)
     {
         token.ThrowIfCancellationRequested(); ObservationCallBoundary.Current.Value?.Check(); _validateRun(); _demandCapture();
-        _source.Validate(); ValidateFrame(_source.Frame); _source.Validate();
     }
     private NativeFrameTime CheckTime(CapturedFrame frame)
     {
@@ -101,9 +110,11 @@ internal sealed class ObservedClickTransaction : IDisposable
         if(frame.CaptureFacts?.Geometry.ClientGeometryVerified!=true) throw new ObservedClickException(ObservedClickReason.GeometryChanged);
         _environment.ValidateGeometry(_run,frame);
     }
-    internal void StartSideEffect()
+    internal void StartSideEffect(CancellationToken token, Action validateInput)
     {
-        // No IO/callback inside the pool decision. All other checks were just performed.
+        // Shared final boundary for foreground activation, movement and button-down.
+        // No IO/callback inside the pool decision; necessary releases do not use it.
+        Validate(token,validateInput);
         _source.Consume(); InputExecutionBoundary.MarkStarted();
     }
     /// <summary>@shape stage: one of at most three bounded fresh comparisons; source/cache are never replaced.

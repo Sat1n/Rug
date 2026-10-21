@@ -510,3 +510,26 @@ DPI-unaware console host although message counts were correct. Observed mapping
 and actual Native move/button calls now enter/restore a per-call PMv2 context;
 legacy input defaults remain unchanged. The final matching-configuration smoke
 checks the exact physical point, not only counts.
+
+### Post-geometry boundary regression (review of `5487170`)
+
+The previous passing suite missed cancellation/age changes *inside* the final
+geometry query. The new control run records the last query preceding foreground,
+move and down; fresh runs inject at each recorded query, without timing sleeps.
+Original cancellation is observed while a later-registered callback blocks linked
+propagation; the other case advances trusted QPC by two seconds. Both modes reject
+the next side effect with zero button down/up. After an earlier movement/activation,
+OutcomeUncertain remains true; before any side effect it remains false. Existing
+down-then-cancel tests still require MouseUp and all resource counts to drain.
+This regression failed on the original implementation and passes with the shared
+final guard. Fake input does not count as native SendInput or human acceptance.
+
+Follow-up automation on 2026-10-21 used newly built SDK 10.0.402 x64 managed
+artifacts. In both Debug and Release: script-test and WinUI builds had zero
+warnings/errors; `--observed-click-tests`, the complete script suite and
+`dotnet run --project Rug.UI.Tests/Rug.UI.Tests.csproj -c <configuration> -p:Platform=x64 --no-restore`
+passed. `--observed-click-native` passed again in both configurations with target
+counts stable=(1,1), changed=(0,0), resize=(0,0), exact stable down/up=(90,80),
+source DPI=144 and drained resources. Native code was unchanged and its existing
+matching-configuration DLLs were reused, not rebuilt for this focused fix.
+No new real SendInput or human acceptance was performed; the Hook gap remains open.

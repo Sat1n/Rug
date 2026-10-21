@@ -35,6 +35,13 @@ Static parsing/source checks precede queues. After the existing input lease:
 recheck source/age/current geometry, fresh ROI comparison, foreground confirmation
 and another comparison for SendInput, move, recheck and fresh ROI comparison,
 then final validation and MouseDown/mandatory MouseUp. No fallback/retry/relocalize.
+Foreground activation, movement and button-down share one final side-effect guard.
+After its potentially blocking geometry query returns, it rechecks the live input
+lease/grant, original caller cancellation/deadline, run/capture admission, current
+QPC age and source qualification before consuming the source and marking input.
+No further geometry query follows those final checks. Cancellation/expiry during
+the query therefore cannot authorize the next side effect. Necessary releases
+remain outside this guard; refusal after activation or movement stays uncertain.
 Current QPC is sampled through trusted native code; arbitrary TimeProvider and
 AgeAtNativeSample cannot establish execution-time age. Window identity and all
 supported capture mapping facts are rechecked independently of source freshness.
@@ -122,3 +129,10 @@ Commands and final results are recorded in the
 [test index](../tests/Rug.UI.Core.Script.Tests/README.md). Deterministic evidence,
 actual PostMessage/WGC evidence and any human acceptance are kept separate.
 The independent Hook observation gap remains open.
+
+Review of `5487170` found a missing post-geometry cancellation/age check, despite
+the earlier passing suite. The follow-up regression calibrates the final geometry
+query before each actual side effect in a control run, then injects original-token
+cancellation with linked propagation blocked, or a two-second QPC advance, at that
+query in fresh runs. Both modes cover movement/down; SendInput also covers activation.
+These are deterministic Gateway/Fake-input checks, not real SendInput acceptance.
