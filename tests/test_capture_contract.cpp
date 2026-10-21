@@ -10,6 +10,8 @@ int RunCaptureContract() {
     auto c = ReadCaptureCandidate<Candidate>([&] { ++read; return Candidate{read == 1 ? 0 : read, read * 100, read * 10}; },
         [](auto f) { return f.pixel != 0; }, [&] { ++waits; }, 5);
     bool ok = c.pixel == 2 && c.time == 200 && c.width == 20 && waits == 1;
+    ok &= KnownLifetimeMatches(0, 0) && KnownLifetimeMatches(0, 42) && KnownLifetimeMatches(42, 42) &&
+        !KnownLifetimeMatches(42, 0) && !KnownLifetimeMatches(42, 43);
     auto missing = ReadCaptureCandidate<Candidate>([] { return Candidate{}; }, [](auto f) { return f.pixel != 0; }, [] {}, 2);
     ok &= missing.time == 0 && missing.width == 0;
     ok &= ValidFrameTime(100, 200, 10000000) && !ValidFrameTime(0, 200, 10000000) &&

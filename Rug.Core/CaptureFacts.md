@@ -79,9 +79,16 @@ The exact-window path retries boundedly for a post-sample frame; if it still has
 usable pixels but cannot establish this mapping, pixels return with unavailable
 geometry; if no usable final candidate remains, capture fails instead. Another
 selected HWND, unsupported styles, stale/unknown time, DPI,
-resize, movement, monitor or lifetime changes yield no transform. A destroyed or
-reused bound/captured HWND rejects capture. Inability to install/read the lifetime
-property permits capture facts but never verified geometry. Properties live with
+resize, movement or monitor changes yield no transform. A destroyed/reused HWND,
+or loss/change of an already-known bound/captured lifetime token, rejects the
+entire candidate with RUG_ERR_CAPTURE_FAILED, not geometryStatus=2 success.
+Both windows are checked at entry, after surface acquisition and immediately
+before ownership transfer, after the output buffer has been copied. Known
+lifetime mismatches observed in geometry samples also reject even if a later
+property query changes again. Output storage is RAII-owned until the final check;
+failure frees it and does not hand pixels/facts to the host for publication.
+Inability to obtain a token at capturer startup remains unknown and does not
+reject an otherwise live window; it never permits verified geometry. Properties live with
 the window so concurrent capturers do not invalidate one another on Stop.
 
 Mapping is `client = image - imageClientOffset`, then
@@ -151,3 +158,24 @@ continuous geometry invariance, action-time safety, physical clicks or new human
 input acceptance. Separate Minecraft E2E was NOT RUN. No UI presentation changed,
 so no new manual UI acceptance is required for this unit. Existing independent
 Hook gap and earlier acceptance limits remain unchanged.
+
+### In-flight lifetime rejection regression
+
+`Rug.Tests.exe capture-lifetime` compiles the production WgcCapturer source into
+the test executable with an internal Config callback (not a C-ABI hook). A barrier
+after real WGC acquisition/output-buffer copy blocks the final delivery decision.
+The test then replaces/removes a known property on the bound or separately
+selected capture window and releases the barrier. All six cases must return
+RUG_ERR_CAPTURE_FAILED with no output pixels/facts. The callback is unset in
+production ABI construction. This is controlled identity invalidation injection,
+not evidence of actual HWND reuse; it supplements the existing destroy-before-
+capture smoke and the no-token/known-token pure contract cases.
+
+2026-10-21 fix verification: native Debug/Release x64 builds and all six barrier
+cases per configuration pass, as do `capture`, managed observation contracts and
+real WGC marker/resize/cross-monitor DPI 144→96 smokes. The retained reviewer
+program (`artifacts/review-02a`, unchanged) returns null in all five timed runs
+against the rebuilt production Debug DLL; those timed runs supplement, rather
+than replace, the barrier cases. No successful old-token frame is returned.
+Full script regressions and WinUI x64 builds also pass in Debug/Release; native
+and WinUI builds report no warnings/errors. Input/Hook policies are unchanged.

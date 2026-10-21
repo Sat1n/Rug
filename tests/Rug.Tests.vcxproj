@@ -140,6 +140,8 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="test_capture_contract.cpp" />
+    <ClCompile Include="test_capture_lifetime.cpp" />
+    <ClCompile Include="..\Rug.Core\WgcCapturer.cpp" />
     <ClCompile Include="TestCommon.cpp" />
     <ClCompile Include="test_model_discovery.cpp" />
     <ClCompile Include="test_ocr_correctness.cpp" />

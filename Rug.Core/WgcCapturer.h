@@ -21,6 +21,7 @@
 #include <windows.h>
 #include <cstdint>
 #include <memory>
+#include <functional>
 #include "include/RugCoreAbi.h"
 
 namespace rug::core {
@@ -43,6 +44,8 @@ public:
         HWND targetWindow  = nullptr;  // any window of the target process
         bool captureCursor = false;    // include the cursor in the capture
         bool exactWindow = false;
+        // Internal native-test seam only; never exposed by the C-ABI.
+        std::function<void()> beforeDeliveryForTesting;
     };
 
     explicit WgcCapturer(Config config);

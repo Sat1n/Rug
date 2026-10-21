@@ -4,6 +4,9 @@
 #include <windows.h>
 
 namespace rug::core {
+inline bool KnownLifetimeMatches(uint64_t known, uint64_t current) {
+    return known == 0 || known == current;
+}
 struct WindowSample {
     RECT bounds{}, client{};
     POINT origin{};

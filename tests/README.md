@@ -14,6 +14,10 @@ correctness, OCR memory/stability under repetition, and OpenCV template matching
 The `capture` mode additionally unit-tests the internal pure candidate, geometry
 sample and QPC helpers; actual WGC marker/resize/DPI evidence is provided by the
 [managed capture smoke](Rug.UI.Core.Script.Tests/README.md).
+`Rug.Tests.exe capture-lifetime` adds deterministic real-WGC delivery-barrier
+tests for in-flight lifetime token removal/replacement (exact bound and distinct
+selected capture windows). It compiles the same internal capturer source for a
+test-only Config callback; production C-ABI exposes no injection facility.
 
 ## Independent input Hook comparison
 

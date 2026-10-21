@@ -255,15 +255,20 @@ struct WgcCapturer::Impl {
         return RUG_OK;
     }
 
+    bool WindowsStillValid() const {
+        return IsWindow(cfg.targetWindow) && IsWindow(resolved) &&
+            KnownLifetimeMatches(boundLifetime, WindowLifetime(cfg.targetWindow, false)) &&
+            KnownLifetimeMatches(capturedLifetime, WindowLifetime(resolved, false));
+    }
+
     // @shape out: owned padded BGRA8 + same-final-frame facts; failure owns no buffer.
     // @source frame: Direct3D11CaptureFrame ContentSize/SystemRelativeTime/Surface.
     int32_t GrabFrame(CapturedFrame& out) {
         if (!started) return RUG_ERR_NOT_INITIALIZED;
 
-        if (!IsWindow(cfg.targetWindow) || !IsWindow(resolved) ||
-            (boundLifetime && WindowLifetime(cfg.targetWindow, false) != boundLifetime) ||
-            (capturedLifetime && WindowLifetime(resolved, false) != capturedLifetime)) return RUG_ERR_CAPTURE_FAILED;
+        if (!WindowsStillValid()) return RUG_ERR_CAPTURE_FAILED;
         const auto before = SampleWindow(resolved);
+        if (!KnownLifetimeMatches(capturedLifetime, before.lifetime)) return RUG_ERR_CAPTURE_FAILED;
         const int64_t beforeQpc = Qpc();
         dpiScale = WindowDpiScale(resolved);
         struct Candidate { SoftwareBitmap pixels{ nullptr }; SizeInt32 content{}; int64_t time100ns = 0; };
@@ -320,6 +325,10 @@ struct WgcCapturer::Impl {
         LARGE_INTEGER frequency{}; QueryPerformanceFrequency(&frequency);
         facts.qpcFrequency = frequency.QuadPart;
         const auto after = SampleWindow(resolved);
+        // Identity loss rejects pixels, unlike resize/unsupported geometry.
+        if (!KnownLifetimeMatches(capturedLifetime, after.lifetime) || !WindowsStillValid()) {
+            buffer.Close(); return RUG_ERR_CAPTURE_FAILED;
+        }
         facts.geometryBeforeQpc = beforeQpc; facts.geometryAfterQpc = Qpc(); facts.qpcSample = Qpc();
         facts.boundWindow = reinterpret_cast<uintptr_t>(cfg.targetWindow); facts.capturedWindow = reinterpret_cast<uintptr_t>(resolved);
         facts.boundLifetime = boundLifetime; facts.capturedLifetime = capturedLifetime;
@@ -334,9 +343,9 @@ struct WgcCapturer::Impl {
         if (resolved == cfg.targetWindow) facts.flags |= 4;
         facts.geometryStatus = 4;
         if (resolved != cfg.targetWindow) facts.geometryStatus = 3;
-        else if (!SameSample(before, after) || WindowLifetime(cfg.targetWindow, false) != boundLifetime) facts.geometryStatus = 2;
+        else if (!SameSample(before, after)) facts.geometryStatus = 2;
         else if (!timeValid || !FrameAtOrAfter(candidate.time100ns, beforeQpc, facts.qpcFrequency)) facts.geometryStatus = 5;
-        else if ((after.style & WS_OVERLAPPEDWINDOW) == WS_OVERLAPPEDWINDOW && !(after.style & WS_CHILD) &&
+        else if (boundLifetime && capturedLifetime && (after.style & WS_OVERLAPPEDWINDOW) == WS_OVERLAPPEDWINDOW && !(after.style & WS_CHILD) &&
             !(after.exStyle & (WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_LAYOUTRTL)) &&
             facts.contentWidth == w && facts.contentHeight == h &&
             w == after.bounds.right - after.bounds.left && h == after.bounds.bottom - after.bounds.top &&
@@ -346,13 +355,17 @@ struct WgcCapturer::Impl {
             facts.flags |= 2; facts.geometryStatus = 1;
         }
         if (len > 64u * 1024u * 1024u) { buffer.Close(); return RUG_ERR_OUT_OF_MEMORY; }
-        uint8_t* dst = new (std::nothrow) uint8_t[len]{};
+        auto dst = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[len]{});
         if (!dst) { buffer.Close(); return RUG_ERR_OUT_OF_MEMORY; }
         for (int32_t row = 0; row < h; ++row)
-            std::memcpy(dst + static_cast<size_t>(row) * stride, srcData + plane.StartIndex + static_cast<size_t>(row) * stride, static_cast<size_t>(w) * 4);
+            std::memcpy(dst.get() + static_cast<size_t>(row) * stride, srcData + plane.StartIndex + static_cast<size_t>(row) * stride, static_cast<size_t>(w) * 4);
         buffer.Close();
+        if (cfg.beforeDeliveryForTesting) cfg.beforeDeliveryForTesting();
+        // Last native delivery decision. No allocation or pixel copy follows it.
+        // Unknown-at-start tokens stay unknown; known tokens must still match.
+        if (!WindowsStillValid()) return RUG_ERR_CAPTURE_FAILED;
 
-        out.data       = dst;
+        out.data       = dst.release();
         out.dataLength = len;
         out.width      = w;
         out.height     = h;

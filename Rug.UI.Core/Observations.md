@@ -80,7 +80,11 @@ without clamp. There is no model preprocessing pipeline or action safety gate.
 
 Before/after window samples do not prove there was no intermediate change or that
 geometry is still current when used later. A destroyed/reused window invalidates
-native lifetime checks; Stop/late host publication guards are unchanged. UI-only
+native lifetime checks. Losing/changing a previously known bound or captured
+window lifetime during acquisition/copy rejects the whole native frame, rather
+than publishing geometryStatus=2 with stale identity. CaptureService receives the
+existing capture-failed/null result; no new observation/frame ID is published.
+Unknown-at-start lifetimes remain unknown. Stop/late host publication guards are unchanged. UI-only
 reload retains the run; a code switch starts a new session/reference identity.
 Recovery/checkpoint validators still request fresh capture, never this normal cache.
 

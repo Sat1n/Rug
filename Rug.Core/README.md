@@ -65,6 +65,8 @@ scripting, scheduling or plugin logic — those live above it.
 08A-02A adds `Rug_CreateCapturerExact` and `Rug_GrabFrameWithFacts` without changing
 RugFrame or old calls. [Capture facts contract](CaptureFacts.md) specifies V1 layout,
 QPC time, supported geometry, refusal and ownership.
+Known window-lifetime loss/change rejects the complete frame at acquisition and
+the final delivery boundary; ordinary geometry changes can remain unverified.
 
 ## Symbol Anchors (C-ABI)
 
