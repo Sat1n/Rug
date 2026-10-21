@@ -42,7 +42,7 @@ internal static class ObservationNativeSmoke
         if(!OperatingSystem.IsWindows()||!File.Exists(dll)){Console.WriteLine("Observation native NOT RUN: Windows/Debug x64 Rug.Core unavailable");return;}
         var assembly=typeof(CaptureService).Assembly;
         nint module=NativeLibrary.Load(dll,assembly,DllImportSearchPath.UseDllDirectoryForDependencies);
-        NativeLibrary.SetDllImportResolver(assembly,(name,_,_)=>name=="Rug.Core.dll"?module:0);
+        NativeLibrary.SetDllImportResolver(assembly,(name,_,_)=>name is "Rug.Core" or "Rug.Core.dll"?module:0);
         string root=Path.Combine(AppContext.BaseDirectory,"observation-native-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
         var pool=new ObservationFramePool();
         try
@@ -63,8 +63,9 @@ internal static class ObservationNativeSmoke
                 RecoveryTests.Check(ocr.Blocks.Count>0 && match is not null,"real WGC/OCR/matching produced no recognition");
                 RecoveryTests.Check(ocr.Observation.FrameId==frame.Observation.FrameId && match!.Observation.FrameId==frame.Observation.FrameId &&
                     ocr.Observation.ObservationId!=match.Observation.ObservationId && ocr.Observation.Run==ObservationRun.From(run) &&
-                    frame.Observation.Time.NativeAcquiredUtc is null && !frame.Observation.Geometry.ClientGeometryVerified,"native result provenance invalid");
-                Console.WriteLine($"Observation native PASS: real WGC -> WinRT OCR blocks={ocr.Blocks.Count} / OpenCV match; frameId={frame.Observation.FrameId}; independent observations, exact host run/binding; native acquisition/client geometry remain unknown");
+                    frame.Observation.Time.NativeAcquiredUtc is null && frame.Observation.Time.NativeTime?.AgeAtNativeSample is not null &&
+                    frame.Observation.CaptureFacts?.ContentWidth>0,"native result provenance invalid");
+                Console.WriteLine($"Observation native PASS: real WGC -> WinRT OCR blocks={ocr.Blocks.Count} / OpenCV match; frameId={frame.Observation.FrameId}; independent observations, exact host run/binding; actual native compositor time retained; geometry status={frame.Observation.CaptureFacts?.GeometryStatus}");
             }
             await capture.StopAsync();RecoveryTests.Check(!capture.IsCapturing && pool.Usage==new ObservationUsage(0,0,0,0,0),"native observation cleanup leaked");
         }

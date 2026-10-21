@@ -17,6 +17,26 @@ the frame through paused UI-only updates; switching tests require a new frame.
 isolated window with matching source IDs; no fake or human-input verdict is used.
 See [observation contract](../../Rug.UI.Core/Observations.md) for limits and commands.
 
+08A-02A adds `--capture-geometry-native`: creates/cleans a PMv2 ordinary bordered
+window with a 20×20 red marker at client (80,70), captures through production
+`CaptureService(exactBoundWindow: true)`, checks mapping, resizes and repeats.
+When a second monitor exists it moves the owned target there and validates again,
+reporting actual DPI changes separately. It also checks old/new C-ABI coexistence, alternate same-process window refusal
+and destroyed-window invalidation. No clicks or other input are synthesized.
+Run after native and managed x64 builds, using `-c Debug` or `-c Release`:
+
+```powershell
+dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64 --no-build -- --capture-geometry-native
+```
+
+`--observation-tests` and the full suite cover native metadata surviving held-frame
+replacement, actual Lua source fields, separate clocks/UTC jumps, ROI/padded stride,
+capacity and cancellation/Stop cleanup; pure crop/scale/letterbox/rounding checks
+are included. Native `Rug.Tests.exe capture` checks candidate replacement, clock
+conversion, geometry sample changes and C-ABI layout/errors. See the
+[native contract](../../Rug.Core/CaptureFacts.md). Physical cross-screen/DPI-change
+experiments are separate from pure computation and must not be inferred as passed.
+
 07B-02 adds `--runtime-switch-tests` (also in the full suite): actual Lua/real files,
 single/double AFTER-only, host rule/config/permission/node/hash/action checks,
 preparation rollback, post-stop scene failure, real fault preservation, direct

@@ -19,6 +19,7 @@
 #endif
 
 using namespace rugtest;
+int RunCaptureContract();
 
 int wmain(int argc, wchar_t** argv) {
 #ifdef _DEBUG
@@ -46,6 +47,7 @@ int wmain(int argc, wchar_t** argv) {
     if (needEngine) std::printf("\n");
 
     int rc = 0;
+    if (all || mode == L"capture") rc |= RunCaptureContract();
     if (all || mode == L"ocr") {
         std::printf("### OCR CORRECTNESS ###\n");
         rc |= RunOcrCorrectness(engineIndex);

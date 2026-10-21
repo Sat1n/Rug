@@ -21,6 +21,7 @@
 #include <windows.h>
 #include <cstdint>
 #include <memory>
+#include "include/RugCoreAbi.h"
 
 namespace rug::core {
 
@@ -33,6 +34,7 @@ struct CapturedFrame {
     int32_t  height     = 0;     // physical pixels
     int32_t  stride     = 0;     // bytes per row
     double   dpiScale   = 1.0;   // physical / logical (Per-Monitor V2)
+    RugCaptureFacts facts{};
 };
 
 class WgcCapturer {
@@ -40,6 +42,7 @@ public:
     struct Config {
         HWND targetWindow  = nullptr;  // any window of the target process
         bool captureCursor = false;    // include the cursor in the capture
+        bool exactWindow = false;
     };
 
     explicit WgcCapturer(Config config);

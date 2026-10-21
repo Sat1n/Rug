@@ -125,7 +125,7 @@ public sealed class ObservationFramePool
             if (bytes > pool.Limits.MaxFrameBytes || frame.Pixels.LongLength > pool.Limits.MaxFrameBytes)
                 throw new ObservationCapacityException("Frame exceeds MaxFrameBytes.");
             // The producer is trusted, but retaining its mutable buffer would leak ownership. Copy only bounded frame bytes.
-            return new CapturedFrame(frame.Pixels.AsSpan(0, checked((int)bytes)).ToArray(), frame.Width, frame.Height, frame.Stride);
+            return new CapturedFrame(frame.Pixels.AsSpan(0, checked((int)bytes)).ToArray(), frame.Width, frame.Height, frame.Stride) { CaptureFacts = frame.CaptureFacts };
         }
         /// <summary>@shape frame: private, prevalidated bounded copy/null; null clears cache without minting IDs.
         /// @source caller: Services/VisualEngineBridge.cs#function:CaptureAsync</summary>
@@ -139,10 +139,11 @@ public sealed class ObservationFramePool
                 ObservationCallBoundary.Current.Value?.Check(); // Final publication decision, before IDs/cache mutation.
                 if (frame is null) { pool.Drop(session.Current); session.Current = null; return null; }
                 long bytes = FrameBytes(frame);
-                var observation = new ObservationEnvelope(1, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid().ToString("N"), session.Run,
+                var observation = new ObservationEnvelope(2, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid().ToString("N"), session.Run,
                     new(frame.Width, frame.Height, frame.Stride, bytes),
                     new(pool._clockId, pool._clock.TimestampFrequency, "host TimeProvider monotonic; UTC informational only",
-                        requestedUtc, receivedUtc, pool.UtcNow, requested, received, pool.Timestamp), new());
+                        requestedUtc, receivedUtc, pool.UtcNow, requested, received, pool.Timestamp, NativeTime: frame.CaptureFacts?.NativeTime),
+                    frame.CaptureFacts?.Geometry ?? new(), CaptureFacts: frame.CaptureFacts);
                 pool.Drop(session.Current);
                 pool._reserved -= _reservation; _reservation = 0;
                 pool._bytes += bytes; pool._frames++;

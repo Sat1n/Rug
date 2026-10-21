@@ -63,6 +63,7 @@ internal static partial class CheckpointTests
     {try{await action();throw new Exception("Observation expected "+typeof(T).Name);}catch(T){}}
     public static async Task RunObservationsAsync()
     {
+        CaptureGeometryTests.Run();
         string root=Path.Combine(AppContext.BaseDirectory,"observations-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(root);
         await File.WriteAllBytesAsync(Path.Combine(root,"template.png"),[137,80,78,71]);
         try
@@ -79,11 +80,14 @@ internal static partial class CheckpointTests
         }
         finally{Directory.Delete(root,true);}
     }
+    private static CaptureFacts ObservationFacts(int width, int height, long time) =>
+        new(new(time,10_000_000,time+20),new("opaque-bound","opaque-capture",true),width,height,width,height,4,0,0,96,new());
     private static async Task ObservationLeasesAsync(string root)
     {
         var clock=new ObservationClock();var pool=new ObservationFramePool(new(96,1024,8,4,8),clock);
         var run=new RunIdentity("same",Guid.NewGuid(),3,Guid.NewGuid(),123);
-        var first=ObservationPixels();var capture=new ObservationCapture(i=>Task.FromResult<CapturedFrame?>(i==1?first:ObservationPixels(20)));
+        var first=ObservationPixels() with {CaptureFacts=ObservationFacts(4,3,100)};
+        var capture=new ObservationCapture(i=>Task.FromResult<CapturedFrame?>(i==1?first:ObservationPixels(20) with {CaptureFacts=ObservationFacts(4,3,200)}));
         var ocr=new ObservationOcr{Hold=true};var match=new ObservationMatch();
         using var visual=ObservationBridge(root,pool,run,capture,ocr,match);
         try
@@ -100,12 +104,15 @@ internal static partial class CheckpointTests
             await ObservationRejectAsync<ObservationReferenceException>(()=>visual.OcrAsync(frameReference:a.Observation.FrameReference));
             var found=(await visual.FindImageAsync("template.png",region:new(1,1,2,2)))!;
             Check(found.X==1 && found.Y==1 && found.Observation.FrameId==b.Observation.FrameId &&
-                found.Observation.Processing is {OffsetX:1,OffsetY:1,InputStride:8},"match source/ROI applied twice");
+                found.Observation.Processing is {OffsetX:1,OffsetY:1,InputStride:8,InputCoordinateSpace:"roi-local-pixels",ActualResultCoordinateSpace:"capture-image-pixels"},"match source/ROI applied twice");
             ocr.Release.TrySetResult();var recognized=await held;
+            Check(recognized.Observation.CaptureFacts==first.CaptureFacts && recognized.Observation.Time.NativeTime?.SystemRelative100ns==100 &&
+                b.Observation.Time.NativeTime?.SystemRelative100ns==200,"native facts replaced by newer cached frame");
             Check(recognized.Observation.FrameId==a.Observation.FrameId && recognized.Observation.ObservationId!=a.Observation.ObservationId &&
                 recognized.Blocks[0].BoundingBox is {X:1,Y:1} && recognized.Observation.Processing!.Roi==new Rect(1,1,2,2),"OCR returned B instead of held A");
             Check(pool.Usage is {Frames:1,ResidentBytes:72,ReservedBytes:0,Operations:0},"old frame/crop lease leaked");
             clock.Ticks+=2000;clock.Utc=clock.Utc.AddDays(-5);
+            Check(b.Observation.Time.NativeTime?.AgeAtNativeSample==TimeSpan.FromTicks(20),"native age mixed UTC/host clock");
             Check(pool.HostReceiptAge(b.Observation)==TimeSpan.FromSeconds(2),"age used wall clock or pretended native acquisition time");
             var again=await visual.OcrAsync();Check(again.Observation.FrameId==b.Observation.FrameId && again.Observation.ObservationId!=recognized.Observation.ObservationId && capture.Calls==2,"cache read fabricated capture");
             foreach(string plugin in new[]{"same","different"})
@@ -199,14 +206,17 @@ internal static partial class CheckpointTests
               assert(o.text=='ready' and o.blocks[1].text=='ready' and o[1].text=='ready')
               assert(c.observation.frameId==o.observation.frameId)
               assert(c.observation.observationId~=o.observation.observationId)
-              assert(c.observation.schemaVersion==1 and c.observation.run.pluginId=='probe')
+              assert(c.observation.schemaVersion==2 and c.observation.run.pluginId=='probe')
               assert(c.observation.time.nativeAcquiredUtc==nil and c.observation.geometry.clientGeometryVerified==false)
+              assert(c.observation.time.nativeTime.systemRelative100ns==10)
+              assert(o.observation.time.nativeTime.systemRelative100ns==10 and c.observation.captureFacts.contentWidth==8)
               rug.set_state('source_frame',c.observation.frameId)
               rug.set_state('source_instance',c.observation.run.instanceId)
             end
             function on_tick() rug.sleep(60000) end
             """;
         await using var f=await Fixture.CreateAsync(script:script,vision:true,observationFrames:pool);
+        f.CaptureMetadata=ObservationFacts(8,8,10);
         var a=await f.StartAsync();var b=await f.StartAsync();
         await Until(()=>f.StoreState.Contains(a.InstanceScope,"source_instance")&&f.StoreState.Contains(b.InstanceScope,"source_instance"));
         Check(f.StoreState.GetState(a.InstanceScope,"source_instance","")==a.InstanceId.ToString() &&

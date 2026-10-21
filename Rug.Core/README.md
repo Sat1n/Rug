@@ -44,7 +44,7 @@ scripting, scheduling or plugin logic — those live above it.
 |---|---|
 | `include/RugCoreAbi.h` | **C-ABI surface** — exports, status codes, handles, structs (exists) |
 | `RugCoreAbi.cpp` | C-ABI impl — capture, image I/O, OCR, discovery, template-matching exports + buffer ownership (exists) |
-| `WgcCapturer.h` / `.cpp` | WGC + D3D11 capture: window resolve, black-frame retry, DPI scale (exists) |
+| `WgcCapturer.h` / `.cpp` | WGC + D3D11 capture: window resolve/exact mode, atomic final-frame time/content facts, resize recreation, sampled DWM client mapping (exists) |
 | `IOcrEngine.h` | OCR strategy interface + `OcrResult`/`OcrLine` types (exists) |
 | `ImageView.h` | Shared non-owning BGRA8 pixel view (exists) |
 | `OcrTextUtils.h` | Shared `CompactText` / `IsCjk` CJK space stripping (both OCR back-ends) (exists) |
@@ -61,6 +61,10 @@ scripting, scheduling or plugin logic — those live above it.
 | `Input/KmboxInputController.*` | KMBox B+/Pro/Net back-end — **guarded skeleton**, returns `RUG_ERR_UNSUPPORTED` until the vendor protocol lands (exists) |
 | `Input/InputControllerFactory.cpp` | `CreateInputController(mode, hwnd)` — routes to the Win32 or KMBox back-end (exists) |
 | `pch.h` / `framework.h` | Precompiled Win32 + WinRT headers |
+
+08A-02A adds `Rug_CreateCapturerExact` and `Rug_GrabFrameWithFacts` without changing
+RugFrame or old calls. [Capture facts contract](CaptureFacts.md) specifies V1 layout,
+QPC time, supported geometry, refusal and ownership.
 
 ## Symbol Anchors (C-ABI)
 

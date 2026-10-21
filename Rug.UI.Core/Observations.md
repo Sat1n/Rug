@@ -6,27 +6,29 @@ outputs: []
 tags: [vision, capture, provenance, lifecycle]
 ---
 
-# Run observations and frame ownership (3.5-08A-01)
+# Run observations and frame ownership (3.5-08A-01 / 08A-02A)
 
 [ObservationEnvelope](Models/Observation.cs#class:ObservationEnvelope) accompanies
 host-run capture, OCR and template-match results. This is provenance, **not** an
-authorization to act, an action freshness check, or verified window geometry.
+authorization to act or an action freshness check. Capture-time sampled geometry
+is available only on the explicitly supported path below.
 The low-level ICaptureService/IOcrService/ITemplateMatchService contracts remain
 run-independent; the [visual bridge](Services/VisualEngineBridge.cs#class:VisualEngineBridge)
 associates their actual inputs with trusted host RunIdentity.
 
-## Version 1 envelope
+## Version 2 envelope (additive fields; legacy result numbers unchanged)
 
 | Field | Meaning |
 | --- | --- |
-| schemaVersion | 1 |
+| schemaVersion | 2; old width/height/stride, match, text and blocks fields retained |
 | observationId | New ID for a successful capture publication or successful recognition |
 | frameId | New ID **only** when a capture result is successfully published; cache reuse and recognition retain it |
 | frameReference | Opaque, process-local reference scoped to this bridge/run's current cache, not a grant |
 | run | pluginId, instanceId, runGeneration, targetBindingId; host-assigned, no HWND |
 | image | Actual source width, height, stride, byteCount including row padding, BGRA8; capture-image-pixels |
 | time | Clock ID/frequency/source, host request/receipt/publication UTC and monotonic timestamps; native acquisition fields nullable |
-| geometry | Client dimensions unknown, image/client relationship unknown, clientGeometryVerified=false |
+| geometry | Verified sampled mapping only for the supported exact-window path; otherwise explicit unavailable status and null transforms |
+| captureFacts | Optional final-frame native time, separate content/buffer extent, opaque bound/captured window lifetimes, sampling brackets/DPI and geometry status |
 | processing | Recognition kind, actual effective ROI, actual inference input width/height/stride, crop offsets/scales, monotonic start/completion and legacy output coordinate space |
 
 ObservationId and frameId are different identifiers even for capture. OCR of A,
@@ -35,25 +37,52 @@ time record. Replaying a deduplicated Gateway request returns its original resul
 not a new capture/recognition. Metadata records are immutable; copied/altered
 records do not modify stored state or authorize reference use.
 
-The C-ABI does **not** expose WGC SystemRelativeTime/native capture timestamp.
-NativeAcquiredUtc and NativeAcquiredTimestamp remain null (Lua nil). RequestedUtc
-and RequestedTimestamp are sampled immediately before calling the capture service;
-Received fields immediately after that service returns. Published fields describe
-successful host publication. UTC is informational and may jump. Each pool has a
-clock ID and uses TimeProvider monotonic timestamps/frequency for durations.
-HostReceiptAge computes elapsed time since **host receipt**, never native frame
-age. WGC can return a frame captured before the host request, so request/receipt
-must not be described as lower/upper bounds on actual acquisition time. Clock IDs
-and timestamps are not comparable across processes or independent pools.
+The additive native C-ABI now supplies WGC SystemRelativeTime as compositor render
+QPC time in `time.nativeTime`, with the corresponding native frequency and sample.
+It is not UTC or user action time. NativeAcquiredUtc/NativeAcquiredTimestamp retain
+null for compatibility; no untagged number changes clock domain. Request/receipt/
+publication fields still use this pool's TimeProvider and clock ID. UTC may jump.
+`HostReceiptAge` still means time since host receipt. NativeFrameTime.AgeAtNativeSample
+uses exact integer rational conversion in the Windows boot QPC domain; arbitrary
+TimeProvider timestamps cannot be passed as native clock evidence. Unknown/future/
+unexplained native time remains null; no replacement by current time.
 
-Native capture can resolve a render child and return window-surface pixels. The
-ABI does not prove these equal the bound target's client size/origin. No client
-dimensions are inferred from image dimensions. Existing result numbers retain
-their legacy physical-client interpretation; the envelope explicitly records
-that image-to-client identity is **unverified**. ROI offsets are added exactly
-once to recognition-local boxes/hits. Processing.ScaleX/Y=1 describe the crop to
-source-image transform, not verified DPI/letterbox/client geometry. Full scaling,
-DPI and action validation remain future work.
+Native pixels/time/ContentSize belong to one final candidate, including stale-frame
+draining, black-frame retries and resize pool recreation. Metadata is copied with
+the frame into the private pool and retained by recognition leases. If OCR holds A
+while B publishes, A's time, geometry and native capture facts remain attached to A.
+No new frameId is minted by recognition or by reading native metadata.
+
+`CaptureService()` preserves legacy same-process window selection and full-surface
+pixels. `CaptureService(exactBoundWindow: true)` opts into capturing only the bound
+window and bounded retries for a post-sample frame. Supported normal overlapped
+window mapping uses DWM bounds plus physical client origin/extent and lifetime/DPI/
+style/monitor checks, not size equality alone. ContentSize is recorded separately
+from buffer size and later client queries. Raw HWNDs never enter public observations;
+opaque native lifetime tokens and SameWindow describe capture selection while the
+host run.targetBindingId remains authoritative. Missing lifetime tokens are null.
+
+See [native facts and precise rejection rules](../Rug.Core/CaptureFacts.md) for
+ABI layout, timing, valid regions, sampling limits and native ownership.
+`geometry.imageToClient` maps **source image** to physical client pixels;
+`geometry.clientToScreen` maps to screen physical pixels. Neither is present for
+unverified geometry. Old OCR/match coordinates are not remapped: ROI offsets are
+still added exactly once to recognition-local boxes/hits, and the historical
+physical-client interpretation remains only a legacy assumption on full-window
+captures. Processing.Offset/Scale describe ROI→source-image, not a verified action
+coordinate. The historical ResultCoordinateSpace field is retained, while the
+additive InputCoordinateSpace=roi-local-pixels and ActualResultCoordinateSpace=
+capture-image-pixels state the actual input/output spaces unambiguously. Consumers
+must explicitly chain a supported source-image transform.
+`PixelTransform` also expresses crop/positive scale/letterbox relations for pure
+calculation; padding, nonfinite/outside points and out-of-bounds rounding reject,
+without clamp. There is no model preprocessing pipeline or action safety gate.
+
+Before/after window samples do not prove there was no intermediate change or that
+geometry is still current when used later. A destroyed/reused window invalidates
+native lifetime checks; Stop/late host publication guards are unchanged. UI-only
+reload retains the run; a code switch starts a new session/reference identity.
+Recovery/checkpoint validators still request fresh capture, never this normal cache.
 
 ## Host pool and leases
 
@@ -220,3 +249,13 @@ lifecycle run and the subsequent sequential Release full run passed without
 changing that Stop branch. This one-off failure is retained here; its cause was
 not established as an environment-only issue. Observation-specific and final
 complete runs passed; this record does not erase the initial failure.
+
+## 08A-02A verification addition
+
+[Native capture verification](../Rug.Core/CaptureFacts.md) records final candidate,
+QPC/layout/window-change tests and actual WGC marker/resize/cross-monitor DPI
+144→96 evidence. The 08A-01 historical record above remains historical. Version 2
+metadata, actual Lua compatibility, held A/native time while B publishes, UTC jumps,
+capacity/Stop/late publication and full Debug/Release script/UI-core regressions
+pass. WGC→OCR/matching retains final native time and source IDs. No action gate,
+input strategy change, Hook root-cause closure or new human acceptance is claimed.

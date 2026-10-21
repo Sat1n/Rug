@@ -8,9 +8,12 @@ tags: [tests, native, cabi]
 
 # Rug.Core Native Tests
 
-A console harness that exercises **Rug.Core through its public C-ABI only**
-(`RugCoreAbi.h`) — the same boundary the C# host will use. It validates OCR
+A console harness that exercises Rug.Core pipeline operations through its public
+C-ABI (`RugCoreAbi.h`) — the same boundary the C# host uses. It validates OCR
 correctness, OCR memory/stability under repetition, and OpenCV template matching.
+The `capture` mode additionally unit-tests the internal pure candidate, geometry
+sample and QPC helpers; actual WGC marker/resize/DPI evidence is provided by the
+[managed capture smoke](Rug.UI.Core.Script.Tests/README.md).
 
 ## Independent input Hook comparison
 
@@ -130,6 +133,8 @@ mode the menu is shown once and reused for both tests.
 
 Paths are resolved from the executable location (it walks up to the directory
 containing `Rug.slnx`), so the working directory does not matter.
+
+Real marker/resize validation runs via [managed geometry smoke](Rug.UI.Core.Script.Tests/README.md).
 
 ## Prerequisites
 

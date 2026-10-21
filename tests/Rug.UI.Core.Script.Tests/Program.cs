@@ -23,6 +23,7 @@ if (args.Contains("--checkpoint-restore-native")) { await NativeCheckpointRestor
 if (args.Contains("--checkpoint-restore-tests")) { await CheckpointTests.RunRestoreAsync(); return; }
 if (args.Contains("--observation-tests")) { await CheckpointTests.RunObservationsAsync(); return; }
 if (args.Contains("--observation-native")) { await ObservationNativeSmoke.RunAsync(); return; }
+if (args.Contains("--capture-geometry-native")) { await CaptureGeometryTests.RunNativeAsync(); return; }
 if (args.Contains("--plugin-update-tests")) { await CheckpointTests.RunPluginUpdatesAsync(); return; }
 if (args.Contains("--runtime-update-tests")) { await CheckpointTests.RunRuntimeUpdatesAsync(); return; }
 if (args.Contains("--runtime-switch-tests")) { await CheckpointTests.RunRuntimeSwitchesAsync(); return; }

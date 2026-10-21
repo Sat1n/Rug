@@ -186,6 +186,7 @@
     <ClInclude Include="PaddleOcrEngine.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="WgcCapturer.h" />
+    <ClInclude Include="CaptureContract.h" />
     <ClInclude Include="WinRtOcrEngine.h" />
   </ItemGroup>
   <ItemGroup>
