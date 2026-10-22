@@ -8,5 +8,5 @@ try {
  dotnet build Rug.UI/Rug.UI.csproj -c $Configuration -p:Platform=x64 --no-restore
  if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
  dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c $Configuration -p:Platform=x64 -- --controlled-recovery-sample $OutputRoot
- exit $LASTEXITCODE # Preserve aggregate failure, including known CLR shutdown assertion.
+ exit $LASTEXITCODE # Preserve aggregate failure, including any process shutdown failure.
 } finally {Pop-Location}

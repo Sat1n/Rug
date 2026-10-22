@@ -7,11 +7,12 @@ using Rug.UI.Core.Services;
 /// UIA and test-host scene repair are automation, never evidence of human takeover.</summary>
 internal static class ControlledRecoveryUi
 {
-    internal sealed record Result(bool InteractionsPassed, int? ExitCode, int TargetDown, int TargetUp, Guid? IncidentId, Guid? TraceId, string? Diagnostic);
-    internal static async Task<Result> RunAsync(string repo, string root, bool manual = false)
+    internal sealed record Result(bool InteractionsPassed, int? ExitCode, int TargetDown, int TargetUp, Guid? IncidentId, Guid? TraceId, string? Diagnostic,string? ShutdownLog=null,string? Stderr=null);
+    internal static async Task<Result> RunAsync(string repo, string root, bool manual = false,string exitPhase="None")
     {
         string install = ControlledRecoverySample.Install(repo, root);
-        using var target = new CaptureGeometryDiagnosticWindow(install, 180, 155, recovery: true);
+        if(exitPhase=="Active")File.Copy(Path.Combine(repo,"samples","controlled-visual","plugin","main.lua"),Path.Combine(install,"main.lua"),true);
+        using var target = new CaptureGeometryDiagnosticWindow(install, 180, 155, recovery: exitPhase is "None" or "Awaiting");
         nint hwnd = await target.Ready;
         var start = new ProcessStartInfo(Path.Combine(repo, "Rug.UI", "bin", "x64", ControlledRecoverySample.Config, "net10.0-windows10.0.22621.0", "win-x64", "Rug.UI.exe"))
         { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
@@ -46,16 +47,19 @@ internal static class ControlledRecoveryUi
             else
             {
                 var ps = new ProcessStartInfo("pwsh") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
-                foreach (string arg in new[] { "-NoProfile", "-File", Path.Combine(repo, "Rug.UI.Tests", "ControlledRecoveryUi.ps1"), "-AppProcessId", app.Id.ToString(), "-TargetHwnd", hwnd.ToInt64().ToString(), "-TraceRoot", Path.Combine(root,"traces") }) ps.ArgumentList.Add(arg);
+                foreach (string arg in new[] { "-NoProfile", "-File", Path.Combine(repo, "Rug.UI.Tests", "ControlledRecoveryUi.ps1"), "-AppProcessId", app.Id.ToString(), "-TargetHwnd", hwnd.ToInt64().ToString(), "-TraceRoot", Path.Combine(root,"traces"),"-ExitPhase",exitPhase }) ps.ArgumentList.Add(arg);
                 using var probe = Process.Start(ps)!; var output = probe.StandardOutput.ReadToEndAsync(); var errors = probe.StandardError.ReadToEndAsync();
                 try { await probe.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(90)); }
                 catch { if (!probe.HasExited) { probe.Kill(true); await probe.WaitForExitAsync(); } Console.Write(await output); Console.Write(await errors); throw; }
                 Console.Write(await output); if (probe.ExitCode != 0) throw new InvalidOperationException(await errors);
             }
-            ControlledRecoverySample.Check(target.ClickCounts == (2, 2), "UI Lua path did not deliver BEFORE/AFTER pairs");
+            int expected=exitPhase=="Preview"?0:exitPhase=="None"?2:1;
+            ControlledRecoverySample.Check(target.ClickCounts == (expected, expected), "UI Lua receiver count mismatch");
+            if(exitPhase is "None" or "Awaiting"){
             string record = Directory.GetFiles(Path.Combine(root, "incidents"), "*.json").Single();
             incident = new IncidentStore(Path.Combine(root, "incidents")).Read(Path.GetFileName(record)).Record;
-            ControlledRecoverySample.Check(incident is { SchemaVersion: 1, Verification.Status: "resolved" } && incident.TraceLink?.TraceId is not null, "UI resolved archive/link missing");
+            ControlledRecoverySample.Check(incident is { SchemaVersion: 1 } && incident.TraceLink?.TraceId is not null && (exitPhase!="None"||incident.Verification?.Status=="resolved"), "UI archive/link missing");
+            }
             passed = true;
         }
         catch (Exception error) { diagnostic = error.ToString(); }
@@ -68,7 +72,9 @@ internal static class ControlledRecoveryUi
                 catch { passed = false; diagnostic += "; Host close timed out; forced owned-process cleanup"; app.Kill(true); await app.WaitForExitAsync(); }
             }
         }
-        await stdout; string shutdown = await stderr;
+        string shutdownLog=await stdout; string shutdown = await stderr;
+        await File.WriteAllTextAsync(Path.Combine(root,"stdout.txt"),shutdownLog);await File.WriteAllTextAsync(Path.Combine(root,"stderr.txt"),shutdown);
+        if(exitPhase!="None"&&!shutdownLog.Contains("shutdown:complete:container",StringComparison.Ordinal)){passed=false;diagnostic+="; container cleanup not confirmed";}
         if (app.ExitCode != 0) diagnostic += "; UI exit=" + app.ExitCode + "; " + shutdown[..Math.Min(2048, shutdown.Length)];
         if (incident?.TraceLink is { HostSessionId: { } session, TraceId: { } trace })
         {
@@ -81,6 +87,6 @@ internal static class ControlledRecoveryUi
         string plugins = Path.GetFullPath(Path.Combine(root,"plugins"));
         ControlledRecoverySample.Check(plugins.StartsWith(Path.GetFullPath(root)+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase),"unsafe UI installation cleanup");
         Directory.Delete(plugins,true); // Owned host has exited; retain incident/trace files, not installation copies.
-        return new(passed, app.ExitCode, target.ClickCounts.Down, target.ClickCounts.Up, incident?.IncidentId, incident?.TraceLink?.TraceId, diagnostic);
+        return new(passed, app.ExitCode, target.ClickCounts.Down, target.ClickCounts.Up, incident?.IncidentId, incident?.TraceLink?.TraceId, diagnostic,shutdownLog,shutdown);
     }
 }

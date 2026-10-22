@@ -7,6 +7,13 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Rug.UI.Core\Rug.UI.Core.csproj" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.1.0" />
+    <Compile Include="..\Rug.UI\Helpers\HostShutdownSequence.cs" Link="HostShutdownSequence.cs" />
+    <Compile Include="..\Rug.UI\Helpers\UiCallbackFence.cs" Link="UiCallbackFence.cs" />
+    <Compile Include="..\Rug.UI\ViewModels\DevToolsViewModel.cs" Link="DevToolsViewModel.cs" />
+    <Compile Include="..\Rug.UI\Models\DevTools.cs" Link="DevTools.cs" />
+    <Compile Include="..\Rug.UI\Services\AppNotificationService.cs" Link="AppNotificationService.cs" />
+    <Compile Include="..\Rug.UI\Contracts\Services\IAppNotificationService.cs" Link="IAppNotificationService.cs" />
     <Compile Include="..\Rug.UI\Helpers\LifecyclePresentation.cs" Link="LifecyclePresentation.cs" />
     <Compile Include="..\Rug.UI\Helpers\TracePresentation.cs" Link="TracePresentation.cs" />
     <Compile Include="..\Rug.UI\Views\TraceViewerPage.xaml.cs" Link="TraceViewerPage.xaml.cs" />

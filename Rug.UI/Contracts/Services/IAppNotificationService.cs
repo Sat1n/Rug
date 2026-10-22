@@ -11,4 +11,5 @@ public interface IAppNotificationService
     NameValueCollection ParseArguments(string arguments);
 
     void Unregister();
+    Task ShutdownAsync();
 }

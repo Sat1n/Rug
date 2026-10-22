@@ -19,6 +19,7 @@ foreach(var integrity in Enum.GetValues<TraceReadStatus>())
 Check(Rug.UI.Helpers.TracePresentation.Integrity(new(TraceReadStatus.Valid,[],null,null,false)).Contains("当前保留窗口"),"memory advertised as complete history");
 Console.WriteLine("Trace presentation passed: unknown outcome, memory window and every offline integrity status");
 await Rug.UI.Views.TraceViewerPage.RunSelectionRegressionAsync();
+await ShutdownTests.RunAsync();
 
 var parser = new SchemaParser();
 string file = Path.Combine(AppContext.BaseDirectory, "ui.json");

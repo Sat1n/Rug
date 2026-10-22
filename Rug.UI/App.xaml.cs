@@ -21,6 +21,8 @@ namespace Rug.UI;
 // To learn more about WinUI 3, see https://docs.microsoft.com/windows/apps/winui/winui3/.
 public partial class App : Application
 {
+    internal ViewModels.DevToolsViewModel? CreatedDevTools { get; private set; }
+    internal IAppNotificationService? CreatedNotifications { get; private set; }
     // The .NET Generic Host provides dependency injection, configuration, logging, and other services.
     // https://docs.microsoft.com/dotnet/core/extensions/generic-host
     // https://docs.microsoft.com/dotnet/core/extensions/dependency-injection
@@ -173,7 +175,7 @@ public partial class App : Application
             services.AddTransient<SettingsPage>();
             services.AddTransient<MainViewModel>();
             services.AddTransient<MainPage>();
-            services.AddSingleton<DevToolsViewModel>();
+            services.AddSingleton(p => CreatedDevTools = ActivatorUtilities.CreateInstance<DevToolsViewModel>(p));
             services.AddTransient<DevToolsPage>();
             services.AddTransient<ShellPage>();
             services.AddTransient<ShellViewModel>();
@@ -183,7 +185,8 @@ public partial class App : Application
         }).
         Build();
 
-        App.GetService<IAppNotificationService>().Initialize();
+        CreatedNotifications=App.GetService<IAppNotificationService>();
+        CreatedNotifications.Initialize();
 
         UnhandledException += App_UnhandledException;
     }
@@ -198,7 +201,7 @@ public partial class App : Application
     {
         base.OnLaunched(args);
 
-        App.GetService<IAppNotificationService>().Show(string.Format("AppNotificationSamplePayload".GetLocalized(), AppContext.BaseDirectory));
+        CreatedNotifications!.Show(string.Format("AppNotificationSamplePayload".GetLocalized(), AppContext.BaseDirectory));
 
         SeedDemoPlugin();
         try { await App.GetService<IInputInterventionCoordinator>().StartAsync(); }

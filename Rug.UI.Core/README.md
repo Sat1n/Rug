@@ -8,6 +8,11 @@ tags: [host, logic, interop, vision, lua, plugins]
 
 # Rug.UI.Core Index (L2)
 
+EXIT-01: host-wide business admission closes before cancellation propagation; repeated
+disposal shares actual cleanup completion. See [lifecycle boundary](Lifecycle.md) and
+[UI shutdown ownership/evidence](../Rug.UI/Shutdown.md).
+
+
 Managed host logic between the native core and the UI. It is the **single managed
 P/Invoke boundary** to `Rug.Core.dll` and exposes safe, async vision services
 (OCR, template matching, WGC capture) plus model discovery, humanized input

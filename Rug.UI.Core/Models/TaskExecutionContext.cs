@@ -93,6 +93,7 @@ public sealed partial class TaskExecutionContext
     internal IInputSession? InputSession { get; set; }
     internal Action? ValidateResume { get; set; }
     internal bool Prepared { get; set; }
+    internal HostBusinessAdmission? HostAdmission { get; init; }
 
     private LifecycleSnapshot SnapshotLocked() => new(Identity, _status, _pauseRequested,
         _resumeRequested, _revision, LastError is not null, _recovery);
@@ -126,7 +127,7 @@ public sealed partial class TaskExecutionContext
     {
         lock (_gate)
         {
-            if (_status is not (AutomationTaskStatus.Starting or AutomationTaskStatus.Running or AutomationTaskStatus.Paused) || Cancellation.IsCancellationRequested) return false;
+            if (HostAdmission?.IsClosed==true || _status is not (AutomationTaskStatus.Starting or AutomationTaskStatus.Running or AutomationTaskStatus.Paused) || Cancellation.IsCancellationRequested) return false;
             if (_pauseRequested || _status == AutomationTaskStatus.Paused) return true;
             _beforePause = _status; _pauseRequested = true; _revision++;
             _resume = Signal(); _pauseSignal.TrySetResult();
@@ -136,7 +137,7 @@ public sealed partial class TaskExecutionContext
 
     internal bool Resume()
     {
-        lock (_gate) if (_updateFrozen || _status != AutomationTaskStatus.Paused || !_pauseRequested) return false;
+        lock (_gate) if (HostAdmission?.IsClosed==true || _updateFrozen || _status != AutomationTaskStatus.Paused || !_pauseRequested) return false;
         try { ValidateResume?.Invoke(); } // Service checks never run under the state lock.
         catch (Exception) when (Snapshot.Status is AutomationTaskStatus.Stopping or AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted)
         { return false; }
@@ -225,7 +226,7 @@ public sealed partial class TaskExecutionContext
     {
         lock (_gate)
         {
-            if (SwitchGroup is { IsOpen: false } || _pauseRequested || _updateFrozen || _status is not (AutomationTaskStatus.Starting or AutomationTaskStatus.Running) || Cancellation.IsCancellationRequested) return null;
+            if (HostAdmission?.IsClosed==true || SwitchGroup is { IsOpen: false } || _pauseRequested || _updateFrozen || _status is not (AutomationTaskStatus.Starting or AutomationTaskStatus.Running) || Cancellation.IsCancellationRequested) return null;
             if (_segments++ == 0) _segmentsDrained = Signal();
             return new WorkLease(this, segment: true, input: false);
         }
@@ -249,7 +250,7 @@ public sealed partial class TaskExecutionContext
     // before Notify/Cancel run outside it; cancellation propagation is not admission.
     internal bool IsBusinessClosed
     {
-        get { lock (_gate) return SwitchGroup is { IsInterrupted: true } || _status is AutomationTaskStatus.Stopping or AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted; }
+        get { lock (_gate) return HostAdmission?.IsClosed==true || SwitchGroup is { IsInterrupted: true } || _status is AutomationTaskStatus.Stopping or AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted; }
     }
     internal void ValidateBusiness()
     {
@@ -262,7 +263,7 @@ public sealed partial class TaskExecutionContext
     }
     private void ValidateBusinessLocked(bool preparation = false)
     {
-        if (SwitchGroup is { IsInterrupted: true } || (!preparation && SwitchGroup is { IsOpen: false }) || _updateFrozen || _status is AutomationTaskStatus.Stopping or AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted or AutomationTaskStatus.Recovering or AutomationTaskStatus.AwaitingHuman)
+        if (HostAdmission?.IsClosed==true || SwitchGroup is { IsInterrupted: true } || (!preparation && SwitchGroup is { IsOpen: false }) || _updateFrozen || _status is AutomationTaskStatus.Stopping or AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted or AutomationTaskStatus.Recovering or AutomationTaskStatus.AwaitingHuman)
             throw new AutomationGateway.GatewayRejectedException(OperationError.InvalidLifecycleState);
     }
     internal (IDisposable Work, long Sequence) EnterCheckpoint(bool preparation = false)
@@ -342,7 +343,7 @@ public sealed partial class TaskExecutionContext
         if (_recovery?.RecoveryId != id || _status is not (AutomationTaskStatus.Recovering or AutomationTaskStatus.AwaitingHuman))
             throw new AutomationGateway.GatewayRejectedException(OperationError.InvalidLifecycleState);
     }
-    private bool IsTerminalLocked() => _status is AutomationTaskStatus.Stopping or AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted;
+    private bool IsTerminalLocked() => HostAdmission?.IsClosed==true || _status is AutomationTaskStatus.Stopping or AutomationTaskStatus.Stopped or AutomationTaskStatus.Faulted;
     internal void UpdateRecovery(Guid id, RecoveryPhase phase, RecoveryResult result, long validation = 0)
     {
         lock (_gate)

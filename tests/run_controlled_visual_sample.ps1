@@ -8,7 +8,7 @@ try {
  dotnet build Rug.UI/Rug.UI.csproj -c $Configuration -p:Platform=x64 --no-restore
  if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
  dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c $Configuration -p:Platform=x64 -- --controlled-visual-sample $OutputRoot
- # Preserve functional failures AND the known WinUI CLR shutdown failure.
+ # Preserve functional failures and any process shutdown failure.
  exit $LASTEXITCODE
 }
 finally {Pop-Location}

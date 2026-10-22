@@ -14,7 +14,9 @@ namespace Microsoft.UI.Xaml.Controls
     public sealed class TestDispatcher
     {
         private readonly ConcurrentQueue<Action> _queue=new();
-        public bool TryEnqueue(Action action){_queue.Enqueue(action);return true;}
+        internal ManualResetEventSlim? Hold;
+        internal TaskCompletionSource? Entered;
+        public bool TryEnqueue(Action action){Entered?.TrySetResult();Hold?.Wait();_queue.Enqueue(action);return true;}
         public int Count=>_queue.Count;
         public void Drain(){while(_queue.TryDequeue(out var action))action();}
     }
@@ -52,6 +54,7 @@ namespace Rug.UI
     internal static class App
     {
         internal static object? TestService;
+        internal static NotificationTestWindow MainWindow { get; }=new();
         public static T GetService<T>()=>(T)TestService!;
     }
 }

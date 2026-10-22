@@ -748,3 +748,16 @@ This known shutdown defect remains a stage-close item.
 No new C++ changes were needed; existing matching Native DLLs were reused.
 SendInput, human takeover re-acceptance, external applications/games and forced
 real-WGC frame loss were NOT RUN. Existing Hook limitations remain open.
+
+## EXIT-01 natural shutdown follow-up
+
+Historical CLR-failure tables above remain actual historical results. Current
+Debug/Release validation is recorded separately in [shutdown evidence](../evidence/host-exit/README.md).
+New `--host-exit-ui` runs owned real WinUI/WGC hosts in preview, active task and
+AwaitingHuman states, then naturally closes them and checks actual-work drain,
+received PostMessage counts, trace cleanup, stderr and exit 0. `--lifecycle-tests`
+also holds cancellation callbacks and queues input across two real Lua runs:
+host admission closes before propagation, queued/new input is refused, repeated
+disposal waits for the same cleanup, and no old Lua is revived. Full default
+regression retains checkpoint/recovery/hot-reload/runtime-update/authorization/
+observed-click coverage. No real SendInput or human acceptance is inferred.

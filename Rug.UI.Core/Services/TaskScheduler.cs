@@ -33,6 +33,8 @@ public sealed partial class TaskScheduler : ITaskScheduler
     private TaskCompletionSource<bool> _inputStartsDrained = CompletedSignal();
     private Dictionary<string, PluginManifest>? _catalog;
     private bool _disposed;
+    private readonly HostBusinessAdmission _hostAdmission = new();
+    private TaskCompletionSource? _disposeCompletion;
     private readonly IInputArbiter _inputArbiter;
     private readonly IDisposable _inputStopRegistration;
     private readonly IInputInterventionCoordinator? _intervention;
@@ -241,6 +243,7 @@ public sealed partial class TaskScheduler : ITaskScheduler
             if (hwnd != 0) target ??= _inputArbiter.BindTarget(hwnd);
             context = new TaskExecutionContext(identity, cancellation, runtime, capture, input)
             {
+                HostAdmission = _hostAdmission,
                 AuthorizationLease = authorizationLease, AuthorizationCancellation = authorizationCancellation,
                 InputCancellation = inputCancellation, InputEpochToken = inputEpoch,
                 DeclaresInput = declaresInput, InputSession = inputSession, RecoveryAuthorization = ticket
@@ -616,24 +619,41 @@ public sealed partial class TaskScheduler : ITaskScheduler
         catch (Exception ex) { _logger.LogError(ex, "Failed during {Stage}", stage); }
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         Task drained;
+        TaskCompletionSource completion;
         lock (_lifecycleGate)
         {
-            if (_disposed) return;
+            if (_disposeCompletion is not null) return new(_disposeCompletion.Task);
+            completion = _disposeCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
             _disposed = true;
+            _hostAdmission.Close();
             drained = _startsDrained.Task;
         }
-        _shutdown.Cancel();
-        await RuntimeUpdates.DisposeAsync().ConfigureAwait(false);
-        await drained.ConfigureAwait(false);
-        await Task.WhenAll(_instances.Keys.Select(StopTaskAsync)).ConfigureAwait(false);
-        lock (_restoreGate) { _selections.Clear(); _restoring.Clear(); }
-        _inputStopRegistration.Dispose();
-        _catalogGate.Dispose();
-        _shutdown.Dispose();
-        await Gateway.Traces.DisposeAsync().ConfigureAwait(false);
+        _ = DisposeCoreAsync();
+        return new(completion.Task);
+
+        async Task DisposeCoreAsync()
+        {
+            var errors = new List<Exception>();
+            async Task Attempt(Func<Task> action)
+            {
+                try { await action().ConfigureAwait(false); }
+                catch (Exception error) { errors.Add(error); _logger.LogError(error, "Host shutdown cleanup failed"); }
+            }
+            await Attempt(() => { _shutdown.Cancel(); return Task.CompletedTask; });
+            await Attempt(() => RuntimeUpdates.DisposeAsync().AsTask());
+            await Attempt(() => drained);
+            await Attempt(() => Task.WhenAll(_instances.Keys.Select(StopTaskAsync)));
+            lock (_restoreGate) { _selections.Clear(); _restoring.Clear(); }
+            await Attempt(() => { _inputStopRegistration.Dispose(); return Task.CompletedTask; });
+            await Attempt(() => { _catalogGate.Dispose(); return Task.CompletedTask; });
+            await Attempt(() => { _shutdown.Dispose(); return Task.CompletedTask; });
+            await Attempt(() => Gateway.Traces.DisposeAsync().AsTask());
+            if (errors.Count > 0) completion.TrySetException(new AggregateException("Host cleanup failed", errors));
+            else completion.TrySetResult();
+        }
     }
     private string StopReason(TaskExecutionContext context)
     {

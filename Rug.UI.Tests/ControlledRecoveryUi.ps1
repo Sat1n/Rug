@@ -1,4 +1,4 @@
-param([int]$AppProcessId, [long]$TargetHwnd, [string]$TraceRoot)
+param([int]$AppProcessId, [long]$TargetHwnd, [string]$TraceRoot,[ValidateSet('None','Preview','Active','Awaiting')][string]$ExitPhase='None')
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName System.Windows.Forms
@@ -63,9 +63,23 @@ try {
  Start-Sleep -Milliseconds 100
  [RecoveryUiNative]::mouse_event(4,0,0,0,[UIntPtr]0x52554749)
  $null=Await ('0x'+$TargetHwnd.ToString('X'))
+ if($ExitPhase -eq 'Preview'){
+  Invoke '开启实时预览'
+  $null=WaitFor {$elements=$script:window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition);$elements | Where-Object {$_.Current.Name -match '^Captured preview [1-9]'} | Select-Object -First 1}
+  Write-Output 'EXIT READY: actual preview frame rendered; close while preview is running';return
+ }
  Select-Item 'Controlled visual recovery'
  Invoke 'Start bound task'; Invoke 'Allow permissions'
+ if($ExitPhase -eq 'Active'){
+  $null=WaitFor {
+   $matched=0
+   foreach($file in Get-ChildItem -LiteralPath $TraceRoot -Filter '*.events' -ErrorAction SilentlyContinue){
+    foreach($line in Get-Content -LiteralPath $file.FullName){try{$row=$line|ConvertFrom-Json -Depth 32}catch{continue};if($row.payload.reason -eq 'template-match:result' -and $row.payload.status -eq 'Matched'){$matched++}}
+   };if($matched -ge 2){return $true}
+  };$null=Await '运行中';Write-Output 'EXIT READY: active observed PostMessage run; no explicit Stop';return
+ }
  $null=Await '等待人工 · controlled-visual-ready'; $null=Await '人工控制已生效'
+ if($ExitPhase -eq 'Awaiting'){Write-Output 'EXIT READY: original coroutine waiting for human; no Return/Verify/Stop';return}
  Write-Output 'RECOVERY UI: BEFORE received/visually confirmed, planned handoff'
  if((Await 'Resume instance').Current.IsEnabled){throw 'Ordinary Resume bypass enabled'}
  Invoke 'Return control';$null=Await '自动化可用';$null=Await '等待人工 · controlled-visual-ready'

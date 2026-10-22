@@ -166,3 +166,13 @@ Real marker/resize validation runs via [managed geometry smoke](Rug.UI.Core.Scri
 execution boundaries in both input modes and actual Lua/Gateway/WGC/PostMessage
 marker delivery/refusal. `Rug_CheckCaptureGeometry` is checked against live frames,
 resize, destroyed identity and unsupported ABI version by the geometry smoke.
+
+## EXIT-01 host process verification
+
+Use [run_host_exit_probe.ps1](run_host_exit_probe.ps1) for empty-plugin startup,
+loaded-runtime/dependency versions, natural close, stderr and exit status. Run
+`-Configuration Debug -Count 5`, then Release, and `-Viewer -RepeatClose` in both.
+The real scenario matrix is the script test host's `--host-exit-ui` entry.
+[Shutdown contract](../Rug.UI/Shutdown.md) and [preserved evidence](evidence/host-exit/README.md)
+separate functional assertions, resource drain and process exit. Owned timeout
+cleanup is a failure, never a substitute for natural exit.

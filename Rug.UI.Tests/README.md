@@ -17,8 +17,8 @@ assertions. See [sample and boundaries](../samples/controlled-visual/RECOVERY.md
 08C-01 `ControlledVisualSampleUi.ps1` is invoked only by the isolated script-host
 `--controlled-visual-sample` entry. It scrolls the virtualized trace catalog to the
 specified stable-run ID and checks offline Valid without starting any task. UI
-interaction and process shutdown results remain separate; known CLR exit failure
-keeps the aggregate command nonzero. See the [sample](../samples/controlled-visual/README.md).
+interaction and process shutdown results remain separate. EXIT-01 now verifies natural
+exit 0; historical failing reports remain unchanged. See the [sample](../samples/controlled-visual/README.md).
 
 08B-02 detail-selection regression is part of the default suite in both Debug and
 Release x64. It links the production `TraceViewerPage.xaml.cs` and supplies only
@@ -118,3 +118,13 @@ block choosing another record, and re-enable selection after Deny/cancellation.
 No timing delay or production test/auto-approval switch is added.
 The noninteractive suite compiles the actual LifecyclePresentation helper and
 asserts that retained Validating snapshots cannot hide Stopping/Faulted/Stopped.
+
+## EXIT-01 shutdown tests
+
+The default suite links the actual HostShutdownSequence, UiCallbackFence,
+DevToolsViewModel and AppNotificationService implementations. Deterministic barriers
+cover shared repeated close, sibling cleanup failure, held preview start/capture,
+entered/queued notification callbacks and owned dialog drain. WinRT doubles are
+explicitly separate from the real UI matrix. No unused input service is created
+by shutdown. The script-host --host-exit-ui entry drives real preview, active task
+and AwaitingHuman shutdown. See [commands and evidence](../Rug.UI/Shutdown.md).

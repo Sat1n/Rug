@@ -30,6 +30,7 @@ internal static class LifecycleTests
         await CleanupFailureAsync(); await AnomalyDrainAsync();
         foreach (string mode in new[] { "stop", "resume-fault", "resume-stop" }) await PausedWakeBoundaryAsync(mode);
         await PausedHostStopAsync();
+        await HostShutdownAdmissionAsync();
         foreach (string mode in new[] { "closed", "denied", "archive-failure" }) await AnomalyAdmissionStopAsync(mode);
         Console.WriteLine("Direct anomaly admission passed: host Stop cancels before capture; permission denial and real archive IO failure remain faults");
         await StopAdmissionAsync(bridgeQueue: true); await StopAdmissionAsync(bridgeQueue: false);
@@ -82,6 +83,38 @@ internal static class LifecycleTests
             Console.WriteLine("Paused wake boundary PASS: " + mode + "; token propagation held");
         }
         finally { release.Set(); c.Cancel(); }
+    }
+    private static async Task HostShutdownAdmissionAsync()
+    {
+        await using var f=await Fixture.CreateAsync("function on_tick() rug.sleep(60000) end function on_stop() rug.log('stop_once') end",[Permission.ControlInput,Permission.Timer]);
+        var a=await f.StartAsync();var b=await f.StartAsync();
+        await Until(()=>a.TaskStatus==AutomationTaskStatus.Running&&b.TaskStatus==AutomationTaskStatus.Running);
+        var callers=new Dictionary<Guid,AutomationCallContext>{{a.InstanceId,await f.CallerAsync(a)},{b.InstanceId,await f.CallerAsync(b)}};
+        var entered=Signal();using var release=new ManualResetEventSlim();
+        using var first=a.Cancellation.Token.Register(()=>{entered.TrySetResult();release.Wait();});
+        using var second=b.Cancellation.Token.Register(()=>{entered.TrySetResult();release.Wait();});
+        using var blocker=await f.Arbiter.AcquireAsync(InputOwner.ForDevTools("shutdown-barrier"),f.Windows.Bind(123),InputDeliveryMode.Win32PostMessage,()=>{},CancellationToken.None);
+        var queued=new[]{a,b}.Select(c=>f.Scheduler.Gateway.ExecuteAsync(callers[c.InstanceId],Request(AutomationOperation.PressKey,c.Identity,new{key=67}))).ToArray();
+        await Until(()=>f.Arbiter.Snapshot.Waiting==2);
+        var close=Task.Run(async()=>await f.Scheduler.DisposeAsync());
+        try
+        {
+            await Bound(entered.Task);
+            var repeated=f.Scheduler.DisposeAsync().AsTask();
+            Check(!repeated.IsCompleted,"repeated host close reported cleanup complete before real work");
+            var pending=new[]{a,b}.Single(c=>!c.Cancellation.IsCancellationRequested);
+            Check(pending.IsBusinessClosed&&!close.IsCompleted,"host shutdown did not close other run admission before cancellation propagation");
+            var refusal=await f.Scheduler.Gateway.ExecuteAsync(callers[pending.InstanceId],Request(AutomationOperation.PressKey,pending.Identity,new{key=66}));
+            Check(refusal.Error==OperationError.InvalidLifecycleState&&!refusal.OutcomeUncertain&&f.Inputs.All(i=>i.PressCalls==0),"shutdown admitted new business input while cancellation callback was blocked");
+            blocker.Dispose();
+            var late=await Task.WhenAll(queued).WaitAsync(TimeSpan.FromSeconds(5));
+            Check(late.All(r=>r.Status!=OperationStatus.Success&&!r.OutcomeUncertain)&&f.Inputs.All(i=>i.PressCalls==0),"pre-shutdown queued input crossed the host admission boundary");
+            Check(!f.Scheduler.PauseTask(pending.InstanceId)&&!f.Scheduler.ResumeTask(pending.InstanceId),"shutdown allowed a new pause/resume");
+            try {await f.Scheduler.StartTaskAsync("lifecycle",123);throw new Exception("shutdown admitted new run");}catch(ObjectDisposedException){}
+        }
+        finally{release.Set();await Bound(close);}
+        Check(a.TaskStatus==AutomationTaskStatus.Stopped&&b.TaskStatus==AutomationTaskStatus.Stopped&&a.LastError is null&&b.LastError is null&&f.Logger.StopCalls==2,"host close became Lua fault or repeated cleanup");
+        Console.WriteLine("Host close admission passed: blocked cancellation callback, two real Lua runs, no new Gateway input/start/pause/resume, normal shared cleanup");
     }
     private static async Task PausedHostStopAsync()
     {

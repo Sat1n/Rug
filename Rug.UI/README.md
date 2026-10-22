@@ -8,6 +8,9 @@ tags: [host, winui, ui]
 
 # Rug.UI Index (L2)
 
+EXIT-01: [orderly shutdown contract, dependency evidence and validation](Shutdown.md).
+Windows App SDK 1.6.240829007; runtime/SDK baseline and native ownership stay explicit.
+
 C# WinUI 3 desktop shell: views, view-models, navigation/activation and theming. It
 renders the dynamic UI and forwards user intent to `Rug.UI.Core` host logic; it owns
 no automation pipeline and no native interop itself.

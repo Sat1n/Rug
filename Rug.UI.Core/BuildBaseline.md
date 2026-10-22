@@ -60,3 +60,14 @@ NOT RUN: real WGC checkpoint scene, Minecraft/OCR models, interactive WinUI
 automation or new human-input acceptance. These are not part
 of this scoped SDK/precision/cancellation revalidation. No Hook-gap resolution,
 new-instance checkpoint startup or absolute power-loss safety is claimed.
+
+## EXIT-01 dependency follow-up (2026-10-22)
+
+The historical SDK verification above is preserved. Current exact .NET SDK remains
+10.0.402 with rollForward disabled. Only the WinUI project's direct Windows App SDK
+reference moves from 1.5.240311000 to 1.6.240829007, based on a native static-event
+teardown stack and a version-only natural-exit contrast. Explicit
+WindowsSdkPackageVersion=10.0.22621.57 is the same Windows framework reference that
+.NET 10 already resolved, needed by the older 1.6 build guard; no TFM, native
+prerequisite or other direct production package is upgraded. Actual runtime remains
+10.0.13. See [shutdown contract and final validation](../Rug.UI/Shutdown.md).

@@ -40,6 +40,21 @@ public partial class DevToolsViewModel : ObservableObject
     private IInputSession? _inputSession;
 
     private CancellationTokenSource? _previewCts;
+    private Task? _previewTask;
+    private readonly SemaphoreSlim _previewGate = new(1,1);
+    private volatile bool _closing;
+    public bool IsClosing => _closing;
+    private readonly Rug.UI.Helpers.HostShutdownSequence _shutdown = new();
+    public Task<IReadOnlyList<string>> ShutdownAsync()
+    {
+        _closing=true;
+        return _shutdown.RunAsync(new (string,Func<Task>)[] {
+            ("preview-drain",StopPreviewAsync),
+            ("commands-drain",async()=>{
+                var tasks=new[]{TestMouseCommand.ExecutionTask,TestKeyboardCommand.ExecutionTask,StressTestCommand.ExecutionTask,TogglePreviewCommand.ExecutionTask,BindCurrentWindowCommand.ExecutionTask};
+                await Task.WhenAll(tasks.Where(t=>t is not null).Cast<Task>());
+            }) },Console.WriteLine);
+    }
 
     public DevToolsViewModel(
         ICaptureService capture, IWindowSpyService windowSpy, IOcrService ocr, IInputService input, IInputArbiter arbiter,
@@ -230,6 +245,9 @@ public partial class DevToolsViewModel : ObservableObject
 
     public async Task StartPreviewAsync()
     {
+        await _previewGate.WaitAsync();
+        try {
+        if(_closing)return;
         if (IsPreviewRunning)
         {
             return;
@@ -243,37 +261,44 @@ public partial class DevToolsViewModel : ObservableObject
         try
         {
             await _capture.StartAsync(BoundWindow.Hwnd);
+            if(_closing){await _capture.StopAsync();return;}
             _previewCts = new CancellationTokenSource();
             IsPreviewRunning = true;
             Log(LogLevel.Success, "Capture", $"开始实时预览 {BoundWindow.HexHwnd}（OCR 叠加 {(IsOcrOverlayEnabled ? "开" : "关")}）");
-            _ = Task.Run(() => RunPreviewLoopAsync(_previewCts.Token));
+            var token=_previewCts.Token;
+            _previewTask = Task.Run(() => RunPreviewLoopAsync(token));
         }
         catch (Exception ex)
         {
             Log(LogLevel.Error, "Capture", $"启动预览失败: {ex.Message}");
         }
+        } finally {_previewGate.Release();}
     }
 
     public async Task StopPreviewAsync()
     {
+        await _previewGate.WaitAsync();
+        try {
         if (_previewCts is not null)
         {
             _previewCts.Cancel();
-            _previewCts.Dispose();
-            _previewCts = null;
         }
-        if (IsPreviewRunning)
+        if (IsPreviewRunning || _previewTask is not null)
         {
             IsPreviewRunning = false;
-            await _capture.StopAsync();
+            try { if(_previewTask is not null)await _previewTask; }
+            finally { await _capture.StopAsync();_previewTask=null;_previewCts?.Dispose();_previewCts=null; }
             Log(LogLevel.Info, "Capture", "已暂停实时预览。");
         }
+        } finally {_previewGate.Release();}
     }
 
     private async Task RestartCaptureAsync(nint hwnd)
     {
+        await _previewGate.WaitAsync();
         try
         {
+            if(_closing)return;
             await _capture.StartAsync(hwnd);
             Log(LogLevel.Info, "Capture", $"预览已切换到 {hwnd:X}");
         }
@@ -281,6 +306,7 @@ public partial class DevToolsViewModel : ObservableObject
         {
             Log(LogLevel.Error, "Capture", $"切换捕获窗口失败: {ex.Message}");
         }
+        finally{_previewGate.Release();}
     }
 
     private async Task RunPreviewLoopAsync(CancellationToken ct)
@@ -315,7 +341,7 @@ public partial class DevToolsViewModel : ObservableObject
                         }
                     }
 
-                    FrameReady?.Invoke(this, new PreviewFrame(frame, cached));
+                    if(!ct.IsCancellationRequested&&!_closing)FrameReady?.Invoke(this, new PreviewFrame(frame, cached));
                 }
 
                 await Task.Delay(33, ct);  // ~30 fps cap
@@ -532,6 +558,7 @@ public partial class DevToolsViewModel : ObservableObject
 
     private bool EnsureBoundForInput()
     {
+        if(_closing)return false;
         if (BoundWindow is null)
         {
             Log(LogLevel.Warn, "Input", "请先用准星绑定一个目标窗口再运行输入测试。");
@@ -565,6 +592,7 @@ public partial class DevToolsViewModel : ObservableObject
 
     private async Task ExecuteInputTestAsync(Func<CancellationToken, Task> action)
     {
+        if(_closing)throw new OperationCanceledException("Host closing");
         // Whole test sequences own one session; stress owns it across capture/OCR gaps.
         using var createdSession = _inputSession is null ? await _intervention.BeginSessionAsync(_owner) : null;
         var session = _inputSession ?? createdSession!;
@@ -575,7 +603,7 @@ public partial class DevToolsViewModel : ObservableObject
             background ? InputDeliveryMode.Win32PostMessage : InputDeliveryMode.Win32SendInput,
             () => { if (BoundWindow?.Hwnd != target.Hwnd || UseBackgroundInput != background || _inputTarget != target)
                 throw new InputUnavailableException("DevTools target was rebound while queued."); }, session.Token);
-        _validateInput = lease.Validate;
+        _validateInput = () => { if(_closing)throw new OperationCanceledException("Host closing");lease.Validate(); };
         using var observationInput = ObservationFramePool.Shared.BeginExternalInput();
         try { await PrepareInputTargetAsync(window.Hwnd, background, lease.Token); await action(lease.Token); }
         catch (InputCleanupException error) { lease.CleanupFailed(error); throw; }

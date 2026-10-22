@@ -191,3 +191,14 @@ interaction (a physical click already takes over). For verified long native inpu
 expect “正在暂停” until releases end, or “正在停止” until actual work drains.
 Record these separately from the [05B-02 user-confirmed acceptance](InputIntervention.md).
 The independent Hook gap/frozen native artifacts are unchanged.
+
+## EXIT-01 host shutdown boundary
+
+The scheduler now gives every context a shared host admission gate. Dispose closes
+it under the scheduler lifecycle gate before any cancellation callbacks. New and
+queued business operations and Lua segments cannot proceed merely because linked
+cancellation has not propagated. Pause/Resume and recovery/checkpoint commit checks
+also respect host closure. Required releases and actual work drain normally.
+Repeated DisposeAsync shares one real cleanup completion; action failures remain
+visible while other cleanup actions are attempted. No lifecycle lock executes
+external cleanup, Native work or callbacks. See the [UI ownership and evidence](../Rug.UI/Shutdown.md).

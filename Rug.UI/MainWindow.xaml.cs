@@ -29,11 +29,18 @@ public sealed partial class MainWindow : WindowEx
     private int _lifecycleRefreshQueued;
     private bool _initialized;
     private IReadOnlyList<PluginSnapshot> _effectivePlugins = [];
-    private bool _closingInput, _inputClosed;
+    private volatile bool _closingInput;
+    private bool _inputClosed;
+    private readonly HostShutdownSequence _shutdown = new();
+    private readonly UiCallbackFence _settingsCallbacks=new();
+    private IHotReloadService? _reload;
+    private EventHandler<HotReloadEventArgs>? _reloaded;
+    private EventHandler<HotReloadFailedEventArgs>? _reloadFailed;
     private Window? _traceWindow;
     private Rug.UI.Core.Services.TraceReviewService? _traceReviews;
     private void OpenTraceViewer_Click(object sender,RoutedEventArgs args)
     {
+        if(_closingInput)return;
         if(_traceWindow is not null){_traceWindow.Activate();return;}
         try
         {
@@ -121,26 +128,12 @@ public sealed partial class MainWindow : WindowEx
             _inputClosed = true;
             Close();
         };
-        Closed += (_, _) =>
-        {
-            _traceWindow?.Close();
-            _traceReviews?.Dispose();
-            if (_scheduler is not null) _scheduler.InstancesChanged -= OnInstancesChanged;
-            if (_scheduler is not null) _scheduler.LifecycleChanged -= OnLifecycleChanged;
-            if (_scheduler?.RuntimeUpdates is { } updates) updates.Changed -= RuntimeUpdateChanged;
-            if (_inputArbiter is not null) _inputArbiter.StateChanged -= InputControlChanged;
-            if (_intervention is not null) _intervention.StateChanged -= InputControlChanged;
-            if (_demo is not null) _demo.TimelineChanged -= OnDemoTimelineChanged;
-            _startSubscription?.Dispose();
-            _stopSubscription?.Dispose();
-            _pauseSubscription?.Dispose();
-            _resumeSubscription?.Dispose();
-        };
+        Closed += (_, _) => Console.WriteLine("shutdown:window-closed");
     }
 
     public async Task InitializePluginShellAsync()
     {
-        if (_initialized) return;
+        if (_initialized || _closingInput) return;
         _initialized = true;
         _scheduler = App.GetService<ITaskScheduler>();
         if (_scheduler.RuntimeUpdates is { } updates) updates.Changed += RuntimeUpdateChanged;
@@ -159,19 +152,22 @@ public sealed partial class MainWindow : WindowEx
         _pauseSubscription = bus.Subscribe("host.pause_selected", (_, token) => ControlSelectedAsync(AutomationOperation.Pause, token));
         _resumeSubscription = bus.Subscribe("host.resume_selected", (_, token) => ControlSelectedAsync(AutomationOperation.Resume, token));
         var reload = App.GetService<IHotReloadService>();
-        reload.Reloaded += (_, e) => DispatcherQueue.TryEnqueue(async () =>
+        _reload=reload;
+        reload.Reloaded += _reloaded = (_, e) => DispatcherQueue.TryEnqueue(async () =>
         {
+            if(_closingInput)return;
             if (e.Status == PluginUpdateStatus.Superseded) return;
             if (e.Status == PluginUpdateStatus.Unchanged) { ReloadStatus.Text = e.PluginId + " · 内容未变，未重复应用"; return; }
             ReloadStatus.Text = e.Status == PluginUpdateStatus.RuntimePending ? e.PluginId + " · 更新待应用，旧任务继续运行" :
                 e.PluginId + " 已于 " + e.Timestamp.ToString("HH:mm:ss") + " 更新";
             if (e.Status == PluginUpdateStatus.RuntimePending) return;
             _effectivePlugins = await _scheduler.GetPluginSnapshotsAsync();
+            if(_closingInput)return;
             RefreshPluginList();
             RefreshInstancePicker();
         });
-        reload.ReloadFailed += (_, e) => DispatcherQueue.TryEnqueue(() =>
-            ReloadStatus.Text = e.PluginId + " 重载失败：" + e.Error.Message);
+        reload.ReloadFailed += _reloadFailed = (_, e) => DispatcherQueue.TryEnqueue(() =>
+            {if(!_closingInput)ReloadStatus.Text = e.PluginId + " 重载失败：" + e.Error.Message;});
         _effectivePlugins = await _scheduler.GetPluginSnapshotsAsync();
         RefreshPluginList();
         if (PluginNavigation.MenuItems.FirstOrDefault() is NavigationViewItem first)
@@ -189,6 +185,7 @@ public sealed partial class MainWindow : WindowEx
     private void InputControlChanged(object? sender, EventArgs args) => DispatcherQueue.TryEnqueue(RefreshInputControl);
     private void RefreshInputControl()
     {
+        if(_closingInput)return;
         // Reread instead of applying queued snapshots: stale notifications cannot roll state back.
         var snapshot = _inputArbiter?.Snapshot;
         var detector = _intervention?.Snapshot;
@@ -222,17 +219,38 @@ public sealed partial class MainWindow : WindowEx
     }
     private async Task ShutdownInputAsync()
     {
-        _checkpointCancellation?.Cancel();
-        try
-        {
-            await App.GetService<IHotReloadService>().DisposeAsync();
-            await App.GetService<IInputInterventionCoordinator>().DisposeAsync();
-            await App.GetService<ITaskScheduler>().DisposeAsync();
-        }
-        catch (Exception error)
-        {
-            System.Diagnostics.Debug.WriteLine("Input host shutdown failed: " + error.Message);
-        }
+        var app=(App)Application.Current;
+        Task settingsCallbacks=_settingsCallbacks.Close();
+        // DisposeAsync closes scheduler admission synchronously, before cancellation callbacks/IO.
+        Task schedulerStop=_scheduler?.DisposeAsync().AsTask()??Task.CompletedTask;
+        Task<IReadOnlyList<string>>? toolsStop=app.CreatedDevTools?.ShutdownAsync();
+        var errors=await _shutdown.RunAsync(new (string,Func<Task>)[] {
+            ("ui-admission",()=>{HostShutdownSequence.RunActions(
+                ()=>{if(Content is FrameworkElement root)root.IsHitTestVisible=false;},
+                ()=>_settings.ColorValuesChanged-=Settings_ColorValuesChanged,
+                ()=>_startSubscription?.Dispose(),()=>_stopSubscription?.Dispose(),()=>_pauseSubscription?.Dispose(),()=>_resumeSubscription?.Dispose(),
+                ()=>{if(_scheduler is not null)_scheduler.InstancesChanged-=OnInstancesChanged;},
+                ()=>{if(_scheduler is not null)_scheduler.LifecycleChanged-=OnLifecycleChanged;},
+                ()=>{if(_scheduler?.RuntimeUpdates is {} u)u.Changed-=RuntimeUpdateChanged;},
+                ()=>{if(_inputArbiter is not null)_inputArbiter.StateChanged-=InputControlChanged;},
+                ()=>{if(_intervention is not null)_intervention.StateChanged-=InputControlChanged;},
+                ()=>{if(_demo is not null)_demo.TimelineChanged-=OnDemoTimelineChanged;},
+                ()=>{if(_reload is not null)_reload.Reloaded-=_reloaded;},
+                ()=>{if(_reload is not null)_reload.ReloadFailed-=_reloadFailed;});
+                return Task.CompletedTask;}),
+            ("cancel-preparations",()=>{_checkpointCancellation?.Cancel();return Task.CompletedTask;}),
+            ("theme-callbacks",()=>settingsCallbacks),
+            ("notifications",()=>app.CreatedNotifications?.ShutdownAsync()??Task.CompletedTask),
+            ("viewer",()=>{HostShutdownSequence.RunActions(()=>_traceWindow?.Close(),()=>_traceReviews?.Dispose());return Task.CompletedTask;}),
+            ("hot-reload",()=>_reload?.DisposeAsync().AsTask()??Task.CompletedTask),
+            ("input-sessions",()=>_intervention?.DisposeAsync().AsTask()??Task.CompletedTask),
+            ("devtools",async()=>{if(toolsStop is not null){var failures=await toolsStop;if(failures.Count>0)throw new InvalidOperationException(string.Join("; ",failures));}}),
+            ("scheduler",()=>schedulerStop),
+            ("dynamic-ui",()=>{HostShutdownSequence.RunActions(()=>{PluginContent.Content=null;_host=null;},()=>_demo?.Dispose());return Task.CompletedTask;}),
+            ("host-stop",()=>app.Host.StopAsync()),
+            ("container",async()=>{if(app.Host is IAsyncDisposable asyncHost)await asyncHost.DisposeAsync();else app.Host.Dispose();})
+        },Console.WriteLine);
+        if(errors.Count>0){foreach(string error in errors)Console.Error.WriteLine("Host cleanup failed: "+error);Environment.ExitCode=1;}
     }
 
     private void RefreshPluginList()
@@ -254,7 +272,7 @@ public sealed partial class MainWindow : WindowEx
     private async void PluginNavigation_SelectionChanged(NavigationView sender,
         NavigationViewSelectionChangedEventArgs args)
     {
-        if (args.SelectedItem is NavigationViewItem item && item.Tag is string id)
+        if (!_closingInput && args.SelectedItem is NavigationViewItem item && item.Tag is string id)
         {
             if (id != _activePlugin) _checkpointCancellation?.Cancel();
             if (id == "__devtools")
@@ -272,10 +290,11 @@ public sealed partial class MainWindow : WindowEx
 
     private async Task SelectPluginAsync(string pluginId)
     {
+        if (_closingInput) return;
         if (_activePlugin == pluginId && _host is not null) return;
         var snapshot = (await _scheduler!.GetPluginSnapshotsAsync()).FirstOrDefault(item => item.PluginId == pluginId);
         var plugin = snapshot?.Manifest;
-        if (plugin is null) return;
+        if (_closingInput || plugin is null) return;
         var next = new DynamicUIHost();
         try { next.LoadJson(snapshot!.UiJson ?? "{\"type\":\"Page\",\"id\":\"empty-plugin-ui\"}", pluginId: plugin.Id); }
         catch (Exception error) { next.ShowLoadError(error); }
@@ -307,6 +326,7 @@ public sealed partial class MainWindow : WindowEx
 
     private void RefreshInstancePicker()
     {
+        if(_closingInput)return;
         var runs = _activePlugin is null ? [] : _scheduler!.Instances
             .Where(item => string.Equals(item.PluginId, _activePlugin, StringComparison.OrdinalIgnoreCase))
             .OrderBy(item => item.RunGeneration).ToArray();
@@ -477,6 +497,6 @@ public sealed partial class MainWindow : WindowEx
                 run.Identity, cancellationToken: cancellationToken);
     }
 
-    private void Settings_ColorValuesChanged(UISettings sender, object args) =>
-        _dispatcherQueue.TryEnqueue(TitleBarHelper.ApplySystemThemeToCaptionButtons);
+    private void Settings_ColorValuesChanged(UISettings sender, object args)
+    {using var callback=_settingsCallbacks.Enter();if(callback is not null&&!_closingInput)_dispatcherQueue.TryEnqueue(()=>{if(!_closingInput)TitleBarHelper.ApplySystemThemeToCaptionButtons();});}
 }
