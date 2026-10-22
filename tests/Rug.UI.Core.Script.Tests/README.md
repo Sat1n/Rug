@@ -589,3 +589,78 @@ Read-only export/query examples and all default bounds are in the
 [Core trace contract](../../Rug.UI.Core/ExecutionTraces.md). Images, configuration,
 checkpoint state and Lua context are excluded. Existing anomaly archive failures,
 takeover rules and the independent Hook gap retain their original contracts.
+
+## 08B-02 trace viewer and versioned incidents
+
+SDK 10.0.402; run from the repository root after matching x64 builds:
+
+```powershell
+dotnet build Rug.UI/Rug.UI.csproj -c Debug -p:Platform=x64 --no-restore
+dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64 -- --trace-review-tests
+dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64 --no-build -- --trace-review-ui
+dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64 --no-build
+dotnet run --project Rug.UI.Tests/Rug.UI.Tests.csproj -c Debug -p:Platform=x64
+```
+
+Replace Debug with Release for matching Release builds/tests. The review suite is
+also in the full script suite. It uses actual Gateway scopes and real PNG/JSON
+files to fix the trace association before a blocked screenshot completes. Later
+operation metadata cannot change it; outside an operation no last-op/source guess
+is allowed. Recovery updates preserve new fields, legacy shape and agent_resolution.
+Unknown versions remain untouched; malformed versions, bad JSON, path traversal,
+oversize files, IO sharing failure and bad files among valid pages are distinct.
+Disabled/closed/failed/permanently blocked recorders cannot block archive or Stop.
+
+The broker barriers cover 500 rapid refreshes, dispatched stale results, one
+pending physical read and one pending UI delivery, closing/reopening 100 times
+behind a stuck reader, detached dual-run/control catalogs and deleted history.
+UI presentation tests keep nullable outcomes unknown, memory-window labeling and
+all six offline integrity states. Existing trace tests cover operation filters,
+late work/failure after caller return, release/cleanup failures and corrupted files.
+
+`--trace-review-ui` is self-contained and owns only its temporary plugin, target,
+UI processes and roots. It first opens/closes a baseline host without the viewer;
+then binds an isolated green target in WinUI, explicitly grants vision/agent/timer,
+runs real Lua capture and incident archival, views control/current run and selected
+authorization/revision, stops the run, views its disk prefix, selects the real v1
+incident and locates its recorded boundary. It closes/reopens the viewer twice.
+A fresh host reads the same sealed history (`Valid`) and incident without starting
+any task or restoring permissions. Actual WGC/PNG is used, not Fake observations.
+The fixture holds the target outside both hosts. It uses no business input task,
+SendInput acceptance or synthetic human validation. Exit code failure is preserved;
+UI interaction success does not convert abnormal CLR shutdown into a passing test.
+
+Verification on 2026-10-21 (fresh matching managed builds):
+
+| Evidence | Debug x64 | Release x64 |
+| --- | --- | --- |
+| WinUI and script builds, Core dependency included | 0 warnings / 0 errors | 0 warnings / 0 errors |
+| Trace review deterministic suite | PASS | PASS |
+| Complete scripts: trace, Gateway/auth, observation/click, lifecycle, recovery/checkpoint, runtime updates | PASS | PASS |
+| UI lifecycle + Schema/state/hot reload | PASS | PASS |
+| Real WinUI/WGC live/control/stopped, incident jump, reopened view, restarted host history | interaction checks PASS | interaction checks PASS |
+| WinUI host clean process exit | FAIL: CLR assertion, exit 0xC0000602 | FAIL: same assertion |
+
+The same exit assertion occurs in the no-viewer/no-task baseline, Live and History:
+`Attempt to execute managed code after the .NET runtime thread state has been destroyed`
+(`ceemain.cpp:1721`). This is an unresolved host/runtime shutdown limitation, not
+recorded as a passing UI test or attributed to a proven root cause. Managed run
+cleanup and recorder sealing completed: the restarted reader verified the previous
+session's files as Valid. The overall UI smoke command deliberately returns nonzero
+for the shutdown failure even when all interaction assertions pass. No input,
+notification, runtime version or shutdown workaround is introduced by this unit.
+
+Manual viewing (optional, not claimed as user acceptance):
+
+1. 启动宿主，点击底部“轨迹与异常”。
+2. 点击“刷新轨迹列表”，选择“当前保留窗口”或“文件”；完整 session/实例/代次用于区分同名插件。
+3. 选择事件看详情；按需填写 operationId，点“刷新本页事件”，或点“下一页事件”。
+4. 点“刷新异常列表”，选择记录，再点“定位关联轨迹”。轨迹被回收也不影响异常详情。
+5. 关闭查看窗口再打开，或重启宿主读文件；这不启动旧实例、不恢复授权。当前未封存 session 的 Incomplete 是正常状态。
+
+[Core contract and limits](../../Rug.UI.Core/TraceReview.md): one background read,
+max 256 events/page, max 100 incident summaries/page, 4096-name scan and 1 MiB
+incident detail. No viewer-owned live frame/resource leases or unbounded history.
+No dedicated human/SendInput rerun is required or claimed. Native implementation
+was unchanged and matching existing DLLs were reused. Independent Hook limitations
+and earlier capture/input acceptance boundaries remain open/unchanged.

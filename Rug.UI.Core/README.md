@@ -39,6 +39,7 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 | `Services/VisualEngineBridge.cs` · `Services/ObservationFramePool.cs` · `Models/Observation.cs` · `Models/CaptureFacts.cs` | Shared bounded host frame leases, immutable run/frame provenance, opaque current-cache references, safe template paths and ROI transforms; [08A observation/facts contract](Observations.md) |
 | `Services/ObservedClickServices.cs` · `Models/ObservedClick.cs` · `Native/ObservedInputEnvironment.cs` · `Native/ObservedInputCoordinates.cs` | Observation-bound click with shared post-geometry cancellation/deadline, live admission and QPC guard before activation/move/down; bounded private ROI comparison, PMv2 input and one-shot source qualification; [08A-02B contract](ObservedClicks.md) |
 | `Models/ExecutionTrace.cs` · `Services/ExecutionTraceRecorder.cs` · `Services/TraceFileStore.cs` | Host-issued run/control trace identities, detached Gateway/lifecycle/observation summaries, bounded nonblocking producer and local checked append/query; [08B-01 contract](ExecutionTraces.md) |
+| `Models/TraceReview.cs` · `Services/TraceReviewService.cs` · `Services/IncidentStore.cs` | Host-root bounded background review, latest-only dispatch, versioned incident reads and boundary links; [08B-02 contract](TraceReview.md) |
 | `Services/InputService.cs` | Async humanized input (Task.Run / MTA): mouse move/click/drag, key press, `SendText`, dry-run `PlanTrajectoryAsync`; `SetTargetAsync(hwnd, background)` binds the window + delivery mode. Mouse coords are **client-space**, confined to the window by native |
 | `Abstractions/ICoordinateMapper.cs` · `Services/CoordinateMapper.cs` | Validate a physical client point against the target HWND and project it through Win32 `ClientToScreen` for diagnostics and tests |
 | `Services/InputBridge.cs` · `Native/ForegroundWindowActivation.cs` | Permission-gated dispatch, cancellable foreground confirmation and full-action shared leases; [contract](InputArbitration.md) |
@@ -56,7 +57,7 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 | `Abstractions/ITaskScheduler.cs` · `Models/TaskExecutionContext.cs` · `Models/RunIdentity.cs` · `Services/TaskScheduler.cs` | Concurrent plugin/window runs, independent run generation and target-binding identity, per-instance service ownership and lifecycle dispatch |
 | `Models/StateScope.cs` · `Models/StateChangedEventArgs.cs` · `Services/StateStore.cs` | Structural AppState/PluginConfig/InstanceState partitions, bounded JSON values, scoped revisions and detached events |
 | `Abstractions/ICommandBus.cs` · `Services/CommandBus.cs` | Scoped state subscriptions with stale UI callback rejection and async named-command routing |
-| `Abstractions/IAnomalyLogger.cs` · `Models/AnomalyLogModel.cs` · `Services/AnomalyLogger.cs` | Per-instance incident capture, PNG encoding and JSON black-box records |
+| `Abstractions/IAnomalyLogger.cs` · `Models/AnomalyLogModel.cs` · `Services/AnomalyLogger.cs` | Per-instance PNG/JSON archive, v1 incident identity and bounded pre-capture trace link |
 | `Services/FileService.cs` · `Helpers/Json.cs` | File IO / JSON helpers |
 
 ## Task lifecycle and watchdog (Task 2.1.3)
@@ -95,6 +96,7 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   returns Lua `{status="resolved",recoveryId,reason,error}`. Commit checks identity,
   cancellation and deadlines under the Stop transition lock. No Resume bypass.
 * `AnomalyLogger` saves local PNG/JSON with run/recovery identity and verification.
+  [08B-02](TraceReview.md) versions new incidents and snapshots trace association before capture; recovery updates preserve the link.
   Bounded context excludes VM stacks; permission/IO/Lua/cleanup errors still fault.
 * Planned input handoff drains releases, retires the input epoch/session and
   preserves only that registered recovery. Other input runs stop; timer/vision

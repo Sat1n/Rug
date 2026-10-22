@@ -30,6 +30,22 @@ public sealed partial class MainWindow : WindowEx
     private bool _initialized;
     private IReadOnlyList<PluginSnapshot> _effectivePlugins = [];
     private bool _closingInput, _inputClosed;
+    private Window? _traceWindow;
+    private Rug.UI.Core.Services.TraceReviewService? _traceReviews;
+    private void OpenTraceViewer_Click(object sender,RoutedEventArgs args)
+    {
+        if(_traceWindow is not null){_traceWindow.Activate();return;}
+        try
+        {
+            _traceReviews=App.GetService<Rug.UI.Core.Services.TraceReviewService>();
+            var page=new TraceViewerPage();var window=new Window{Title="Rug · 轨迹与异常（只读）",Content=page};
+            window.AppWindow.Resize(new Windows.Graphics.SizeInt32(1280,1000));
+            _traceWindow=window;
+            window.Closed+=(_,_)=>{page.CloseQueries();_traceWindow=null;};
+            window.Activate();
+        }
+        catch(Exception error){ReloadStatus.Text="轨迹查看器不可用 · "+error.GetType().Name;}
+    }
     private CancellationTokenSource? _checkpointCancellation;
     private sealed record CheckpointItem(CheckpointChoice Choice)
     {
@@ -107,6 +123,8 @@ public sealed partial class MainWindow : WindowEx
         };
         Closed += (_, _) =>
         {
+            _traceWindow?.Close();
+            _traceReviews?.Dispose();
             if (_scheduler is not null) _scheduler.InstancesChanged -= OnInstancesChanged;
             if (_scheduler is not null) _scheduler.LifecycleChanged -= OnLifecycleChanged;
             if (_scheduler?.RuntimeUpdates is { } updates) updates.Changed -= RuntimeUpdateChanged;

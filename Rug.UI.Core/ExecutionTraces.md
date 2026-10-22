@@ -20,8 +20,9 @@ bounded memory-only and cannot report durable history. An invalid root degrades
 to memory and exposes diagnostics. Invalid trusted limits fail configuration.
 
 The scheduler owns one recorder session and closes it after actual run cleanup.
-Sharing that recorder with another scheduler is unsupported. No new UI or MCP
-surface exists. This unit does not modify anomaly PNG/JSON archival semantics.
+Sharing that recorder with another scheduler is unsupported. The follow-up
+[08B-02 viewer and incident contract](TraceReview.md) adds read-only UI and versioned
+incident links; no MCP surface exists. Archive IO failure semantics are preserved.
 
 ## Event fields and identity
 
@@ -157,6 +158,6 @@ None of these APIs starts tasks, restores grants or retrieves live frame resourc
 
 Commands/results: [test index](../tests/Rug.UI.Core.Script.Tests/README.md).
 Actual controlled WGC/PostMessage example: [trace sample](../tests/samples/execution-trace/README.md).
-No viewer, replay, screenshot warehouse, model calls or incident JSON upgrade is
-delivered. UI/human input behavior is unchanged; real SendInput/human acceptance
-is not expanded by these tests.
+The [08B-02 follow-up](TraceReview.md) delivers a read-only viewer and incident JSON
+links. Replay, screenshot warehouse and model calls remain outside scope.
+Input behavior and real SendInput/human acceptance are unchanged.

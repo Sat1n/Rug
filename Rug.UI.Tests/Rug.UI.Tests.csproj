@@ -8,6 +8,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Rug.UI.Core\Rug.UI.Core.csproj" />
     <Compile Include="..\Rug.UI\Helpers\LifecyclePresentation.cs" Link="LifecyclePresentation.cs" />
+    <Compile Include="..\Rug.UI\Helpers\TracePresentation.cs" Link="TracePresentation.cs" />
     <None Include="..\Rug.UI\ui.json" Link="ui.json" CopyToOutputDirectory="Always" />
   </ItemGroup>
 </Project>

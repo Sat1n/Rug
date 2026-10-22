@@ -23,6 +23,8 @@ if (args.Contains("--checkpoint-restore-native")) { await NativeCheckpointRestor
 if (args.Contains("--checkpoint-restore-tests")) { await CheckpointTests.RunRestoreAsync(); return; }
 if (args.Contains("--observed-click-tests")) { await CheckpointTests.RunObservedClicksAsync(); return; }
 if (args.Contains("--execution-trace-tests")) { await CheckpointTests.RunExecutionTracesAsync(); return; }
+if (args.Contains("--trace-review-tests")) { await CheckpointTests.RunTraceReviewAsync(); return; }
+if (args.Contains("--trace-review-ui")) { await TraceReviewUi.RunAsync(); return; }
 if (args.Contains("--execution-trace-read")) { CheckpointTests.TraceReadChild(args); return; }
 if (args.Contains("--execution-trace-export"))
 {
@@ -1146,6 +1148,7 @@ await CheckpointTests.RunRuntimeSwitchesAsync();
 await CheckpointTests.RunObservationsAsync();
 await CheckpointTests.RunObservedClicksAsync();
 await CheckpointTests.RunExecutionTracesAsync();
+await CheckpointTests.RunTraceReviewAsync();
 await LifecycleTests.RunAsync();
 await AuthorizationTests.RunAsync();
 await InputArbitrationTests.RunAsync();

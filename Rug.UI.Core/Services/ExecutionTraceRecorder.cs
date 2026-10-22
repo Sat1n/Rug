@@ -20,9 +20,14 @@ public sealed class ExecutionTraceHandle
 internal sealed record TraceOperation(ExecutionTraceHandle Handle, Guid OperationId, string CorrelationId,
     Guid? ExecutionId, string Caller, AutomationSource Source, string Operation, TraceTarget Target)
 {
+    private TraceObservation? _knownObservation;
+    internal TraceObservation? KnownObservation=>Volatile.Read(ref _knownObservation);
     internal void Emit(TraceEventKind kind,string? status=null,string? error=null,string? reason=null,bool? uncertain=null,
         TraceAuthorization? authorization=null,TraceObservation? observation=null)
-        => Handle.Emit(kind,this,status,error,reason,uncertain,authorization,observation);
+    {
+        if(observation is not null)Volatile.Write(ref _knownObservation,observation);
+        Handle.Emit(kind,this,status,error,reason,uncertain,authorization,observation);
+    }
 }
 internal static class ExecutionTraceScope
 {
@@ -68,8 +73,29 @@ public sealed class ExecutionTraceRecorder : IAsyncDisposable
     private string? _writerError;
     public Guid HostSessionId { get; }=Guid.NewGuid();
     public TraceLimits Limits { get; }
+    public bool Enabled=>_enabled;
     public ExecutionTraceHandle Control { get; }
     public static ExecutionTraceRecorder Disabled()=>new(enabled:false);
+    internal IncidentTraceLink IncidentBoundary(ExecutionTraceHandle handle,TraceOperation? operation)
+    {
+        try
+        {
+            lock(_gate)
+            {
+                string status=!_enabled?"Disabled":handle.TraceId==Guid.Empty?"CapacityRejected":
+                    !_traces.TryGetValue(handle.TraceId,out var p)?"Unavailable":_closing||p.Closed?"Closed":
+                    _failures>0?"WriterFailed":"AssociatedInMemory";
+                bool exists=_traces.ContainsKey(handle.TraceId)&&handle.TraceId!=Guid.Empty;
+                // An inherited Start/control scope or another instance is not this run's operation.
+                var op=operation?.Handle.TraceId==handle.TraceId&&operation.Handle.Run==handle.Run?operation:null;
+                var observation=op?.KnownObservation;
+                return new(status,HostSessionId,exists?handle.TraceId:null,handle.Run,
+                    exists?_sequence:null,op?.OperationId,op?.ExecutionId,observation?.ObservationId,observation?.FrameId,
+                    _clock.GetUtcNow());
+            }
+        }
+        catch{return new("Unknown");} // Never make an otherwise valid archive depend on tracing.
+    }
     public ExecutionTraceRecorder(string? root=null,TraceLimits? limits=null,TimeProvider? clock=null,
         ITraceFileSink? sink=null,bool enabled=true)
     {

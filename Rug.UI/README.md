@@ -20,9 +20,15 @@ It adds no input lock, detector policy or interop to UI; see
 
 08B-01: `App.xaml.cs` enables the Core execution trace recorder by default at
 `%LOCALAPPDATA%/Rug/traces` and injects it into the scheduler. Host environment can
-select the root or disable it; there is no UI viewer or new input behavior.
+select the root or disable it; input behavior is unchanged.
 The scheduler closes recording after run cleanup with a bounded writer flush;
 see [trace limits and fault isolation](../Rug.UI.Core/ExecutionTraces.md).
+
+08B-02: host button **轨迹与异常** opens `Views/TraceViewerPage.xaml(.cs)` for
+current/control/history event pages and versioned incidents with boundary links.
+The Core singleton broker bounds background IO and latest-only delivery; window
+close never waits on disk. No live frames, task/grant restoration or P/Invoke are
+introduced. See [review and incident semantics](../Rug.UI.Core/TraceReview.md).
 
 > **Status:** WinUI 3 template scaffold (activation, services, VMs, views) plus the
 > **Dev Tools sandbox** (Task 1.6): `Views/DevToolsPage.xaml(.cs)` +

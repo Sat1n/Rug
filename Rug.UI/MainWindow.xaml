@@ -1,4 +1,4 @@
-﻿<windowex:WindowEx
+<windowex:WindowEx
     x:Class="Rug.UI.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -35,6 +35,7 @@
                 <StackPanel Orientation="Horizontal" Spacing="12">
                     <Button Content="人工接管" AutomationProperties.Name="Manual takeover" Click="ManualTakeover_Click"/>
                     <Button Content="交还控制" AutomationProperties.Name="Return control" Click="ReturnControl_Click"/>
+                    <Button Content="轨迹与异常" AutomationProperties.Name="Open trace viewer" Click="OpenTraceViewer_Click"/>
                     <TextBlock x:Name="InputControlStatus" Text="自动化可用" VerticalAlignment="Center"/>
                 </StackPanel>
                 <TextBlock x:Name="InputDetectorStatus" Text="输入检测器尚未就绪" TextWrapping="Wrap"/>

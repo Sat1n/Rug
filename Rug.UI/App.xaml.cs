@@ -83,7 +83,8 @@ public partial class App : Application
             services.AddSingleton<IPluginAuthorization, PluginAuthorization>();
             services.AddSingleton<PluginPermissionConsent>();
             services.AddSingleton<IPluginManager, PluginManager>();
-            services.AddSingleton<IAnomalyLogger, AnomalyLogger>();
+            services.AddSingleton(p=>new AnomalyLogger(p.GetRequiredService<ILogger<AnomalyLogger>>(),Environment.GetEnvironmentVariable("RUG_ANOMALY_ROOT")));
+            services.AddSingleton<IAnomalyLogger>(p=>p.GetRequiredService<AnomalyLogger>());
             services.AddSingleton<RecoveryValidatorRegistry>(_ =>
             {
                 var registry = new RecoveryValidatorRegistry();
@@ -126,6 +127,10 @@ public partial class App : Application
             services.AddSingleton(_ => new ExecutionTraceRecorder(
                 Environment.GetEnvironmentVariable("RUG_TRACE_ROOT")??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Rug","traces"),
                 enabled:Environment.GetEnvironmentVariable("RUG_TRACE_DISABLED")!="1"));
+            services.AddSingleton(_=>new TraceFileStore(Environment.GetEnvironmentVariable("RUG_TRACE_ROOT")??Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Rug","traces")));
+            services.AddSingleton(p=>new IncidentStore(p.GetRequiredService<AnomalyLogger>().DirectoryPath));
+            services.AddSingleton<ITraceReviewReader,TraceReviewReader>();
+            services.AddSingleton<TraceReviewService>();
             services.AddSingleton<ITaskScheduler>(provider => new Rug.UI.Core.Services.TaskScheduler(
                 provider.GetRequiredService<IPluginManager>(), PluginsRoot,
                 () => new CaptureService(),
