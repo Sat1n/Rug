@@ -62,6 +62,7 @@ public sealed partial class TraceViewerPage : Page
     private void MoreEvents_Click(object sender,RoutedEventArgs e){if(_nextEvents is {} n)ReadTrace(n);}
     private void ReadTrace(long after)
     {
+        ClearDetail();
         if((Traces.SelectedItem as ListViewItem)?.Tag is not TraceChoice choice)return;
         Guid? operation=null;
         if(!string.IsNullOrWhiteSpace(OperationFilter.Text))
@@ -69,12 +70,18 @@ public sealed partial class TraceViewerPage : Page
         Submit(new(choice.Memory?TraceReviewKind.Memory:TraceReviewKind.Disk,choice.SessionId,choice.TraceId,operation,after));
     }
     private void Event_Changed(object sender,SelectionChangedEventArgs e)
-    {if((Events.SelectedItem as ListViewItem)?.Tag is ExecutionTraceEvent row)Show(JsonSerializer.Serialize(row,Json));}
+    {
+        if(_setting)return;
+        _session?.Invalidate();ClearDetail();
+        _setting=true;Incidents.SelectedIndex=-1;_setting=false;
+        if((Events.SelectedItem as ListViewItem)?.Tag is ExecutionTraceEvent row)Show(JsonSerializer.Serialize(row,Json));
+    }
     private void Incidents_Click(object sender,RoutedEventArgs e)=>Submit(new(TraceReviewKind.Incidents));
     private void MoreIncidents_Click(object sender,RoutedEventArgs e){if(_nextIncidents is {} n)Submit(new(TraceReviewKind.Incidents,Offset:n));}
     private void Incident_Changed(object sender,SelectionChangedEventArgs e)
     {
-        if(_setting)return;_session?.Invalidate();_incident=null;Detail.Text="";Locate.IsEnabled=false;
+        if(_setting)return;_session?.Invalidate();ClearDetail();
+        _setting=true;Events.SelectedIndex=-1;_setting=false;
         if((Incidents.SelectedItem as ListViewItem)?.Tag is IncidentEntry item)Submit(new(TraceReviewKind.Incident,IncidentKey:item.FileKey));
     }
     private void Locate_Click(object sender,RoutedEventArgs e)
@@ -92,6 +99,10 @@ public sealed partial class TraceViewerPage : Page
     private void Received(TraceReviewResult result)
     {
         if(!_active)return;
+        // The broker revision rejects queued reads; selection ownership also guards
+        // the shared detail pane, including callbacks already entering delivery.
+        if(result.Incident is {} incoming&&
+            (Events.SelectedItem is not null||(Incidents.SelectedItem as ListViewItem)?.Tag is not IncidentEntry owner||owner.FileKey!=incoming.FileKey))return;
         try
         {
             var h=result.Health;
@@ -99,14 +110,20 @@ public sealed partial class TraceViewerPage : Page
             if(result.Error is {} error){TraceStatus.Text=error;return;}
             if(result.Choices is {} choices)
             {
-                _setting=true;Traces.ItemsSource=choices.Select(TraceItem).ToArray();Traces.SelectedIndex=-1;_setting=false;
+                ClearDetail();
+                _setting=true;
+                Events.ItemsSource=null;
+                Traces.ItemsSource=choices.Select(TraceItem).ToArray();Traces.SelectedIndex=-1;_setting=false;
                 _nextCatalog=result.NextOffset;MoreCatalog.IsEnabled=_nextCatalog is not null;
-                Events.ItemsSource=null;Detail.Text="";MoreEvents.IsEnabled=false;TraceStatus.Text=$"本页 {choices.Count} 个轨迹选项；请选择当前窗口或历史文件。";
+                MoreEvents.IsEnabled=false;TraceStatus.Text=$"本页 {choices.Count} 个轨迹选项；请选择当前窗口或历史文件。";
             }
             if(result.Page is {} page)
             {
+                ClearDetail();
                 _nextEvents=page.NextSequence;MoreEvents.IsEnabled=_nextEvents is not null;
+                _setting=true;
                 Events.ItemsSource=page.Events.OrderBy(x=>x.Sequence).Select(x=>new ListViewItem{Content=new EventItem(x).Label,Tag=x}).ToArray();
+                _setting=false;
                 TraceStatus.Text=$"{TracePresentation.Integrity(page)} · 本页 {page.Events.Count} 条；任务结果另见事件。"+
                     $" 已知丢失 {page.Summary?.DroppedEvents.ToString()??"未知"}；session丢失 {page.SessionDroppedEvents?.ToString()??"未确认"}；清理尝试 {page.Summary?.RunCleanupCompleted.ToString()??"未知"}；清理成功 {Uncertain(page.Summary?.CleanupSucceeded)}。";
                 if(_locating is not null)
@@ -115,6 +132,7 @@ public sealed partial class TraceViewerPage : Page
             }
             if(result.Incidents is {} incidents)
             {
+                ClearDetail();
                 _setting=true;Incidents.ItemsSource=incidents.Entries.Select(x=>new ListViewItem{Content=new IncidentItem(x).Label,Tag=x}).ToArray();Incidents.SelectedIndex=-1;_setting=false;
                 _nextIncidents=incidents.NextOffset;MoreIncidents.IsEnabled=_nextIncidents is not null;
                 _incident=null;Locate.IsEnabled=false;
@@ -130,6 +148,8 @@ public sealed partial class TraceViewerPage : Page
         }
         catch(Exception error){TraceStatus.Text="显示失败 · "+error.GetType().Name;}
     }
+    private void ClearDetail()
+    {_incident=null;Detail.Text="";Locate.IsEnabled=false;}
     private void Show(string text)=>Detail.Text=text.Length<=65536?text:text[..65536]+"\n[显示已截断；原文件未修改]";
     private static ListViewItem TraceItem(TraceChoice choice)=>new(){Content=choice.Label,Tag=choice};
     private static string Uncertain(bool? value)=>TracePresentation.Boolean(value);

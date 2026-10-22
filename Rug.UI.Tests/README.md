@@ -8,6 +8,17 @@ tags: [ui, tests]
 
 # Rug.UI.Tests
 
+08B-02 detail-selection regression is part of the default suite in both Debug and
+Release x64. It links the production `TraceViewerPage.xaml.cs` and supplies only
+test-only generated fields, control selection events and a queued dispatcher.
+The actual page handlers and real `TraceReviewService` execute with a blocked
+incident reader: select an event, release the old read, and verify the event detail
+is unchanged. A second barrier holds an already-queued UI delivery. Direct stale
+delivery, clearing either selection, event paging, catalog replacement and incident
+list refresh are covered. No fixed sleeps or copied selection logic is used.
+These are deterministic code-behind tests, not native WinUI rendering/WGC or human
+acceptance; WinUI itself is compiled separately through `Rug.UI.csproj`.
+
 07B-02 uses script harness `--runtime-switch-ui`: fixed embedded v1/v2 sample,
 explicit switch dialog, actual fresh WGC before/after Stop, new-generation AFTER-only,
 inherited Pause and visible red-scene rejection. `CheckpointRestoreUiSmoke.ps1`

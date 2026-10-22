@@ -29,6 +29,9 @@ current/control/history event pages and versioned incidents with boundary links.
 The Core singleton broker bounds background IO and latest-only delivery; window
 close never waits on disk. No live frames, task/grant restoration or P/Invoke are
 introduced. See [review and incident semantics](../Rug.UI.Core/TraceReview.md).
+Event selection invalidates pending incident reads and owns the shared detail pane;
+clearing a selection or replacing a page discards stale detail/navigation state.
+The UI test suite executes the actual page handlers with controlled read/dispatch barriers.
 
 > **Status:** WinUI 3 template scaffold (activation, services, VMs, views) plus the
 > **Dev Tools sandbox** (Task 1.6): `Views/DevToolsPage.xaml(.cs)` +

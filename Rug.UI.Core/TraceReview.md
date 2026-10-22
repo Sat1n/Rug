@@ -28,6 +28,10 @@ The [broker](Services/TraceReviewService.cs#class:TraceReviewService) has at mos
 four logical views, **one actual background read and one replaceable latest pending
 read host-wide**. Per view, at most one dispatch callback and one latest completed
 result are retained. A revision rejects results from old selections/refreshes.
+Event selection also invalidates outstanding incident queries; an incident result
+must still belong to the selected incident and cannot replace a selected event.
+Event/incident selection is mutually exclusive. Page replacement and selection
+clearing discard the previous detail and its incident-navigation capability.
 Closing/unloading unsubscribes immediately; it does not wait for or claim to cancel
 physical file IO. One hung read can delay all newer queries, but cannot create
 additional reader workers or block Stop/host closing. Queries never call flush.
