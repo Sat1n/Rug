@@ -8,6 +8,12 @@ tags: [recovery, lifecycle, cancellation]
 
 # Explicit anomaly recovery — 3.5-06B-01
 
+08C-02 composes this unchanged protocol in the [persistent visual recovery sample](../samples/controlled-visual/RECOVERY.md):
+real observed BEFORE, planned handoff, explicit fresh capture verification, retained
+on_init locals, AFTER-only input and new visual confirmation. Actual PNG/v1 JSON
+identity/link preservation and late validation/Stop barriers are checked separately
+from WinUI interaction, human acceptance and known CLR shutdown failure.
+
 The composition root injects `IRecoveryCoordinator`, optional `IRecoveryExecutor`
 and installation/scenario-bound `IRecoveryValidatorRegistry`. No executor or
 validator implies human waiting, never production success. Executors receive

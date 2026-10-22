@@ -26,6 +26,16 @@ if (args.Contains("--execution-trace-tests")) { await CheckpointTests.RunExecuti
 if (args.Contains("--trace-review-tests")) { await CheckpointTests.RunTraceReviewAsync(); return; }
 if (args.Contains("--trace-review-ui")) { await TraceReviewUi.RunAsync(); return; }
 if (args.Contains("--controlled-visual-sample")) { await ControlledVisualSample.RunAsync(args.Length>1?args[1]:Path.Combine(Environment.CurrentDirectory,"artifacts","controlled-visual")); return; }
+if (args.Contains("--controlled-recovery-sample")) { await ControlledRecoverySample.RunAsync(args.Length>1?args[1]:Path.Combine(Environment.CurrentDirectory,"artifacts","controlled-recovery")); return; }
+if (args.Contains("--controlled-recovery-ui") || args.Contains("--controlled-recovery-manual"))
+{
+    string repo = ControlledRecoverySample.Repo(); ControlledRecoverySample.LoadNative(repo);
+    string root = Path.Combine(repo,"artifacts","controlled-recovery-ui-"+Guid.NewGuid().ToString("N"));
+    var result = await ControlledRecoveryUi.RunAsync(repo, root, args.Contains("--controlled-recovery-manual"));
+    Console.WriteLine(JsonSerializer.Serialize(result)); Console.WriteLine("ARTIFACTS "+root);
+    if(!result.InteractionsPassed || result.ExitCode!=0) Environment.ExitCode=1;
+    return;
+}
 if (args.Contains("--execution-trace-read")) { CheckpointTests.TraceReadChild(args); return; }
 if (args.Contains("--execution-trace-export"))
 {

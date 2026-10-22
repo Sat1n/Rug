@@ -65,6 +65,11 @@ real WGC/template matching, one observed PostMessage click, new-frame business
 confirmation and read-only trace review. Exact-window capture is explicitly opt-in
 in its isolated host; ordinary capture/input policies are unchanged.
 
+08C-02 adds the [controlled recovery sample](../samples/controlled-visual/RECOVERY.md):
+verified BEFORE, planned handoff, fresh WGC verification and original-coroutine
+AFTER-only continuation, with incident/trace evidence and deterministic Stop barriers.
+It composes existing recovery contracts without adding a recovery or input policy.
+
 ## Task lifecycle and watchdog (Task 2.1.3)
 
 * `TaskScheduler.StartTaskAsync(pluginId, hwnd)` gets a scanned plugin, creates

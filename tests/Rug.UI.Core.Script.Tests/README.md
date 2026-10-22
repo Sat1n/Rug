@@ -8,6 +8,15 @@ tags: [lua, tests, input]
 
 # Lua coroutine bridge tests
 
+08C-02 `--controlled-recovery-sample [outputRoot]` runs the persistent visual recovery
+sample through real WGC/OpenCV/PostMessage, actual archive/trace services and eight
+barrier-controlled scenarios. It also starts real WinUI for consent, red refusal,
+green verification and incident-to-trace navigation. `--controlled-recovery-ui`
+isolates that UI case; `--controlled-recovery-manual` leaves interaction to the user.
+See [commands/contracts](../../samples/controlled-visual/RECOVERY.md). Both build
+configurations report functionality, resource cleanup and CLR shutdown separately;
+nonzero UI exit keeps the aggregate command failing. Human takeover is NOT RUN.
+
 08A-01 adds `--observation-tests` (also in the full suite): host-only identity,
 frame/reference/cache provenance, held A while B publishes, padded stride/ROI,
 global byte/operation/frame/session limits, clock jumps, cancellation/Stop/late

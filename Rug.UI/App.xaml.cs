@@ -91,6 +91,9 @@ public partial class App : Application
                 // Trusted sample only; arbitrary plugins have no default success validator.
                 registry.Register(new PluginInstallation("recovery_probe", Path.Combine(PluginsRoot, "recovery_probe")),
                     "controlled-ready", new FreshGreenFrameValidator());
+                // Installation/scenario-bound controlled sample; fresh read-only WGC, no input tools.
+                registry.Register(new PluginInstallation("controlled_visual_recovery", Path.Combine(PluginsRoot, "controlled_visual_recovery")),
+                    "controlled-visual-ready", new FreshGreenFrameValidator());
                 return registry;
             });
             services.AddSingleton<IRecoveryValidatorRegistry>(p => p.GetRequiredService<RecoveryValidatorRegistry>());
@@ -133,7 +136,7 @@ public partial class App : Application
             services.AddSingleton<TraceReviewService>();
             services.AddSingleton<ITaskScheduler>(provider => new Rug.UI.Core.Services.TaskScheduler(
                 provider.GetRequiredService<IPluginManager>(), PluginsRoot,
-                () => new CaptureService(),
+                () => new CaptureService(exactBoundWindow: Environment.GetEnvironmentVariable("RUG_EXACT_BOUND_CAPTURE") == "1"),
                 () => new InputService(InputMode.Win32Software, 0),
                 (capture, input) => new LuaRuntime(capture,
                     provider.GetRequiredService<IOcrService>(), input,

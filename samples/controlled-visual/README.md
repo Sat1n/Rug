@@ -8,6 +8,8 @@ tags: [sample, wgc, template, observed-click, trace]
 
 # 受控视觉业务闭环 — 3.5-08C-01
 
+08C-02 的保留协程人工恢复示例及独立运行说明见 [RECOVERY.md](RECOVERY.md)。
+
 这是可以阅读和复用的插件示例，不是临时拼接 Lua。`plugin/` 中保留 manifest、
 完整 Lua、最小 UI 和三张确定生成的 32×32 BMP 模板。`generate_assets.py` 可重新
 生成相同模板；它们不是运行截图。示例不连接游戏、模型、MCP 或恢复服务。

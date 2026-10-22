@@ -8,6 +8,12 @@ tags: [ui, tests]
 
 # Rug.UI.Tests
 
+08C-02 `ControlledRecoveryUi.ps1` uses an owned host/target and production recovery
+controls: actual consent, planned wait, return-only, red rejection, green explicit
+verification, AFTER/new-frame confirmation, Stop and real incident-to-trace jump.
+The script-host launcher preserves the actual UI exit code separately from UIA
+assertions. See [sample and boundaries](../samples/controlled-visual/RECOVERY.md).
+
 08C-01 `ControlledVisualSampleUi.ps1` is invoked only by the isolated script-host
 `--controlled-visual-sample` entry. It scrolls the virtualized trace catalog to the
 specified stable-run ID and checks offline Valid without starting any task. UI

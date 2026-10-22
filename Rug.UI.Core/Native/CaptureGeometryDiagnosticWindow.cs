@@ -15,6 +15,9 @@ internal sealed class CaptureGeometryDiagnosticWindow : IDisposable
     private readonly string? _sampleAssets;
     private readonly int _markerX,_markerY;
     private readonly bool _completeOnClick;
+    private readonly bool _recovery;
+    private int _stage;
+    private bool _repaired;
     private nint _buttonBitmap,_completeBitmap,_blockedBitmap;
     private bool _completed,_changed,_correctDown;
     private int _disposed, _tick, _downs, _ups;
@@ -23,12 +26,14 @@ internal sealed class CaptureGeometryDiagnosticWindow : IDisposable
     public (int X,int Y) LastDown => (Volatile.Read(ref _downX),Volatile.Read(ref _downY));
     public (int X,int Y) LastUp => (Volatile.Read(ref _upX),Volatile.Read(ref _upY));
     public void ChangeMarker() => SendMessageW(_hwnd,0x8004,0,0);
+    // Controlled scene repair only. No input is sent and no recovery approval is granted.
+    public void Repair() => SendMessageW(_hwnd,0x8005,0,0);
     private nint _marker;
     private Exception? _failure;
     public Task<nint> Ready => _ready.Task;
-    public CaptureGeometryDiagnosticWindow(string? sampleAssets=null,int markerX=80,int markerY=70,bool completeOnClick=true)
+    public CaptureGeometryDiagnosticWindow(string? sampleAssets=null,int markerX=80,int markerY=70,bool completeOnClick=true,bool recovery=false)
     {
-        _sampleAssets=sampleAssets;_markerX=markerX;_markerY=markerY;_completeOnClick=completeOnClick;
+        _sampleAssets=sampleAssets;_markerX=markerX;_markerY=markerY;_completeOnClick=completeOnClick;_recovery=recovery;
         _callback = Message;
         _thread = new Thread(Run) { IsBackground = true, Name = "Rug controlled geometry target" };
         _thread.Start();
@@ -107,7 +112,13 @@ internal sealed class CaptureGeometryDiagnosticWindow : IDisposable
         if (id == 0x201) { _downX=unchecked((short)(long)l);_downY=unchecked((short)((long)l>>16));Interlocked.Increment(ref _downs);_correctDown=Inside(_downX,_downY); return 0; }
         if (id == 0x202) { _upX=unchecked((short)(long)l);_upY=unchecked((short)((long)l>>16));Interlocked.Increment(ref _ups);
             bool correctPair=_correctDown&&Inside(_upX,_upY);_correctDown=false;
-            if(_sampleAssets is not null&&_completeOnClick&&correctPair&&!_changed){_completed=true;SetWindowTextW(hwnd,"Rug controlled visual target: COMPLETED");InvalidateRect(hwnd,0,true);UpdateWindow(hwnd);}return 0; }
+            if(_sampleAssets is not null&&_completeOnClick&&correctPair&&!_changed)
+            {
+                if(!_recovery||_stage==0||(_stage==1&&_repaired))
+                { _stage++;_completed=true;SetWindowTextW(hwnd,_recovery&&_stage==1?"Rug recovery target: BEFORE confirmed; Space repairs scene":"Rug controlled visual target: COMPLETED");InvalidateRect(hwnd,0,true);UpdateWindow(hwnd); }
+            }return 0; }
+        if(id==0x8005||(id==0x100&&w==32))
+        { if(_recovery&&_stage==1){_repaired=true;_completed=false;SetWindowTextW(hwnd,"Rug recovery target: REPAIRED (green); verify explicitly in host");InvalidateRect(hwnd,0,true);UpdateWindow(hwnd);}return 0; }
         if (id == 0x8004) { _changed=true;var old=_marker;_marker=CreateSolidBrush(0x00FF0000);DeleteObject(old);InvalidateRect(hwnd,0,true);UpdateWindow(hwnd);return 0; }
         if (id == 0x8002) { SetWindowPos(hwnd, 0, 0, 0, (int)w, (int)l, 0x16); return 0; }
         if (id == 0x8003) { SetWindowPos(hwnd, 0, unchecked((int)w), (int)l, 0, 0, 0x15); return 0; }
@@ -119,7 +130,7 @@ internal sealed class CaptureGeometryDiagnosticWindow : IDisposable
         }
         if (id == 0x113) { _tick++; InvalidateRect(hwnd, 0, true); UpdateWindow(hwnd); return 0; }
         if (id == 0x14)
-        { GetClientRect(hwnd, out var rect); FillRect((nint)w, ref rect, _green);
+        { GetClientRect(hwnd, out var rect); FillRect((nint)w, ref rect, _recovery&&!_repaired?_red:_green);
             var marker = new NativeRect { Left = 80, Top = 70, Right = 100, Bottom = 90 };
             FillRect((nint)w, ref marker, _marker);
             if(_sampleAssets is not null)

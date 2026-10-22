@@ -185,8 +185,11 @@ New real-human 06A checks remain NOT RUN by the agent.
 
 Task 3.5-06B-01 injects recovery coordinator and exact installation/scenario
 validator registry. Production has no executor; arbitrary plugins have no default
-validator. Only the trusted `recovery_probe` controlled green-window validator is
-registered at the composition root. Footer shows recovery/waiting/verification,
+validator. Trusted `recovery_probe` and `controlled_visual_recovery` installation/scenario
+pairs register fresh green-panel validation at the composition root.
+`RUG_EXACT_BOUND_CAPTURE=1` opts an isolated host into exact-window capture; unset
+keeps the existing default. See the [controlled sample](../samples/controlled-visual/RECOVERY.md).
+Footer shows recovery/waiting/verification,
 reason, Verify recovery and Stop; Pause/Resume reject recovery. Verify sends a
 Gateway control with the selected full identity/recoveryId; it never calls Runtime
 Resume. Selection/queued updates re-query current revision. The DevTools crosshair
