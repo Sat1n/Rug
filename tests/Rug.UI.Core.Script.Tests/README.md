@@ -664,3 +664,78 @@ incident detail. No viewer-owned live frame/resource leases or unbounded history
 No dedicated human/SendInput rerun is required or claimed. Native implementation
 was unchanged and matching existing DLLs were reused. Independent Hook limitations
 and earlier capture/input acceptance boundaries remain open/unchanged.
+
+## 08C-01 controlled visual business sample
+
+Persistent [sample plugin and instructions](../../samples/controlled-visual/README.md),
+not generated Lua, with deterministic BMP assets and a dedicated native-message
+window. The test host copies the installation, explicitly grants this test install,
+uses exact-bound-window CaptureService, production OpenCV/InputService/Lua/Gateway/
+InputArbiter and a normal recorder. Old capture factories and input policy stay unchanged.
+
+```powershell
+.\tests\run_controlled_visual_sample.ps1 -Configuration Debug
+.\tests\run_controlled_visual_sample.ps1 -Configuration Release
+```
+
+Equivalent script-harness mode after matching WinUI/test builds:
+`--controlled-visual-sample artifacts/controlled-visual-Debug` (replace Debug with
+Release). Every invocation owns a new sample-GUID root, windows, isolated plugin
+copies and data. Copies are removed after all scenes; reports/production trace
+files remain for review. No screenshot archive or pixel payload is added.
+
+The real matcher is decorated only with a TaskCompletionSource barrier AFTER real
+OpenCV returns and BEFORE Lua receives the hit. Change/resize/invalidation/Stop/
+revocation are injected at that known point. Expiry waits for the actual native
+frame age crossing the unchanged 1000ms policy, using trusted current QPC rather
+than guessing a sleep. The newly returned recognition cannot revive an invalidated
+source. Stop and revocation close business while the service/frame lease is held;
+Stop cannot finish before the barrier is released. No extra input is submitted.
+
+The sample computes button center from actual matching coordinates, submits one
+ClickObserved, and uses fresh capture/template confirmation with a bounded read-only
+polling deadline. The fixture's receiver counts are NOT visible to Lua. Completed
+API, actual down/up and coordinates, fresh confirmation frame, and trace integrity
+are asserted independently. A target deliberately withholding its completion image
+receives 1/1 but the plugin reports unconfirmed_timeout; no second click is allowed.
+
+Verification 2026-10-22, matching freshly built managed artifacts:
+
+| Evidence | Debug x64 | Release x64 |
+| --- | --- | --- |
+| WinUI + script-host builds | 0 warnings / 0 errors | 0 warnings / 0 errors |
+| Stable: real WGC -> OpenCV -> observed PostMessage -> receiver -> new-frame complete pattern | completed; 1/1 at (161,141); confirmed | same |
+| Changed / resize / stale / invalidated | SceneChanged / GeometryChanged / Stale / InvalidReference; all 0/0, not_confirmed | same |
+| Stop / revoke before click | NOT RUN; 0/0; no later business input | same |
+| No completion transition | completed; 1/1; unconfirmed_timeout | same |
+| Per-scene persisted traces / actual work / cleanup / frame pool | Valid; outstanding=0; cleanup succeeded; usage=0 | same |
+| Actual WinUI viewer selects the stable trace from the same persisted root | PASS | PASS |
+| Complete scripts (Gateway/auth, input/lifecycle, observation/click, recovery/checkpoint, runtime updates, tracing) | PASS | PASS |
+| UI lifecycle + detail race + Schema/state/hot reload | PASS | PASS |
+| WinUI process clean exit / aggregate sample command | FAIL: CLR 0xC0000602 / nonzero | same |
+
+Stable identities and all per-scene IDs are preserved in the actual
+[Debug report](../../samples/controlled-visual/evidence/debug-report.json) and
+[Release report](../../samples/controlled-visual/evidence/release-report.json).
+Input source and completion frame IDs differ; invalid reference resolution stays
+unknown/null instead of inventing a resolved click source. On Stop/revoke, the
+leased-input frame is known but no recognition result was published to Lua, and
+ClickObserved executionId remains null. Counts reset with each new target.
+
+`Observation / template-match:result / Matched|NoMatch` is a bounded structured
+fact from VisualEngineBridge with its actual source IDs. It uses the existing trace
+schema/event kind; no full template path, pixels, OCR/context or script state is
+copied into events. It is not by itself a declaration of business success. The
+fixed sample and independent host assertions associate its completion pattern with
+the new frame. Generic UI/trace semantics remain those of 08B.
+
+The helper scrolls virtualized catalog items to the stable trace identity. It
+caches the owned main window before opening the viewer, then closes only that
+host. CLR assertion stderr and exit -1073740286 remain in report.viewer; the
+aggregate command deliberately fails even when functionalPassed and viewer
+InteractionsPassed are true. No test bypass or runtime exit workaround is used.
+This known shutdown defect remains a stage-close item.
+
+No new C++ changes were needed; existing matching Native DLLs were reused.
+SendInput, human takeover re-acceptance, external applications/games and forced
+real-WGC frame loss were NOT RUN. Existing Hook limitations remain open.

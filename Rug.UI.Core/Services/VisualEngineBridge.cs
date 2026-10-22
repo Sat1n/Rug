@@ -104,9 +104,17 @@ public sealed class VisualEngineBridge : IDisposable
         CheckCancellation(cancellationToken); _validateRun?.Invoke(); ThrowIfDisposed();
         TemplateMatchResult? best = hits.Where(hit => double.IsFinite(hit.Score) && hit.Score >= threshold)
             .OrderByDescending(hit => hit.Score).FirstOrDefault();
-        if (best is null) return null;
+        if (best is null)
+        {
+            ExecutionTraceScope.Current.Value?.Emit(TraceEventKind.Observation,status:"NoMatch",reason:"template-match:result",
+                observation:new(lease.Observation.ObservationId,lease.Observation.FrameId));
+            return null;
+        }
+        var recognized=Recognized(lease.Observation,target,region,"template-match",started);
+        ExecutionTraceScope.Current.Value?.Emit(TraceEventKind.Observation,status:"Matched",reason:"template-match:result",
+            observation:new(recognized.ObservationId,recognized.FrameId));
         return new ImageFindResult(best.X + (region?.X ?? 0), best.Y + (region?.Y ?? 0), best.Score,
-            Recognized(lease.Observation, target, region, "template-match", started));
+            recognized);
     }
 
     /// <summary>@shape blocks: ROI-local native boxes translated once, with the leased source envelope.

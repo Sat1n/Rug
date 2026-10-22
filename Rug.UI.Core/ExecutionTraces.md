@@ -64,6 +64,13 @@ comparison passed. `completed`/Success remains input API completion, not busines
 success. InputSideEffect records the existing activation/move/down boundary;
 no human keys, mouse movements, OCR text, Lua context or configuration is collected.
 
+08C-01 adds bounded template-result facts using the existing Observation kind and
+schema: reason `template-match:result`, status Matched/NoMatch and the actual held
+source IDs. Matched uses the returned recognition observation; NoMatch uses the
+input capture observation. No template path/pixels or Lua state is serialized.
+These are recognition results, not generic business-success declarations; the
+[controlled sample](../samples/controlled-visual/README.md) records its separate confirmation.
+
 Lifecycle events carry revision/pause state. The first observed closed-run cause
 is retained: HostStop, ManualTakeover, AuthorizationRevoked, HostShutdown,
 ExecutionFault or Unknown. A later cleanup error is separate and must not rewrite

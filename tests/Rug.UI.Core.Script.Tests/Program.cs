@@ -25,6 +25,7 @@ if (args.Contains("--observed-click-tests")) { await CheckpointTests.RunObserved
 if (args.Contains("--execution-trace-tests")) { await CheckpointTests.RunExecutionTracesAsync(); return; }
 if (args.Contains("--trace-review-tests")) { await CheckpointTests.RunTraceReviewAsync(); return; }
 if (args.Contains("--trace-review-ui")) { await TraceReviewUi.RunAsync(); return; }
+if (args.Contains("--controlled-visual-sample")) { await ControlledVisualSample.RunAsync(args.Length>1?args[1]:Path.Combine(Environment.CurrentDirectory,"artifacts","controlled-visual")); return; }
 if (args.Contains("--execution-trace-read")) { CheckpointTests.TraceReadChild(args); return; }
 if (args.Contains("--execution-trace-export"))
 {

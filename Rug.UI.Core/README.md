@@ -60,6 +60,11 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 | `Abstractions/IAnomalyLogger.cs` · `Models/AnomalyLogModel.cs` · `Services/AnomalyLogger.cs` | Per-instance PNG/JSON archive, v1 incident identity and bounded pre-capture trace link |
 | `Services/FileService.cs` · `Helpers/Json.cs` | File IO / JSON helpers |
 
+08C-01 provides a [persistent controlled visual sample](../samples/controlled-visual/README.md):
+real WGC/template matching, one observed PostMessage click, new-frame business
+confirmation and read-only trace review. Exact-window capture is explicitly opt-in
+in its isolated host; ordinary capture/input policies are unchanged.
+
 ## Task lifecycle and watchdog (Task 2.1.3)
 
 * `TaskScheduler.StartTaskAsync(pluginId, hwnd)` gets a scanned plugin, creates

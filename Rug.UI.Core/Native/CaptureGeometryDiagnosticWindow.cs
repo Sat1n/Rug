@@ -4,13 +4,19 @@ using System.Runtime.InteropServices;
 
 namespace Rug.UI.Core.Native;
 
-/// <summary>Opt-in controlled capture geometry marker target. No hooks, registrations or synthetic human input.</summary>
+/// <summary>Opt-in geometry marker target; sample-assets mode is the independent visual business receiver.
+/// No hooks, registrations or synthetic human input. Each instance owns its counters and GDI resources.</summary>
 internal sealed class CaptureGeometryDiagnosticWindow : IDisposable
 {
     private readonly Thread _thread;
     private readonly WindowProc _callback;
     private readonly TaskCompletionSource<nint> _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private nint _hwnd, _red, _green;
+    private readonly string? _sampleAssets;
+    private readonly int _markerX,_markerY;
+    private readonly bool _completeOnClick;
+    private nint _buttonBitmap,_completeBitmap,_blockedBitmap;
+    private bool _completed,_changed,_correctDown;
     private int _disposed, _tick, _downs, _ups;
     private int _downX,_downY,_upX,_upY;
     public (int Down,int Up) ClickCounts => (Volatile.Read(ref _downs),Volatile.Read(ref _ups));
@@ -20,8 +26,9 @@ internal sealed class CaptureGeometryDiagnosticWindow : IDisposable
     private nint _marker;
     private Exception? _failure;
     public Task<nint> Ready => _ready.Task;
-    public CaptureGeometryDiagnosticWindow()
+    public CaptureGeometryDiagnosticWindow(string? sampleAssets=null,int markerX=80,int markerY=70,bool completeOnClick=true)
     {
+        _sampleAssets=sampleAssets;_markerX=markerX;_markerY=markerY;_completeOnClick=completeOnClick;
         _callback = Message;
         _thread = new Thread(Run) { IsBackground = true, Name = "Rug controlled geometry target" };
         _thread.Start();
@@ -61,10 +68,17 @@ internal sealed class CaptureGeometryDiagnosticWindow : IDisposable
             _marker = CreateSolidBrush(0x000000FF);
             _red = CreateSolidBrush(0x002020C0); _green = CreateSolidBrush(0x0020B020);
             if (_red == 0 || _green == 0 || _marker == 0) throw new Win32Exception(Marshal.GetLastPInvokeError());
+            if(_sampleAssets is not null)
+            {
+                _buttonBitmap=LoadImageW(0,Path.Combine(_sampleAssets,"button.bmp"),0,0,0,0x10);
+                _completeBitmap=LoadImageW(0,Path.Combine(_sampleAssets,"complete.bmp"),0,0,0,0x10);
+                _blockedBitmap=LoadImageW(0,Path.Combine(_sampleAssets,"blocked.bmp"),0,0,0,0x10);
+                if(_buttonBitmap==0||_completeBitmap==0||_blockedBitmap==0)throw new Win32Exception(Marshal.GetLastPInvokeError());
+            }
             var wc = new WindowClass { Proc = Marshal.GetFunctionPointerForDelegate(_callback), Instance = instance, Name = name };
             if (RegisterClassW(ref wc) == 0) throw new Win32Exception(Marshal.GetLastPInvokeError());
             registered = true;
-            _hwnd = CreateWindowExW(0, name, "Rug capture geometry: red marker at client (80,70)",
+            _hwnd = CreateWindowExW(0, name, _sampleAssets is null?"Rug capture geometry: red marker at client (80,70)":"Rug controlled visual target: locate the patterned button",
                 0x00cf0000, 100, 100, 640, 420, 0, 0, instance, 0);
             if (_hwnd == 0) throw new Win32Exception(Marshal.GetLastPInvokeError());
             ShowWindow(_hwnd, 5); UpdateWindow(_hwnd);
@@ -83,15 +97,18 @@ internal sealed class CaptureGeometryDiagnosticWindow : IDisposable
             if (_red != 0) DeleteObject(_red);
             if (_green != 0) DeleteObject(_green);
             if (_marker != 0) DeleteObject(_marker);
+            foreach(nint bitmap in new[]{_buttonBitmap,_completeBitmap,_blockedBitmap})if(bitmap!=0)DeleteObject(bitmap);
             if (dpiContext != 0) SetThreadDpiAwarenessContext(dpiContext);
             GC.KeepAlive(_callback);
         }
     }
     private nint Message(nint hwnd, uint id, nuint w, nint l)
     {
-        if (id == 0x201) { _downX=unchecked((short)(long)l);_downY=unchecked((short)((long)l>>16));Interlocked.Increment(ref _downs); return 0; }
-        if (id == 0x202) { _upX=unchecked((short)(long)l);_upY=unchecked((short)((long)l>>16));Interlocked.Increment(ref _ups); return 0; }
-        if (id == 0x8004) { var old=_marker;_marker=CreateSolidBrush(0x00FF0000);DeleteObject(old);InvalidateRect(hwnd,0,true);UpdateWindow(hwnd);return 0; }
+        if (id == 0x201) { _downX=unchecked((short)(long)l);_downY=unchecked((short)((long)l>>16));Interlocked.Increment(ref _downs);_correctDown=Inside(_downX,_downY); return 0; }
+        if (id == 0x202) { _upX=unchecked((short)(long)l);_upY=unchecked((short)((long)l>>16));Interlocked.Increment(ref _ups);
+            bool correctPair=_correctDown&&Inside(_upX,_upY);_correctDown=false;
+            if(_sampleAssets is not null&&_completeOnClick&&correctPair&&!_changed){_completed=true;SetWindowTextW(hwnd,"Rug controlled visual target: COMPLETED");InvalidateRect(hwnd,0,true);UpdateWindow(hwnd);}return 0; }
+        if (id == 0x8004) { _changed=true;var old=_marker;_marker=CreateSolidBrush(0x00FF0000);DeleteObject(old);InvalidateRect(hwnd,0,true);UpdateWindow(hwnd);return 0; }
         if (id == 0x8002) { SetWindowPos(hwnd, 0, 0, 0, (int)w, (int)l, 0x16); return 0; }
         if (id == 0x8003) { SetWindowPos(hwnd, 0, unchecked((int)w), (int)l, 0, 0, 0x15); return 0; }
         if (id == 0x2e0)
@@ -105,10 +122,19 @@ internal sealed class CaptureGeometryDiagnosticWindow : IDisposable
         { GetClientRect(hwnd, out var rect); FillRect((nint)w, ref rect, _green);
             var marker = new NativeRect { Left = 80, Top = 70, Right = 100, Bottom = 90 };
             FillRect((nint)w, ref marker, _marker);
+            if(_sampleAssets is not null)
+            {
+                nint dc=CreateCompatibleDC((nint)w);
+                if(dc!=0){nint old=SelectObject(dc,_changed?_blockedBitmap:_completed?_completeBitmap:_buttonBitmap);
+                    BitBlt((nint)w,_markerX,_markerY,32,32,dc,0,0,0x00cc0020);SelectObject(dc,old);DeleteDC(dc);}
+                string label=_changed?"TARGET CHANGED":_completed?"COMPLETED":"READY";
+                TextOutW((nint)w,300,90,label,label.Length);
+            }
             var pulse = new NativeRect { Right = 12, Bottom = 12 }; FillRect((nint)w, ref pulse, (_tick & 1) == 0 ? _red : _green); return 1; }
         if (id == 2) { _hwnd = 0; PostQuitMessage(0); }
         return DefWindowProcW(hwnd, id, w, l);
     }
+    private bool Inside(int x,int y)=>x>=_markerX&&x<_markerX+32&&y>=_markerY&&y<_markerY+32;
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
@@ -146,4 +172,11 @@ internal sealed class CaptureGeometryDiagnosticWindow : IDisposable
     [DllImport("user32.dll")] private static extern bool KillTimer(nint hwnd, nuint id);
     [DllImport("gdi32.dll", SetLastError = true)] private static extern nint CreateSolidBrush(uint color);
     [DllImport("gdi32.dll")] private static extern bool DeleteObject(nint handle);
+    [DllImport("user32.dll",CharSet=CharSet.Unicode,SetLastError=true)] private static extern nint LoadImageW(nint instance,string path,uint type,int width,int height,uint flags);
+    [DllImport("gdi32.dll")] private static extern nint CreateCompatibleDC(nint dc);
+    [DllImport("gdi32.dll")] private static extern nint SelectObject(nint dc,nint value);
+    [DllImport("gdi32.dll")] private static extern bool BitBlt(nint dc,int x,int y,int width,int height,nint source,int sx,int sy,uint mode);
+    [DllImport("gdi32.dll")] private static extern bool DeleteDC(nint dc);
+    [DllImport("gdi32.dll",CharSet=CharSet.Unicode)] private static extern bool TextOutW(nint dc,int x,int y,string text,int length);
+    [DllImport("user32.dll",CharSet=CharSet.Unicode)] private static extern bool SetWindowTextW(nint hwnd,string text);
 }

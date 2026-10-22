@@ -79,6 +79,12 @@ ROI consistency checks only the declared local pixels, not full business semanti
 Windows/external actors can still race after the last check. No complete action
 atomicity, automatic recovery, VLM/MCP or generic model preprocessing is claimed.
 
+The [08C-01 controlled plugin](../samples/controlled-visual/README.md) locates its
+click through actual template matching and separately confirms a completion
+template from a new capture. It retains these policies, uses PostMessage only and
+keeps API completion, target reception, business confirmation and trace integrity
+distinct; ordinary rejections do not enter anomaly recovery.
+
 ## API and error details
 
 Both `input` and `vision.capture` must be declared, explicitly granted and present

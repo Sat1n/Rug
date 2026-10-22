@@ -8,6 +8,12 @@ tags: [ui, tests]
 
 # Rug.UI.Tests
 
+08C-01 `ControlledVisualSampleUi.ps1` is invoked only by the isolated script-host
+`--controlled-visual-sample` entry. It scrolls the virtualized trace catalog to the
+specified stable-run ID and checks offline Valid without starting any task. UI
+interaction and process shutdown results remain separate; known CLR exit failure
+keeps the aggregate command nonzero. See the [sample](../samples/controlled-visual/README.md).
+
 08B-02 detail-selection regression is part of the default suite in both Debug and
 Release x64. It links the production `TraceViewerPage.xaml.cs` and supplies only
 test-only generated fields, control selection events and a queued dispatcher.
