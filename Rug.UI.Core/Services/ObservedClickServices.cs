@@ -105,9 +105,30 @@ internal sealed class ObservedClickTransaction : IDisposable
         var t=frame.CaptureFacts?.NativeTime;var now=_environment.ReadQpc();
         if(t is null || now.Domain!="Windows boot QPC" || t.ClockDomain!=now.Domain || now.Frequency<=0 ||
             t.QpcFrequency!=now.Frequency || t.AgeAt(now.Ticks,now.Frequency,now.Domain) is not { } age)
-            throw new ObservedClickException(ObservedClickReason.TimeUnavailable);
-        if(age.TotalMilliseconds>(_request.MaxAgeMs??_policy.MaxAgeMs)) throw new ObservedClickException(ObservedClickReason.Stale);
+            throw TimeRejected(frame,t,now,ObservedClickReason.TimeUnavailable);
+        if(age.TotalMilliseconds>(_request.MaxAgeMs??_policy.MaxAgeMs)) throw TimeRejected(frame,t,now,ObservedClickReason.Stale);
         return t;
+    }
+    private ObservedClickException TimeRejected(CapturedFrame frame, NativeFrameTime? time, QpcReading now, ObservedClickReason reason)
+    {
+        var raw=frame.NativeCaptureFacts;
+        long? source=raw?.SystemRelative100ns??time?.SystemRelative100ns;
+        long? frequency=raw?.QpcFrequency??time?.QpcFrequency;
+        string? domain=raw is not null?"Windows boot QPC":time?.ClockDomain;
+        long? SignedAge(long? rendered,long? hz,string? clock)
+        {
+            if(rendered is not >0 || clock!=now.Domain || hz!=now.Frequency || now.Frequency<=0 || now.Ticks<=0)return null;
+            Int128 age=(Int128)now.Ticks*TimeSpan.TicksPerSecond/now.Frequency-rendered.Value;
+            return age>=long.MinValue&&age<=long.MaxValue?(long)age:null;
+        }
+        var original=_source.Frame.CaptureFacts?.NativeTime;
+        var detail=new TraceFrameTimeRejection(ReferenceEquals(frame,_source.Frame)?"source":"unpublished-verification",source,
+            raw?.QpcSample??time?.QpcSample,frequency,raw?.Flags,domain,now.Ticks,now.Frequency,now.Domain,SignedAge(source,frequency,domain),time is not null,
+            _request.MaxAgeMs??_policy.MaxAgeMs,original?.SystemRelative100ns,original?.QpcFrequency,
+            SignedAge(original?.SystemRelative100ns,original?.QpcFrequency,original?.ClockDomain));
+        ExecutionTraceScope.Current.Value?.Emit(TraceEventKind.Validation,status:"Rejected",error:reason.ToString(),reason:"frame-time-rejected",
+            observation:new(_source.Observation.ObservationId,_source.Observation.FrameId,_policy.Id,Point,TimeRejection:detail));
+        return new(reason);
     }
     private void ValidateFrame(CapturedFrame frame)
     {

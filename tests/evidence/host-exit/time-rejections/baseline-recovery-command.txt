@@ -1,0 +1,20 @@
+RECOVERY success: BEFORE=1/1 AFTER=1/1; preserved=True; terminal=Stopped; incident=87eae00d-d50e-46df-b272-bed660a21721; trace=9c248be2-4ea8-43c1-acf3-320d2860e0d0/2d427288-bf8b-4a02-ac14-31b6ef21025a Valid; resources=drained
+RECOVERY stop-wait: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Stopped; incident=d9d8eeb7-6efb-4416-91d5-440a81ecd408; trace=caa85f41-ac00-4ff6-a22f-eed098f4d425/8a8dd05c-4be7-4fba-a8d2-017f3fb770ed Valid; resources=drained
+RECOVERY revoke-wait: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Stopped; incident=4ac1aa87-9b17-4ccd-8538-b863efc027e1; trace=8350aa88-dbcc-4757-8921-134b3cdfb208/efc57f1d-8b9f-4cd5-aad1-a2f4dae10f48 Valid; resources=drained
+RECOVERY stop-validation: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Stopped; incident=b46e0d3a-6bc5-4211-a8d0-9a0237c790e4; trace=57a22ec5-cf8c-4594-a5ce-16588fda59c0/f908e98b-104b-4f9a-b66f-2cdf820a0d51 Valid; resources=drained
+RECOVERY revoke-validation: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Stopped; incident=d3021d9b-653a-4b4b-bdb0-91460762e767; trace=40782bbc-a3c6-41c5-9930-7f32e961ed57/b6e85a82-f391-4d54-bbd1-ec66e5acf6d6 Valid; resources=drained
+RECOVERY cancel-late: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Stopped; incident=26080ae2-0a4b-4a62-a73d-239bccc5e914; trace=b343e586-60cf-470e-8c1b-2ec67d4b9219/71192dd6-8a14-475a-aa30-04309bb7467c Valid; resources=drained
+RECOVERY stop-late: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Stopped; incident=7c2bf3c7-9285-4976-b012-949af8968c47; trace=2a2342e5-01e2-4f4a-8249-b979a7021327/767dcd4e-4d76-45de-b8c3-47a74032a281 Valid; resources=drained
+RECOVERY lua-error: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Faulted; incident=; trace=86e83251-752e-4737-b8f3-d2e549e15a58/8b0f6c48-1805-4a3d-80c2-2a41f17b59ac Valid; resources=drained
+RECOVERY UI: BEFORE received/visually confirmed, planned handoff
+RECOVERY UI: red rejected, original run remains waiting
+RECOVERY UI PASS: explicit fresh WGC verification, AFTER-only, real incident -> trace. Human acceptance NOT RUN.
+RECOVERY UI interactions=True; target=(2, 2); exit=-1073740286; ; UI exit=-1073740286; CLR: Assert failure(PID 41540 [0x0000a244], Thread: 6356 [0x18d4]): !"Attempt to execute managed code after the .NET runtime thread state has been destroyed."
+    File: D:\a\_work\1\s\src\runtime\src\coreclr\vm\ceemain.cpp:1721 Image:
+F:\Cardinal\Rug\Rug\artifacts\exit-time-baseline\Rug.UI\bin\x64\Release\net10.0-windows10.0.22621.0\win-x64\Rug.UI.exe
+
+RECOVERY REPORT F:\Cardinal\Rug\Rug\artifacts\exit-time-baseline-report\recovery-2e948d082fbc4d5890e2fe55a4933fe8\report.json
+Unhandled exception. System.InvalidOperationException: Independent functional/UI/exit results retained; abnormal CLR shutdown remains a command failure.
+   at ControlledRecoverySample.RunAsync(String output) in F:\Cardinal\Rug\Rug\artifacts\exit-time-baseline\tests\Rug.UI.Core.Script.Tests\ControlledRecoverySample.cs:line 111
+   at Program.<Main>$(String[] args) in F:\Cardinal\Rug\Rug\artifacts\exit-time-baseline\tests\Rug.UI.Core.Script.Tests\Program.cs:line 29
+   at Program.<Main>(String[] args)

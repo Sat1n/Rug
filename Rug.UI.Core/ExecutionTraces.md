@@ -168,3 +168,9 @@ Actual controlled WGC/PostMessage example: [trace sample](../tests/samples/execu
 The [08B-02 follow-up](TraceReview.md) delivers a read-only viewer and incident JSON
 links. Replay, screenshot warehouse and model calls remain outside scope.
 Input behavior and real SendInput/human acceptance are unchanged.
+
+EXIT-01 follow-up adds optional `TraceObservation.TimeRejection`: bounded typed
+QPC/native-time/age facts only at a rejected observed-click check. Old schema-v1
+records have null. Source frame identity and unpublished verification candidates
+remain distinct; diagnostic raw time never grants action eligibility. See
+[time guard diagnostic contract](ObservedClicks.md). No retry or threshold change.

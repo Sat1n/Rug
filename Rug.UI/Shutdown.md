@@ -122,3 +122,14 @@ new successful commands rather than retrospectively marking old commands passed.
 Cancelled classified as ValidationTimedOut remains a separate known issue; the
 independent Hook observation gap is unchanged. No new real SendInput or human
 intervention acceptance is claimed.
+
+## Independent Release review: business timing remains separate
+
+The CLR close repair is independently confirmed. Subsequent Release recovery
+runs reported TimeUnavailable/Stale. The [2026-10-23 directed investigation](../tests/evidence/host-exit/time-rejections/README.md)
+records actual native-time/current-QPC evidence, old/new-code comparison and all
+nonzero commands. A pre-existing future-valued capture-time condition is observed
+on both versions; original spontaneous Stale exact ages were not collected.
+Do not interpret the earlier successful sample runs as universal business
+acceptance or weaken input time protection to make them green. This follow-up
+changes diagnostics only, not capture/input/recovery decisions.

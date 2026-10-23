@@ -142,3 +142,27 @@ query before each actual side effect in a control run, then injects original-tok
 cancellation with linked propagation blocked, or a two-second QPC advance, at that
 query in fresh runs. Both modes cover movement/down; SendInput also covers activation.
 These are deterministic Gateway/Fake-input checks, not real SendInput acceptance.
+
+## EXIT-01 time-rejection diagnostics
+
+The time guard is unchanged: current Windows boot QPC, finite policy age (default
+1000ms), no future/unknown/cross-domain time, and no click retry. A rejected frame
+time check now emits a bounded `Validation / Rejected / frame-time-rejected`
+event. `TraceObservation.TimeRejection` contains native SystemRelative100ns,
+native sample/frequency/flags, current QPC/frequency/domain, signed age in 100ns,
+and the effective MaxAgeMs. It separately retains the action source's native
+time/frequency/signed age, associated with the existing source observation/frame.
+
+FrameRole is `source` or `unpublished-verification`. For the latter, the checked
+raw facts belong to a private verification candidate rejected before publication;
+no successful verification frameId is invented. The enclosing frameId remains
+the action's actual source. Native flags/raw time are diagnostic only, never an
+alternate authority that reactivates a time rejected by CaptureService. Unknown
+or incomparable age remains null; a comparable future value is a negative signed
+diagnostic age, still rejected. No pixels/handles/input content is recorded.
+
+The additive nullable trace field retains schema v1 and old checked-file reads.
+The normal recorder limits, nonblocking emission and fault isolation still apply.
+The controlled recovery report includes at most 16 time rejections per failed
+scene, read from bounded checked trace pages. UI launch errors are preserved in
+the report and keep the command nonzero, instead of losing completed scene evidence.

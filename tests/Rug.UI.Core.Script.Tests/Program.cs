@@ -27,6 +27,7 @@ if (args.Contains("--trace-review-tests")) { await CheckpointTests.RunTraceRevie
 if (args.Contains("--trace-review-ui")) { await TraceReviewUi.RunAsync(); return; }
 if (args.Contains("--controlled-visual-sample")) { await ControlledVisualSample.RunAsync(args.Length>1?args[1]:Path.Combine(Environment.CurrentDirectory,"artifacts","controlled-visual")); return; }
 if (args.Contains("--controlled-recovery-sample")) { await ControlledRecoverySample.RunAsync(args.Length>1?args[1]:Path.Combine(Environment.CurrentDirectory,"artifacts","controlled-recovery")); return; }
+if (args.Contains("--capture-time-probe")) { await CaptureTimeProbe.RunAsync(args[^1]); return; }
 if (args.Contains("--host-exit-ui")) { await HostExitMatrix.RunAsync(); return; }
 if (args.Contains("--controlled-recovery-ui") || args.Contains("--controlled-recovery-manual"))
 {

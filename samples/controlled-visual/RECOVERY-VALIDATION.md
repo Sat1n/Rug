@@ -80,3 +80,8 @@ C++/C-ABI 改动，使用配置匹配的现有 DLL；Hook 独立缺口及既有�
 产物重跑完整样例，两者功能、资源清理、实际 UI 交互及自然退出均通过，退出 0。
 新证据见[退出验收矩阵](../../tests/evidence/host-exit/README.md)。这不是重做真人接管
 验收，也不关闭原 Hook 限制；历史的 Cancelled 分类问题仍单独跟踪。
+
+2026-10-23 EXIT-01 定向复查仍保留业务时序限制：真实捕获可出现未来原生时间，
+旧基线也已实测；当前补查的内容变化场景因 TimeUnavailable 未到达 SceneChanged。
+不能按内容变化验证通过记账。原始 Stale 精确帧龄未采集，详见
+[时间拒绝证据与实际命令结果](../../tests/evidence/host-exit/time-rejections/README.md)。

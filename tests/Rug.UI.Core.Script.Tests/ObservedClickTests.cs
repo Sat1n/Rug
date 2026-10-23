@@ -73,8 +73,53 @@ internal static partial class CheckpointTests
         await ObservedForegroundAsync();await ObservedFailuresAsync();await ObservedStopAsync();
         await ObservedOriginalCancelAsync();await ObservedReleaseAsync();await ObservedLateAsync();
         await ObservedFinalGeometryAsync();
+        await ObservedTimeDiagnosticsAsync();
         await ObservedConcurrentAsync();await ObservedPauseAsync();await ObservedCleanupFailureAsync();await ObservedLuaAsync();
         Console.WriteLine("Observed clicks PASS: actual Lua/Gateway, input arbitration, trusted QPC/ROI, all execution boundaries, one-shot sources, cancellation/Stop/release and bounded resources");
+    }
+    private static async Task ObservedTimeDiagnosticsAsync()
+    {
+        string root=Path.Combine(Path.GetTempPath(),"rug-time-diagnostics-"+Guid.NewGuid().ToString("N"));
+        try
+        {
+            foreach(string mode in new[]{"stale-after-move","future-private","unknown-private","foreign-private"})
+            {
+                string area=Path.Combine(root,mode);var traces=new ExecutionTraceRecorder(area);
+                Guid trace;
+                await using(var f=await ClickFixture.Create(traces:traces))
+                {
+                    trace=f.Run.Trace!.TraceId;
+                    if(mode=="stale-after-move")f.Input.OnMove=()=>{f.Clock.Now+=20_000_000;return Task.CompletedTask;};
+                    else f.Host.Captures[0].Next=()=>
+                    {
+                        var frame=f.Clock.Frame();
+                        if(mode=="future-private")frame=frame with{
+                            CaptureFacts=frame.CaptureFacts! with{NativeTime=null},
+                            NativeCaptureFacts=new(){SystemRelative100ns=f.Clock.Now+100,QpcSample=f.Clock.Now,QpcFrequency=10_000_000,Flags=0}};
+                        if(mode=="unknown-private")frame=frame with{CaptureFacts=frame.CaptureFacts! with{NativeTime=null}};
+                        if(mode=="foreign-private")frame=frame with{CaptureFacts=frame.CaptureFacts! with{NativeTime=new(f.Clock.Now,10_000_000,f.Clock.Now,"foreign")}};
+                        return Task.FromResult<CapturedFrame?>(frame);
+                    };
+                    var result=await f.Click();
+                    ClickRejected(result,mode=="stale-after-move"?OperationError.ObservationStale:OperationError.ObservationTimeUnavailable,mode=="stale-after-move");
+                    var rejected=traces.Query(trace,limit:256).Events.Single(e=>e.Reason=="frame-time-rejected");
+                    var time=rejected.Observation!.TimeRejection!;
+                    Check(rejected.Observation.FrameId==f.Source.FrameId&&time.CurrentQpc==f.Clock.Now&&time.CurrentFrequency==10_000_000&&
+                        time.MaxAgeMs==1000&&time.SourceSystemRelative100ns==100_000_000&&time.SourceFrequency==10_000_000&&
+                        time.SourceSignedAge100ns==(mode=="stale-after-move"?20_000_000:0)&&f.Input.MouseDownCalls==0,
+                        "time rejection lost source/QPC or changed input protection");
+                    if(mode=="stale-after-move")Check(time.FrameRole=="source"&&time.SignedAge100ns==20_000_000&&time.ManagedTimeAvailable,"stale clock facts incorrect");
+                    if(mode=="future-private")Check(time.FrameRole=="unpublished-verification"&&time.SignedAge100ns==-100&&time.NativeFlags==0&&!time.ManagedTimeAvailable,"suppressed future raw time lost");
+                    if(mode=="unknown-private")Check(time.SystemRelative100ns is null&&time.SignedAge100ns is null,"unknown time fabricated");
+                    if(mode=="foreign-private")Check(time.NativeDomain=="foreign"&&time.SignedAge100ns is null,"different clock domains subtracted");
+                }
+                var offline=new TraceFileStore(area).Read(traces.HostSessionId,trace,limit:256);
+                Check(offline.Status==TraceReadStatus.Valid&&offline.Events.Single(e=>e.Reason=="frame-time-rejected").Observation?.TimeRejection is not null,
+                    "time diagnostics not retained by offline checked trace");
+            }
+            Console.WriteLine("Observed time diagnostics PASS: exact source/QPC, stale-after-move zero down/uncertain, raw suppressed future, unknown/domain isolation, persisted reread; unchanged 1000ms guard");
+        }
+        finally{if(Directory.Exists(root))Directory.Delete(root,true);}
     }
     private static async Task ObservedSuccessAsync()
     {

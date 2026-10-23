@@ -761,3 +761,16 @@ host admission closes before propagation, queued/new input is refused, repeated
 disposal waits for the same cleanup, and no old Lua is revived. Full default
 regression retains checkpoint/recovery/hot-reload/runtime-update/authorization/
 observed-click coverage. No real SendInput or human acceptance is inferred.
+
+EXIT-01 Release follow-up: observed-click tests also verify typed QPC/native time
+rejection diagnostics, including suppressed raw future values, unknown/cross-domain
+age, stale after movement (zero down and uncertain), and checked offline re-read.
+`--controlled-recovery-sample` preserves failed scene time-rejection facts and UI
+launch errors separately; all previous aggregate failure/exit checks remain.
+These diagnostics do not relax age/ROI rules or retry input.
+
+`--capture-time-probe <outputRoot>` is a separate read-only producer diagnostic:
+128 sequential exact-window WGC captures, actual QPC/raw flags/ages, zero input,
+no fabricated observation identities. It is not a business acceptance substitute.
+The [EXIT-01 directed comparison](../evidence/host-exit/time-rejections/README.md)
+keeps actual failures and baseline/new-code results separate.

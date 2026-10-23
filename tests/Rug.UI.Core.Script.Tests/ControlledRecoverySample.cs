@@ -90,13 +90,24 @@ internal static class ControlledRecoverySample
         foreach (string scene in new[] { "success", "stop-wait", "revoke-wait", "stop-validation", "revoke-validation", "cancel-late", "stop-late", "lua-error" })
         {
             try { reports.Add(await Scene(repo, root, scene)); }
-            catch (Exception error) { passed = false; reports.Add(new { scene, passed = false, error = error.ToString() }); Console.WriteLine(scene + " FAILED: " + error); }
+            catch (Exception error)
+            {
+                passed = false;
+                var store=new TraceFileStore(Path.Combine(root,scene,"traces"));
+                var timeRejections=store.Discover(limit:32).Entries.SelectMany(entry=>store.Read(entry.HostSessionId,entry.TraceId,limit:256).Events)
+                    .Where(e=>e.Observation?.TimeRejection is not null).Take(16)
+                    .Select(e=>new{e.HostSessionId,e.TraceId,e.Sequence,e.Run,e.OperationId,e.ExecutionId,e.Error,e.Observation}).ToArray();
+                reports.Add(new { scene, passed = false, error = error.ToString(),timeRejections });
+                Console.WriteLine(scene + " FAILED: " + error);
+            }
         }
-        var ui = await ControlledRecoveryUi.RunAsync(repo, Path.Combine(root, "ui"));
+        ControlledRecoveryUi.Result? ui=null;string? uiLaunchError=null;
+        try { ui=await ControlledRecoveryUi.RunAsync(repo, Path.Combine(root, "ui")); }
+        catch(Exception error) { uiLaunchError=error.ToString();Console.Error.WriteLine("RECOVERY UI launch/run failed: "+error); }
         await File.WriteAllTextAsync(Path.Combine(root, "report.json"), JsonSerializer.Serialize(new
-        { schemaVersion = 1, configuration = Config, functionalPassed = passed, scenes = reports, ui, humanAcceptance = "NOT RUN", sendInput = "NOT RUN" }, Json));
+        { schemaVersion = 1, configuration = Config, functionalPassed = passed, scenes = reports, ui, uiLaunchError, humanAcceptance = "NOT RUN", sendInput = "NOT RUN" }, Json));
         Console.WriteLine("RECOVERY REPORT " + Path.Combine(root, "report.json"));
-        if (!passed || !ui.InteractionsPassed || ui.ExitCode != 0)
+        if (!passed || ui is null || !ui.InteractionsPassed || ui.ExitCode != 0)
             throw new InvalidOperationException("Independent functional/UI/exit results retained; abnormal CLR shutdown remains a command failure.");
     }
 

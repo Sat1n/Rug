@@ -90,3 +90,13 @@ builds, with output under artifacts/host-exit/final2-<configuration>-08c0x.
 The harness preserves aggregate failure; successful assertions alone cannot hide
 a future child nonzero exit. All logs here are bounded test output, not a second
 production trace or a dump of plugin state/images.
+
+## 2026-10-23 independent Release review follow-up
+
+CLR natural-exit acceptance was independently confirmed. Business acceptance is
+not unconditionally all-green: user runs observed recovery TimeUnavailable/Stale.
+The [targeted time investigation](time-rejections/README.md) preserves both failed
+historical evidence and new old/new-code comparison results, actual future raw
+WGC time on both versions, and a further current visual-sample TimeUnavailable
+failure. Previous passing run records above remain historical facts, not a claim
+that all subsequent runs pass. Age thresholds/retry policy are unchanged.
