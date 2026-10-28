@@ -1,0 +1,5 @@
+{
+  "id": "recovery_probe", "name": "Controlled recovery", "version": "1.0", "entry": "main.lua",
+  "targetProcess": "isolated-recovery", "permissions": ["agent", "vision.capture", "input", "timer"],
+  "inputDelivery": "Win32PostMessage"
+}

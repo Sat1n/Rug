@@ -1,0 +1,9 @@
+{
+  "id": "demo_arknights",
+  "name": "明日方舟 · MVP 演示",
+  "version": "1.0.0",
+  "author": "Rug",
+  "entry": "main.lua",
+  "targetProcess": "demo",
+  "permissions": ["timer"]
+}

@@ -8,7 +8,7 @@ using Rug.UI.Core.Models;
 namespace Rug.UI.Core.Services;
 
 /// <summary>Owns one capture/input/Lua session per plugin and window instance.</summary>
-public sealed class TaskScheduler : ITaskScheduler
+public sealed partial class TaskScheduler : ITaskScheduler
 {
     private readonly IPluginManager _plugins;
     private readonly IAnomalyLogger _anomalies;
@@ -17,22 +17,40 @@ public sealed class TaskScheduler : ITaskScheduler
     private readonly Func<IInputService> _inputFactory;
     private readonly Func<ICaptureService, IInputService, IScriptRuntime> _runtimeFactory;
     private readonly ILogger _logger;
+    private readonly ICommandBus? _commandBus;
     private readonly TimeSpan _tickInterval;
     private readonly TimeSpan _watchdogTimeout;
     private readonly SemaphoreSlim _catalogGate = new(1, 1);
     private readonly ConcurrentDictionary<Guid, TaskExecutionContext> _instances = new();
+    private readonly ConcurrentDictionary<string, long> _generations = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _pluginStartGates =
+        new(StringComparer.OrdinalIgnoreCase);
     private readonly CancellationTokenSource _shutdown = new();
     private readonly object _lifecycleGate = new();
     private TaskCompletionSource<bool> _startsDrained = CompletedSignal();
     private int _starting;
+    private int _startingInput;
+    private TaskCompletionSource<bool> _inputStartsDrained = CompletedSignal();
     private Dictionary<string, PluginManifest>? _catalog;
     private bool _disposed;
+    private readonly HostBusinessAdmission _hostAdmission = new();
+    private TaskCompletionSource? _disposeCompletion;
+    private readonly IInputArbiter _inputArbiter;
+    private readonly IDisposable _inputStopRegistration;
+    private readonly IInputInterventionCoordinator? _intervention;
+    private readonly IRecoveryCoordinator _recovery;
+    private readonly ICheckpointCoordinator? _checkpoints;
 
     public TaskScheduler(IPluginManager plugins, string pluginsRoot,
         Func<ICaptureService> captureFactory, Func<IInputService> inputFactory,
         Func<ICaptureService, IInputService, IScriptRuntime> runtimeFactory,
         ILogger<TaskScheduler> logger, IAnomalyLogger anomalies, TimeSpan? tickInterval = null,
-        TimeSpan? watchdogTimeout = null)
+        TimeSpan? watchdogTimeout = null, ICommandBus? commandBus = null,
+        IAutomationPermissionChecker? permissionChecker = null, IPluginAuthorization? authorization = null,
+        IInputArbiter? inputArbiter = null, IInputInterventionCoordinator? intervention = null,
+        IRecoveryCoordinator? recovery = null, ICheckpointCoordinator? checkpoints = null,
+        ICheckpointStore? checkpointStore = null, ICheckpointRestoreRegistry? checkpointRestores = null,
+        IRuntimeUpdateCompatibilityRegistry? updateCompatibility = null, ExecutionTraceRecorder? traces = null)
     {
         _plugins = plugins ?? throw new ArgumentNullException(nameof(plugins));
         _anomalies = anomalies ?? throw new ArgumentNullException(nameof(anomalies));
@@ -42,23 +60,87 @@ public sealed class TaskScheduler : ITaskScheduler
         _inputFactory = inputFactory ?? throw new ArgumentNullException(nameof(inputFactory));
         _runtimeFactory = runtimeFactory ?? throw new ArgumentNullException(nameof(runtimeFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _commandBus = commandBus;
         _tickInterval = tickInterval ?? TimeSpan.FromMilliseconds(50);
         _watchdogTimeout = watchdogTimeout ?? TimeSpan.FromSeconds(1);
+        _inputArbiter = inputArbiter ?? InputArbiter.Shared;
+        _intervention = intervention;
+        _inputStopRegistration = _inputArbiter.RegisterStopHandler(StopInputRunsAsync);
         if (_tickInterval <= TimeSpan.Zero || _watchdogTimeout <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(tickInterval));
+        Gateway = new AutomationGateway(logger, permissionChecker, getPlugin: GetPluginAsync,
+            start: async (plugin, hwnd, inputs, ready, token) =>
+            {
+                RunIdentity? started = null;
+                await StartTaskWithReadyAsync(plugin, hwnd, inputs,
+                    identity => { started = identity; ready?.Invoke(identity); }, token).ConfigureAwait(false);
+                return started!;
+            }, stop: StopTaskAsync, pause: PauseTask, resume: ResumeTask, authorization: authorization, verifyRecovery: VerifyRecoveryAsync, traces:traces);
+        _recovery = recovery ?? new RecoveryCoordinator(anomalies, Gateway.Authorization, new RecoveryValidatorRegistry());
+        _checkpoints = checkpoints;
+        _checkpointStore = checkpointStore; _checkpointRestores = checkpointRestores;
+        _updateCompatibility = updateCompatibility ?? new RuntimeUpdateCompatibilityRegistry();
+        Gateway.RestoreCheckpoint = RestoreCheckpointAsync;
+        Gateway.RuntimeUpdateControl = ControlRuntimeUpdateAsync;
     }
 
+    public AutomationGateway Gateway { get; }
+    public RuntimeUpdateCoordinator RuntimeUpdates { get; } = new();
+    IRuntimeUpdateCoordinator ITaskScheduler.RuntimeUpdates => RuntimeUpdates;
     public IReadOnlyCollection<TaskExecutionContext> Instances => _instances.Values.ToArray();
+    public event EventHandler? InstancesChanged;
+    public event EventHandler<LifecycleChangedEventArgs>? LifecycleChanged;
+    public LifecycleSnapshot? GetLifecycle(Guid instanceId) =>
+        _instances.TryGetValue(instanceId, out var context) ? context.Snapshot : null;
 
-    public async Task<Guid> StartTaskAsync(string pluginId, nint hwnd, CancellationToken cancellationToken = default)
+    /// <summary>Legacy bootstrap refresh; managed updates use only validated snapshot publication.</summary>
+    public async Task RefreshPluginsAsync(CancellationToken cancellationToken = default)
     {
+        await _catalogGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_disposed) throw new ObjectDisposedException(nameof(TaskScheduler));
+            if (_snapshots is not null) return; // Managed updates publish validated snapshots, never a disk rescan.
+            _catalog = await Task.Run(() => _plugins.ScanPlugins(_pluginsRoot)
+                .ToDictionary(p => p.Id, StringComparer.OrdinalIgnoreCase), cancellationToken)
+                .ConfigureAwait(false);
+            foreach (var manifest in _catalog.Values) Gateway.Authorization.Register(manifest);
+        }
+        finally { _catalogGate.Release(); }
+    }
+
+    public Task<Guid> StartTaskAsync(string pluginId, nint hwnd, CancellationToken cancellationToken = default) =>
+        StartTaskWithReadyAsync(pluginId, hwnd, new Dictionary<string, object?>(), null, cancellationToken);
+
+    public Task<Guid> StartTaskAsync(string pluginId, nint hwnd,
+        IReadOnlyDictionary<string, object?> launchInputs, CancellationToken cancellationToken = default) =>
+        StartTaskWithReadyAsync(pluginId, hwnd, launchInputs, null, cancellationToken);
+
+    public Task<Guid> StartTaskAsync(string pluginId, nint hwnd,
+        IReadOnlyDictionary<string, object?> launchInputs, Action<RunIdentity> onReady,
+        CancellationToken cancellationToken = default) =>
+        StartTaskWithReadyAsync(pluginId, hwnd, launchInputs, onReady, cancellationToken);
+
+    private async Task<Guid> StartTaskWithReadyAsync(string pluginId, nint hwnd,
+        IReadOnlyDictionary<string, object?> launchInputs, Action<RunIdentity>? onReady,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
+        ArgumentNullException.ThrowIfNull(launchInputs);
         lock (_lifecycleGate)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(TaskScheduler));
             if (++_starting == 1)
                 _startsDrained = new(TaskCreationOptions.RunContinuationsAsynchronously);
         }
-        try { return await StartCoreAsync(pluginId, hwnd, cancellationToken).ConfigureAwait(false); }
+        SemaphoreSlim gate = _pluginStartGates.GetOrAdd(pluginId, _ => new SemaphoreSlim(1, 1));
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
+        try
+        {
+            await gate.WaitAsync(linked.Token).ConfigureAwait(false);
+            try { return await StartCoreAsync(pluginId, hwnd, launchInputs, onReady, linked.Token).ConfigureAwait(false); }
+            finally { gate.Release(); }
+        }
         finally
         {
             lock (_lifecycleGate)
@@ -68,39 +150,253 @@ public sealed class TaskScheduler : ITaskScheduler
         }
     }
 
-    private async Task<Guid> StartCoreAsync(string pluginId, nint hwnd, CancellationToken cancellationToken)
+    /// <summary>Serialize one plugin's startup and snapshot publication; this lease never stops a run.</summary>
+    public async Task<IAsyncDisposable> AcquirePluginReloadAsync(string pluginId,
+        CancellationToken cancellationToken = default)
     {
-        if (hwnd == 0) throw new ArgumentException("Target window handle is required.", nameof(hwnd));
-        var cancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
+        ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
+        if (_disposed) throw new ObjectDisposedException(nameof(TaskScheduler));
+        SemaphoreSlim gate = _pluginStartGates.GetOrAdd(pluginId, _ => new SemaphoreSlim(1, 1));
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdown.Token);
+        await gate.WaitAsync(linked.Token).ConfigureAwait(false);
+        return new PluginReloadLease(gate);
+    }
+
+    private async Task<Guid> StartCoreAsync(string pluginId, nint hwnd,
+        IReadOnlyDictionary<string, object?> launchInputs, Action<RunIdentity>? onReady,
+        CancellationToken cancellationToken, CheckpointStartPlan? restore = null, InputTarget? restoreTarget = null,
+        CancellationToken original = default, DateTimeOffset deadline = default, CheckpointStartBoundary? restoreBoundary = null,
+        RuntimeSwitchCandidate? switchCandidate = null)
+    {
+        var cancellation = CancellationTokenSource.CreateLinkedTokenSource(restore is null ? cancellationToken : _shutdown.Token, _shutdown.Token);
+        using var restoreCancellation = restore is null ? default : cancellationToken.Register(() =>
+        { if (switchCandidate is null ? restoreBoundary!.CancelPreparation() : !switchCandidate.Group.IsOpen) cancellation.Cancel(); });
         ICaptureService? capture = null;
         IInputService? input = null;
         IScriptRuntime? runtime = null;
+        RunIdentity? identity = null;
+        AuthorizationLease? authorizationLease = null;
+        CancellationTokenRegistration authorizationCancellation = default;
+        CancellationTokenRegistration inputCancellation = default;
+        CancellationToken inputEpoch = default;
+        bool inputStarting = false;
+        IInputSession? inputSession = null;
+        TaskExecutionContext? context = null;
+        InputTarget? target = restoreTarget;
         try
         {
-            PluginManifest source = await GetPluginAsync(pluginId, cancellation.Token).ConfigureAwait(false);
+            PluginManifest source = restore?.Manifest ?? await GetPluginAsync(pluginId, cancellation.Token).ConfigureAwait(false);
+            if (switchCandidate is null && RuntimeUpdates.BlocksStart(pluginId)) throw new AutomationGateway.GatewayRejectedException(OperationError.UpdatePreparing);
+            var ticket = Gateway.Authorization.Bind(source);
+            authorizationLease = Gateway.Authorization.Admit(ticket, source.Permissions);
+            authorizationCancellation = authorizationLease.Token.Register(() => cancellation.Cancel());
+            cancellation.Token.ThrowIfCancellationRequested();
+            bool declaresInput = source.Permissions.Contains(Permission.ControlInput);
+            if (declaresInput)
+            {
+                lock (_lifecycleGate)
+                {
+                    inputStarting = true;
+                    if (++_startingInput == 1) _inputStartsDrained = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                }
+                inputEpoch = _inputArbiter.AutomationToken;
+                inputCancellation = inputEpoch.Register(() => cancellation.Cancel());
+                target = restoreTarget ?? _inputArbiter.BindTarget(hwnd);
+                cancellation.Token.ThrowIfCancellationRequested();
+            }
+            bool needsWindow = source.Permissions.Contains(Permission.Capture) ||
+                source.Permissions.Contains(Permission.ControlInput);
+            if (needsWindow && hwnd == 0)
+                throw new ArgumentException("Target window handle is required.", nameof(hwnd));
+            Guid id = Guid.NewGuid();
+            long generation = _generations.AddOrUpdate(source.Id, 1, (_, previous) => checked(previous + 1));
+            identity = new RunIdentity(source.Id, id, generation,
+                hwnd == 0 ? null : Guid.NewGuid(), hwnd);
+            if (declaresInput && _intervention is not null && restore is null)
+            {
+                inputSession = await _intervention.BeginSessionAsync(InputOwner.ForRun(identity), cancellation.Token).ConfigureAwait(false);
+                inputCancellation.Dispose();
+                inputCancellation = inputSession.Token.Register(() => cancellation.Cancel());
+                cancellation.Token.ThrowIfCancellationRequested();
+            }
             PluginManifest manifest = source with { TargetWindow = hwnd };
+            var configuration = source.Configuration is null
+                ? new Dictionary<string, object?>(StringComparer.Ordinal)
+                : new Dictionary<string, object?>(source.Configuration, StringComparer.Ordinal);
+            long configRevision = 0;
+            if (_commandBus is not null)
+            {
+                var configSnapshot = _commandBus.SnapshotWithRevision(StateScope.Plugin(source.Id));
+                configRevision = configSnapshot.Revision;
+                foreach (var pair in configSnapshot.Values)
+                    configuration[pair.Key] = pair.Value;
+            }
+            configuration = configuration.ToDictionary(p => p.Key, p => StateStore.CloneValue(p.Value), StringComparer.Ordinal);
+            if (restore is not null) { configuration = restore.Configuration.ToDictionary(p => p.Key, p => StateStore.CloneValue(p.Value)); configRevision = restore.Metadata.ConfigRevision; }
             capture = _captureFactory() ?? throw new InvalidOperationException("Capture factory returned null.");
             input = _inputFactory() ?? throw new InvalidOperationException("Input factory returned null.");
             runtime = _runtimeFactory(capture, input) ?? throw new InvalidOperationException("Runtime factory returned null.");
-            // Capture is ready before Lua on_init can call rug.capture().
-            await capture.StartAsync(hwnd, cancellation.Token).ConfigureAwait(false);
-            await runtime.InitializeAsync(Path.Combine(source.PluginDirectory, source.Entry),
-                manifest, cancellation.Token).ConfigureAwait(false);
-            await runtime.PrepareLifecycleAsync().ConfigureAwait(false);
-            Guid id = Guid.NewGuid();
-            var context = new TaskExecutionContext(id, source.Id, hwnd, cancellation, runtime, capture, input);
-            runtime.ConfigureAnomalyHandler((reason, detail) => _anomalies.LogAnomalyAsync(context, reason, detail));
+            runtime.ConfigureGateway(Gateway);
+            runtime.ConfigureInputArbiter(_inputArbiter);
+            _commandBus?.OpenInstance(identity.InstanceScope);
+            runtime.ConfigureState(identity, launchInputs, configuration);
+            if (hwnd != 0) target ??= _inputArbiter.BindTarget(hwnd);
+            context = new TaskExecutionContext(identity, cancellation, runtime, capture, input)
+            {
+                HostAdmission = _hostAdmission,
+                AuthorizationLease = authorizationLease, AuthorizationCancellation = authorizationCancellation,
+                InputCancellation = inputCancellation, InputEpochToken = inputEpoch,
+                DeclaresInput = declaresInput, InputSession = inputSession, RecoveryAuthorization = ticket
+            };
+            context.VerifiedTarget = target;
+            context.SwitchGroup = switchCandidate?.Group;
+            context.RuntimeUpdateOrigin = switchCandidate?.Origin;
+            if (restore is not null) context.CheckpointOrigin = new(restore.Record.SourceInstanceId, restore.Record.CheckpointId, restore.Record.SubmissionSequence, restore.Record.NodeId);
+            context.Trace=Gateway.Traces.OpenRun(identity,context.CheckpointOrigin,context.RuntimeUpdateOrigin);
+            context.Trace.Emit(TraceEventKind.RunCreated,ExecutionTraceScope.Current.Value,
+                reason:context.RuntimeUpdateOrigin is {} update?"Runtime update "+update.UpdateId:"Host-created run");
+            context.ValidateResume = () =>
+            {
+                cancellation.Token.ThrowIfCancellationRequested();
+                using var admission = Gateway.Authorization.Admit(ticket, source.Permissions);
+                admission.Token.ThrowIfCancellationRequested();
+                if (target is not null) _inputArbiter.ValidateTarget(target, declaresInput);
+            };
+            context.ValidateRecovery = () =>
+            {
+                cancellation.Token.ThrowIfCancellationRequested();
+                using var admission = Gateway.Authorization.Admit(ticket, source.Permissions);
+                admission.Token.ThrowIfCancellationRequested();
+                if (target is not null)
+                {
+                    try { _inputArbiter.ValidateTarget(target, requireControl: false); }
+                    catch (InputUnavailableException) { throw new RecoveryFailedException(RecoveryError.ResourceUnavailable); }
+                }
+            };
+            if (declaresInput)
+            {
+                inputCancellation.Dispose();
+                context.AttachInput(inputEpoch);
+                context.HandoffRecovery = async () =>
+                {
+                    var recoveryId = context.Snapshot.Recovery!.RecoveryId;
+                    Task takeover = _inputArbiter.TakeOverForRecoveryAsync(() => context.PreserveAndRetireInput(recoveryId));
+                    // Remove detector registration outside both state locks before takeover drains sessions.
+                    context.InputCancellation.Dispose();
+                    context.InputSession?.Dispose(); context.InputSession = null;
+                    await takeover.WaitAsync(cancellation.Token).ConfigureAwait(false);
+                };
+                context.AcquireRecoveryInput = async () =>
+                {
+                    context.CheckRecovery(context.Snapshot.Recovery!.RecoveryId);
+                    context.ValidateResume(); // Must have explicitly returned control and valid target/grants.
+                    if (!context.PreservedForHuman) return;
+                    IInputSession? next = _intervention is null ? null :
+                        await _intervention.BeginSessionAsync(InputOwner.ForRun(identity), cancellation.Token).ConfigureAwait(false);
+                    try
+                    {
+                        context.CheckRecovery(context.Snapshot.Recovery!.RecoveryId);
+                        context.InputSession = next;
+                        context.AttachInput(_inputArbiter.AutomationToken);
+                    }
+                    catch { next?.Dispose(); throw; }
+                };
+            }
+            runtime.ConfigureLifecycle(context);
+            context.LifecycleChanged += ForwardLifecycle;
             lock (_lifecycleGate)
             {
                 if (_disposed) throw new ObjectDisposedException(nameof(TaskScheduler));
+                cancellation.Token.ThrowIfCancellationRequested();
                 if (!_instances.TryAdd(id, context)) throw new InvalidOperationException("Duplicate instance id.");
+            }
+            Gateway.RegisterStartingRun(context, manifest);
+            TaskExecutionContext owned = context;
+            context.LifetimeCancellation = cancellation.Token.Register(owned.Cancel);
+            NotifyInstancesChanged();
+            // Capture is ready before Lua on_init can call rug.capture().
+            if (hwnd != 0)
+                await capture.StartAsync(hwnd, cancellation.Token).ConfigureAwait(false);
+            cancellation.Token.ThrowIfCancellationRequested();
+            if (restore is null && _snapshots?.GetValueOrDefault(pluginId) is { } effective)
+                await runtime.InitializeLoadedAsync(effective.EntryCode, manifest, cancellation.Token).ConfigureAwait(false);
+            else if (restore is null) await runtime.InitializeAsync(Path.Combine(source.PluginDirectory, source.Entry), manifest, cancellation.Token).ConfigureAwait(false);
+            else await runtime.InitializeLoadedAsync(restore.Metadata.Code, manifest, cancellation.Token).ConfigureAwait(false);
+            if (source.Permissions.Contains(Permission.Checkpoint))
+            {
+                if (source.Version.Length > 128) throw new InvalidDataException("Checkpoint plugin version exceeds 128 characters.");
+                var code = runtime.LoadedCode ?? throw new InvalidOperationException("Runtime lacks immutable code snapshot.");
+                context.CheckpointMetadata = new(ticket.Installation, CheckpointJson.InstallationId(ticket.Installation), source.Version,
+                    code, configRevision, CheckpointJson.ConfigHash(configuration));
+                context.CheckpointPublished = (attempt, record) => RuntimeUpdates.Published(context, attempt, record);
+                runtime.ConfigureCheckpointHandler(async (node, state, actions) =>
+                {
+                    var result = await (_checkpoints ?? throw new InvalidOperationException("Host checkpoint coordinator is not configured.")).CommitAsync(context, node, state, actions).ConfigureAwait(false);
+                    await RuntimeUpdates.ReturnedAsync(context, result).ConfigureAwait(false);
+                    return result;
+                });
+            }
+            cancellation.Token.ThrowIfCancellationRequested();
+            if (restore is null) await runtime.PrepareLifecycleAsync().ConfigureAwait(false);
+            else
+            {
+                runtime.ConfigureRecoveryHandler((reason, detail) => _recovery.RequestAsync(context, reason, detail));
+                await runtime.PrepareRestoreAsync(RestoreJson(restore.Record)).ConfigureAwait(false);
+                if (switchCandidate is not null)
+                {
+                    // Declaration only. No on_restore, input session/lease or runner business before group commit.
+                    context.Runner = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await switchCandidate.Group.Opened.Task.WaitAsync(context.LifetimeToken).ConfigureAwait(false);
+                            await RunAsync(context).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException) { context.Cancel(); await CleanupAsync(context).ConfigureAwait(false); }
+                    });
+                    return id;
+                }
+                await ValidateCheckpointStartAsync(context, restore, cancellation.Token, original, deadline).ConfigureAwait(false);
+                if (declaresInput && _intervention is not null)
+                {
+                    context.InputSession = await _intervention.BeginSessionAsync(InputOwner.ForRun(identity), cancellation.Token).ConfigureAwait(false);
+                    context.AttachInput(_inputArbiter.AutomationToken);
+                }
+                if (BeforeCheckpointStartDecision is not null) await BeforeCheckpointStartDecision().ConfigureAwait(false);
+                await CheckStartPlanAsync(restore, cancellation.Token).ConfigureAwait(false);
+                context.ValidateResume?.Invoke();
+                CheckRestoreConfiguration(restore);
+                original.ThrowIfCancellationRequested();
+            }
+            if (restore is null) { context.Prepared = true; Gateway.CompleteStartingRun(context.InstanceId); }
+            if (restore is null) runtime.ConfigureRecoveryHandler((reason, detail) => _recovery.RequestAsync(context, reason, detail));
+            cancellation.Token.ThrowIfCancellationRequested();
+            onReady?.Invoke(identity);
+            lock (_lifecycleGate)
+            {
+                if (_disposed) throw new ObjectDisposedException(nameof(TaskScheduler));
+                cancellation.Token.ThrowIfCancellationRequested();
+                if (restore is not null) context.CommitCheckpointStart(restoreBoundary!, original, cancellationToken, authorizationLease.Token, deadline);
+                if (restore is not null) { context.Prepared = true; Gateway.CompleteStartingRun(context.InstanceId); }
                 context.Runner = Task.Run(() => RunAsync(context));
             }
+            NotifyInstancesChanged();
             return id;
         }
-        catch
+        catch (Exception error)
         {
+            if (context is not null)
+            {
+                if (error is not OperationCanceledException || (!cancellation.IsCancellationRequested && !context.IsBusinessClosed &&
+                    !(restore is not null && (original.IsCancellationRequested || cancellationToken.IsCancellationRequested ||
+                        authorizationLease?.Token.IsCancellationRequested == true || DateTimeOffset.UtcNow >= deadline))))
+                    context.RecordFailure(error);
+                context.Cancel();
+                await CleanupAsync(context).ConfigureAwait(false);
+                throw;
+            }
             cancellation.Cancel();
+            if (identity is not null) _commandBus?.CloseInstance(identity.InstanceScope);
             if (runtime is not null)
             {
                 runtime.Stop();
@@ -113,8 +409,19 @@ public sealed class TaskScheduler : ITaskScheduler
             }
             if (input is not null)
                 await TryCleanupAsync(() => input.DisposeAsync().AsTask(), "input startup disposal").ConfigureAwait(false);
+            authorizationCancellation.Dispose();
+            inputCancellation.Dispose();
+            inputSession?.Dispose();
+            authorizationLease?.Dispose();
             cancellation.Dispose();
             throw;
+        }
+        finally
+        {
+            if (inputStarting) lock (_lifecycleGate)
+            {
+                if (--_startingInput == 0) _inputStartsDrained.TrySetResult(true);
+            }
         }
     }
 
@@ -127,9 +434,28 @@ public sealed class TaskScheduler : ITaskScheduler
     public async Task StopTaskAsync(Guid instanceId)
     {
         if (!_instances.TryGetValue(instanceId, out TaskExecutionContext? context)) return;
+        if(StopReason(context)=="Unknown")Interlocked.CompareExchange(ref context.TraceStopCause,"HostStop",null);
+        context.Trace?.Emit(TraceEventKind.StopRequested,reason:StopReason(context));
         context.Cancel();
-        if (context.Runner is Task runner)
-            await runner.WaitAsync(_watchdogTimeout + TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+        await context.Completion.ConfigureAwait(false);
+    }
+
+    private Task<RecoveryResult> VerifyRecoveryAsync(Guid instanceId, Guid recoveryId, DateTimeOffset deadline, CancellationToken token)
+    {
+        if (!_instances.TryGetValue(instanceId, out var context))
+            throw new AutomationGateway.GatewayRejectedException(OperationError.InstanceNotFound);
+        return _recovery.VerifyAndContinueAsync(context, recoveryId, token, deadline);
+    }
+
+    private async Task StopInputRunsAsync()
+    {
+        Task starts;
+        lock (_lifecycleGate) starts = _inputStartsDrained.Task;
+        await starts.ConfigureAwait(false);
+        var affected = Instances.Where(c => c.DeclaresInput && !c.PreservedForHuman).ToArray();
+        await Task.WhenAll(affected.Select(c => StopTaskAsync(c.InstanceId))).ConfigureAwait(false);
+        if (affected.Any(c => c.LastError is InputCleanupException))
+            throw new InputUnavailableException("Input cleanup failed during takeover.");
     }
 
     private async Task<PluginManifest> GetPluginAsync(string pluginId, CancellationToken ct)
@@ -140,8 +466,10 @@ public sealed class TaskScheduler : ITaskScheduler
         {
             _catalog ??= await Task.Run(() => _plugins.ScanPlugins(_pluginsRoot)
                 .ToDictionary(p => p.Id, StringComparer.OrdinalIgnoreCase), ct).ConfigureAwait(false);
-            return _catalog.TryGetValue(pluginId, out PluginManifest? manifest)
-                ? manifest : throw new KeyNotFoundException($"Plugin '{pluginId}' was not found.");
+            if (!_catalog.TryGetValue(pluginId, out PluginManifest? manifest))
+                throw new KeyNotFoundException($"Plugin '{pluginId}' was not found.");
+            Gateway.Authorization.Register(manifest);
+            return manifest;
         }
         finally { _catalogGate.Release(); }
     }
@@ -151,9 +479,9 @@ public sealed class TaskScheduler : ITaskScheduler
         CancellationToken token = context.Cancellation.Token;
         try
         {
-            await DriveHookAsync(context, token).ConfigureAwait(false); // on_init
-            if (context.TaskStatus != AutomationTaskStatus.Paused)
-                context.SetStatus(AutomationTaskStatus.Running);
+            await DriveHookAsync(context, token).ConfigureAwait(false); // on_init or the prepared on_restore
+            context.FirstHookCompleted.TrySetResult(true);
+            context.SetStatus(AutomationTaskStatus.Running);
             while (true)
             {
                 token.ThrowIfCancellationRequested();
@@ -163,17 +491,17 @@ public sealed class TaskScheduler : ITaskScheduler
                 await Task.Delay(_tickInterval, token).ConfigureAwait(false);
             }
         }
+        catch (TaskExecutionContext.HostStopWakeCancellation) when (context.IsBusinessClosed) { }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         catch (Exception ex)
         {
-            context.LastError = ex;
-            context.SetStatus(AutomationTaskStatus.Faulted);
+            context.RecordFailure(ex);
             _logger.LogError(ex, "Automation instance {InstanceId} faulted", context.InstanceId);
         }
         finally
         {
-            context.Cancellation.Cancel();
-            context.Runtime.Stop();
+            context.FirstHookCompleted.TrySetResult(false);
+            context.Cancel();
             await CleanupAsync(context).ConfigureAwait(false);
         }
     }
@@ -188,12 +516,21 @@ public sealed class TaskScheduler : ITaskScheduler
             ScriptExecutionResult result = resume
                 ? await context.Runtime.ResumeAsync().ConfigureAwait(false)
                 : await context.Runtime.StepAsync().ConfigureAwait(false);
+            // Ready/yield is a boundary too: pause must win before returning to on_tick.
+            if (context.PauseRequested && result.State is ScriptState.Ready or ScriptState.Yielded or ScriptState.Paused)
+                await context.WaitIfPausedAsync(token).ConfigureAwait(false);
             switch (result.State)
             {
                 case ScriptState.Ready: return;
                 case ScriptState.Yielded: resume = true; break;
                 case ScriptState.Paused: break;
-                case ScriptState.Stopped when token.IsCancellationRequested:
+                case ScriptState.Stopped when context.IsBusinessClosed || token.IsCancellationRequested || context.InputEpochToken.IsCancellationRequested ||
+                    context.AuthorizationLease?.Token.IsCancellationRequested == true:
+                    // Linked cancellation callbacks can wake Lua before they reach the
+                    // scheduler. A cancelled host-owned epoch/grant is sufficient evidence;
+                    // a closed host lifecycle also proves Stop before token propagation.
+                    // propagate it before classifying this terminal result as cancellation.
+                    context.Cancel();
                     throw new OperationCanceledException(token);
                 case ScriptState.Faulted:
                     throw result.Error ?? new InvalidOperationException("Lua hook faulted.");
@@ -207,7 +544,10 @@ public sealed class TaskScheduler : ITaskScheduler
     {
         try
         {
-            try { await context.Runtime.InvokeStopHookAsync(_watchdogTimeout).ConfigureAwait(false); }
+            // Gateway may have returned cancellation while native work is still alive.
+            // Do not run on_stop or touch any service handle until actual work ends.
+            await context.DrainOperationsAsync().ConfigureAwait(false);
+            try { if (context.Prepared) await context.Runtime.InvokeStopHookAsync(_watchdogTimeout).ConfigureAwait(false); }
             catch (Exception ex) { RecordCleanupError(context, ex, "on_stop"); }
             try { await context.Capture.StopAsync().ConfigureAwait(false); }
             catch (Exception ex) { RecordCleanupError(context, ex, "capture stop"); }
@@ -220,15 +560,56 @@ public sealed class TaskScheduler : ITaskScheduler
         }
         finally
         {
-            context.SetStatus(context.LastError is null ? AutomationTaskStatus.Stopped : AutomationTaskStatus.Faulted);
-            _instances.TryRemove(context.InstanceId, out _);
-            context.Cancellation.Dispose();
+            try
+            {
+                TryCleanup(() => _commandBus?.CloseInstance(context.InstanceScope), "state close");
+                TryCleanup(context.AuthorizationCancellation.Dispose, "authorization subscription");
+                TryCleanup(context.InputCancellation.Dispose, "input subscription");
+                TryCleanup(context.LifetimeCancellation.Dispose, "lifetime subscription");
+                TryCleanup(() => context.InputSession?.Dispose(), "input session");
+                TryCleanup(() => context.AuthorizationLease?.Dispose(), "authorization lease");
+                TryCleanup(context.Cancellation.Dispose, "cancellation disposal");
+                context.SetStatus(context.LastError is null ? AutomationTaskStatus.Stopped : AutomationTaskStatus.Faulted);
+                _instances.TryRemove(context.InstanceId, out _);
+                NotifyInstancesChanged();
+            }
+            finally
+            {
+                try { Gateway.EndRun(context.InstanceId); }
+                finally
+                {
+                    if(context.Trace is {} trace)
+                    {
+                        Gateway.Traces.CloseRun(trace);
+                        trace.Emit(TraceEventKind.CleanupCompleted,status:context.TaskStatus.ToString(),
+                            error:context.LastError?.GetType().Name,reason:StopReason(context));
+                    }
+                    context.Complete();
+                }
+            }
+            void TryCleanup(Action action, string stage)
+            { try { action(); } catch (Exception error) { RecordCleanupError(context, error, stage); } }
         }
+    }
+
+    private void ForwardLifecycle(object? sender, LifecycleChangedEventArgs args)
+    {
+        if(sender is TaskExecutionContext context)context.Trace?.Emit(TraceEventKind.Lifecycle,status:args.Snapshot.Status.ToString(),
+            error:context.LastError?.GetType().Name,reason:$"revision={args.Snapshot.Revision};pauseRequested={args.Snapshot.PauseRequested};cause={StopReason(context)}");
+        foreach (EventHandler<LifecycleChangedEventArgs> handler in LifecycleChanged?.GetInvocationList() ?? [])
+            try { handler(this, args); } catch (Exception error) { _logger.LogWarning(error, "Lifecycle notification failed"); }
+    }
+
+    private void NotifyInstancesChanged()
+    {
+        try { InstancesChanged?.Invoke(this, EventArgs.Empty); }
+        catch (Exception error) { _logger.LogWarning(error, "Instance-list notification failed"); }
     }
 
     private void RecordCleanupError(TaskExecutionContext context, Exception ex, string stage)
     {
-        context.LastError ??= ex;
+        context.Trace?.Emit(TraceEventKind.CleanupFailed,error:ex.GetType().Name,reason:stage);
+        context.RecordFailure(ex);
         _logger.LogError(ex, "Automation instance {InstanceId} failed during {Stage}", context.InstanceId, stage);
     }
 
@@ -238,20 +619,50 @@ public sealed class TaskScheduler : ITaskScheduler
         catch (Exception ex) { _logger.LogError(ex, "Failed during {Stage}", stage); }
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
         Task drained;
+        TaskCompletionSource completion;
         lock (_lifecycleGate)
         {
-            if (_disposed) return;
+            if (_disposeCompletion is not null) return new(_disposeCompletion.Task);
+            completion = _disposeCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
             _disposed = true;
+            _hostAdmission.Close();
             drained = _startsDrained.Task;
         }
-        _shutdown.Cancel();
-        await drained.ConfigureAwait(false);
-        await Task.WhenAll(_instances.Keys.Select(StopTaskAsync)).ConfigureAwait(false);
-        _catalogGate.Dispose();
-        _shutdown.Dispose();
+        _ = DisposeCoreAsync();
+        return new(completion.Task);
+
+        async Task DisposeCoreAsync()
+        {
+            var errors = new List<Exception>();
+            async Task Attempt(Func<Task> action)
+            {
+                try { await action().ConfigureAwait(false); }
+                catch (Exception error) { errors.Add(error); _logger.LogError(error, "Host shutdown cleanup failed"); }
+            }
+            await Attempt(() => { _shutdown.Cancel(); return Task.CompletedTask; });
+            await Attempt(() => RuntimeUpdates.DisposeAsync().AsTask());
+            await Attempt(() => drained);
+            await Attempt(() => Task.WhenAll(_instances.Keys.Select(StopTaskAsync)));
+            lock (_restoreGate) { _selections.Clear(); _restoring.Clear(); }
+            await Attempt(() => { _inputStopRegistration.Dispose(); return Task.CompletedTask; });
+            await Attempt(() => { _catalogGate.Dispose(); return Task.CompletedTask; });
+            await Attempt(() => { _shutdown.Dispose(); return Task.CompletedTask; });
+            await Attempt(() => Gateway.Traces.DisposeAsync().AsTask());
+            if (errors.Count > 0) completion.TrySetException(new AggregateException("Host cleanup failed", errors));
+            else completion.TrySetResult();
+        }
+    }
+    private string StopReason(TaskExecutionContext context)
+    {
+        if(Volatile.Read(ref context.TraceStopCause) is {} cause)return cause;
+        string observed=context.LastError is not null?"ExecutionFault":
+            context.AuthorizationLease?.Token.IsCancellationRequested==true?"AuthorizationRevoked":
+            _disposed?"HostShutdown":_inputArbiter.Snapshot.State is InputControlState.TakingOver or InputControlState.ManualControl?"ManualTakeover":"Unknown";
+        if(context.IsBusinessClosed)Interlocked.CompareExchange(ref context.TraceStopCause,observed,null);
+        return Volatile.Read(ref context.TraceStopCause)??observed;
     }
 
     private static TaskCompletionSource<bool> CompletedSignal()
@@ -259,5 +670,15 @@ public sealed class TaskScheduler : ITaskScheduler
         var signal = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         signal.SetResult(true);
         return signal;
+    }
+
+    private sealed class PluginReloadLease(SemaphoreSlim gate) : IAsyncDisposable
+    {
+        private int _released;
+        public ValueTask DisposeAsync()
+        {
+            if (Interlocked.Exchange(ref _released, 1) == 0) gate.Release();
+            return ValueTask.CompletedTask;
+        }
     }
 }

@@ -1,0 +1,23 @@
+CONTROLLED SAMPLE: explicit trusted test-host grants; exact-window WGC, real OpenCV and PostMessage only. Output=F:\Cardinal\Rug\Rug\artifacts\exit-time-baseline-visual\sample-9a6264e93d5c4265a945c86bd2c35530
+SCENE stable: API=completed/RoiConsistent; target=(1, 1); business=confirmed; trace=Valid df0fb1de-cc57-4909-92c4-3453dab6cf6e/13174b6d-9144-4f2a-ab4d-04da599391da; instance=64209b62-53ae-4882-8ae4-3e213a8ee4d1 g1; resources=drained
+SCENE changed: API=rejected/SceneChanged; target=(0, 0); business=not_confirmed; trace=Valid 16399597-bf69-4b41-abdf-23579fe2ad9e/da457235-648e-46b5-95a5-ab3a8eb020fe; instance=58838b60-2372-4d84-80ab-9504e7a803a5 g1; resources=drained
+SCENE resize: API=rejected/GeometryChanged; target=(0, 0); business=not_confirmed; trace=Valid 35ac8acd-d805-4dcc-aae0-dcdfe558778b/d5177fbd-0dc9-4e35-8d74-e7e1af01a961; instance=7217d01b-1e62-45de-b2b1-b4d6c7d99e6a g1; resources=drained
+SCENE stale: API=rejected/Stale; target=(0, 0); business=not_confirmed; trace=Valid feb608c6-d241-476b-8377-360285834bfb/7feb35ac-6fad-4d3c-a86b-79122f74e8b1; instance=9a35fedc-15a2-48f4-8ebb-d576221828fe g1; resources=drained
+SCENE invalidated: API=rejected/InvalidReference; target=(0, 0); business=not_confirmed; trace=Valid 6f922a03-9397-4df2-bcc2-d9f283e2ebb0/73fac078-bdff-4007-97ea-91eceb73ffb5; instance=e9224040-cda3-4f05-bca2-a829a75e645e g1; resources=drained
+SCENE stop: API=NOT RUN/NOT RUN; target=(0, 0); business=NOT RUN; trace=Valid 42eef7b2-fff7-4e30-ae29-31c92d0ea456/4e251bd7-c62a-4789-a8c5-b8b7654bf785; instance=13641ff1-2ef4-4b96-9f1a-09e95f319fb5 g1; resources=drained
+SCENE revoked: API=NOT RUN/NOT RUN; target=(0, 0); business=NOT RUN; trace=Valid 1879f302-68ec-4d3a-86fb-8006696ff816/ac789aa5-ddab-4066-8c94-03df50c53c67; instance=24ce4557-9ffe-4cdd-927d-976a374238ae g1; resources=drained
+SCENE no-completion: API=completed/RoiConsistent; target=(1, 1); business=unconfirmed_timeout; trace=Valid 3588cfbe-2f36-49da-85a2-4d7a6dcfe0ea/d72abf26-ddb8-4756-9518-14f635a6062c; instance=11da5578-f8f2-430b-ab16-103fb34b3db8 g1; resources=drained
+VIEWER stage: host ready
+VIEWER stage: catalog ready
+VIEWER stage: stable trace selected
+VIEWER stage: persisted page Valid
+CONTROLLED VIEWER PASS: read-only historical trace 文件 · controlled_visual / 64209b6253ae48828ae43e213a8ee4d1 g1 · session df0fb1decc57490992c43453dab6cf6e · trace 13174b6d91444f2aab4d04da599391da · Valid
+VIEWER interactions=True; processExit=-1073740286;  UI shutdown exit=-1073740286; CLR: Assert failure(PID 47712 [0x0000ba60], Thread: 41424 [0xa1d0]): !"Attempt to execute managed code after the .NET runtime thread state has been destroyed."
+    File: D:\a\_work\1\s\src\runtime\src\coreclr\vm\ceemain.cpp:1721 Image:
+F:\Cardinal\Rug\Rug\artifacts\exit-time-baseline\Rug.UI\bin\x64\Release\net10.0-windows10.0.22621.0\win-x64\Rug.UI.exe
+
+REPORT F:\Cardinal\Rug\Rug\artifacts\exit-time-baseline-visual\sample-9a6264e93d5c4265a945c86bd2c35530\report.json
+Unhandled exception. System.InvalidOperationException: Sample acceptance incomplete: see independent functional/viewer/shutdown results. Abnormal UI exit is retained as failure.
+   at ControlledVisualSample.RunAsync(String output) in F:\Cardinal\Rug\Rug\artifacts\exit-time-baseline\tests\Rug.UI.Core.Script.Tests\ControlledVisualSample.cs:line 70
+   at Program.<Main>$(String[] args) in F:\Cardinal\Rug\Rug\artifacts\exit-time-baseline\tests\Rug.UI.Core.Script.Tests\Program.cs:line 28
+   at Program.<Main>(String[] args)

@@ -1,0 +1,1 @@
+{"id":"update_probe","name":"Update freeze probe","version":"1.0.0","entry":"main.lua","targetProcess":"controlled-target","permissions":["timer","vision.capture","checkpoint"]}

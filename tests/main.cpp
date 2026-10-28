@@ -1,6 +1,6 @@
 // =============================================================================
 //  main.cpp — Rug.Core native test harness entry point.
-//  Usage: Rug.Tests.exe [all|ocr|stress|match|models] [engineIndex]
+//  Usage: Rug.Tests.exe [all|ocr|stress|match|models|capture|capture-lifetime] [engineIndex]
 //    engineIndex: preselect the OCR engine (skips the interactive menu).
 //                 0 = WinRT, 1.. = discovered Paddle models. Default: prompt.
 // =============================================================================
@@ -19,6 +19,8 @@
 #endif
 
 using namespace rugtest;
+int RunCaptureContract();
+int RunCaptureLifetime();
 
 int wmain(int argc, wchar_t** argv) {
 #ifdef _DEBUG
@@ -46,6 +48,8 @@ int wmain(int argc, wchar_t** argv) {
     if (needEngine) std::printf("\n");
 
     int rc = 0;
+    if (all || mode == L"capture") rc |= RunCaptureContract();
+    if (mode == L"capture-lifetime") rc |= RunCaptureLifetime();
     if (all || mode == L"ocr") {
         std::printf("### OCR CORRECTNESS ###\n");
         rc |= RunOcrCorrectness(engineIndex);

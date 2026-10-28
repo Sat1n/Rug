@@ -26,6 +26,7 @@ public static class RugStatus
     public const int ErrBufferTooSmall = -9;
     public const int ErrTimeout = -10;
     public const int ErrOcrModelNotFound = -11;
+    public const int ErrWindowIdentity = -12;
 }
 
 /// <summary>Pixel formats mirrored from RugCoreAbi.h (RugPixelFormat).</summary>
@@ -62,6 +63,19 @@ public struct RugFrame
     public int Height;
     public int Stride;
     public int Format;     // RugPixelFormat
+}
+
+/// <summary>Additive V1 facts, pack 8. All times are raw Windows QPC; time100ns is not UTC.</summary>
+[StructLayout(LayoutKind.Sequential, Pack = 8)]
+public struct RugCaptureFacts
+{
+    public uint StructSize, Version, Flags, GeometryStatus;
+    public long SystemRelative100ns, QpcFrequency, QpcSample, GeometryBeforeQpc, GeometryAfterQpc;
+    public ulong BoundWindow, CapturedWindow, BoundLifetime, CapturedLifetime;
+    public int ContentWidth, ContentHeight, BufferWidth, BufferHeight;
+    public int ClientWidth, ClientHeight, ClientScreenX, ClientScreenY;
+    public int ImageClientX, ImageClientY, Dpi, Reserved;
+    public static RugCaptureFacts Create() => new() { StructSize = (uint)Marshal.SizeOf<RugCaptureFacts>(), Version = 1 };
 }
 
 /// <summary>Maps C `RugOcrLine`. Text is a UTF-8 fixed buffer.</summary>
@@ -159,6 +173,14 @@ public static partial class RugCoreNative
 
     [LibraryImport(Lib)]
     public static partial int Rug_GrabFrame(nint handle, out RugFrame outFrame);
+
+    [LibraryImport(Lib)]
+    public static partial int Rug_CreateCapturerExact(in RugCaptureConfig config, out nint outHandle);
+
+    [LibraryImport(Lib)]
+    public static partial int Rug_GrabFrameWithFacts(nint handle, out RugFrame outFrame, ref RugCaptureFacts facts);
+    [LibraryImport(Lib)]
+    public static partial int Rug_CheckCaptureGeometry(nint boundWindow, in RugCaptureFacts facts);
 
     // --- Image I/O ---
     [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]

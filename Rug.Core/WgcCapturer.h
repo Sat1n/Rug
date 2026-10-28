@@ -21,8 +21,12 @@
 #include <windows.h>
 #include <cstdint>
 #include <memory>
+#include <functional>
+#include "include/RugCoreAbi.h"
 
 namespace rug::core {
+// Recheck current window identity and the supported mapping basis; no capture/input.
+int32_t CheckCaptureGeometry(HWND bound, const RugCaptureFacts& facts);
 
 // A captured frame. `data` is a BGRA8 buffer allocated with new[] and MUST be
 // released with delete[] (the ABI frees it via Rug_FreeBuffer).
@@ -33,6 +37,7 @@ struct CapturedFrame {
     int32_t  height     = 0;     // physical pixels
     int32_t  stride     = 0;     // bytes per row
     double   dpiScale   = 1.0;   // physical / logical (Per-Monitor V2)
+    RugCaptureFacts facts{};
 };
 
 class WgcCapturer {
@@ -40,6 +45,9 @@ public:
     struct Config {
         HWND targetWindow  = nullptr;  // any window of the target process
         bool captureCursor = false;    // include the cursor in the capture
+        bool exactWindow = false;
+        // Internal native-test seam only; never exposed by the C-ABI.
+        std::function<void()> beforeDeliveryForTesting;
     };
 
     explicit WgcCapturer(Config config);

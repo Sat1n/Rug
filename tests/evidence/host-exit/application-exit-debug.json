@@ -1,0 +1,92 @@
+{
+  "forced": false,
+  "phases": [
+    "started",
+    "ready-empty-host",
+    "close-requested",
+    "process-exited"
+  ],
+  "passed": false,
+  "modules": [
+    {
+      "productVersion": "1.0.0+95149f35caa858a52e4754b91f611d1b37e7b11b",
+      "fileVersion": "1.0.0.0",
+      "path": "F:\\Cardinal\\Rug\\Rug\\Rug.UI\\bin\\x64\\Debug\\net10.0-windows10.0.22621.0\\win-x64\\Rug.UI.exe",
+      "name": "Rug.UI.exe"
+    },
+    {
+      "productVersion": "10.0.13 @Commit: 4099f83977f4d29604a9aeb971fb0a7bc1d5f699",
+      "fileVersion": "10,0,1326,50504 @Commit: 4099f83977f4d29604a9aeb971fb0a7bc1d5f699",
+      "path": "F:\\Cardinal\\Rug\\Rug\\Rug.UI\\bin\\x64\\Debug\\net10.0-windows10.0.22621.0\\win-x64\\hostpolicy.dll",
+      "name": "hostpolicy.dll"
+    },
+    {
+      "productVersion": "10,0,1326,50504 @Commit: 4099f83977f4d29604a9aeb971fb0a7bc1d5f699",
+      "fileVersion": "10,0,1326,50504 @Commit: 4099f83977f4d29604a9aeb971fb0a7bc1d5f699",
+      "path": "F:\\Cardinal\\Rug\\Rug\\Rug.UI\\bin\\x64\\Debug\\net10.0-windows10.0.22621.0\\win-x64\\coreclr.dll",
+      "name": "coreclr.dll"
+    },
+    {
+      "productVersion": "10,0,1326,50504 @Commit: 4099f83977f4d29604a9aeb971fb0a7bc1d5f699",
+      "fileVersion": "10,0,1326,50504 @Commit: 4099f83977f4d29604a9aeb971fb0a7bc1d5f699",
+      "path": "F:\\Cardinal\\Rug\\Rug\\Rug.UI\\bin\\x64\\Debug\\net10.0-windows10.0.22621.0\\win-x64\\clrjit.dll",
+      "name": "clrjit.dll"
+    },
+    {
+      "productVersion": "1.0.0+95149f35caa858a52e4754b91f611d1b37e7b11b",
+      "fileVersion": "1.0.0.0",
+      "path": "F:\\Cardinal\\Rug\\Rug\\Rug.UI\\bin\\x64\\Debug\\net10.0-windows10.0.22621.0\\win-x64\\Rug.UI.dll",
+      "name": "Rug.UI.dll"
+    },
+    {
+      "productVersion": "1.5",
+      "fileVersion": "1.5",
+      "path": "F:\\Cardinal\\Rug\\Rug\\Rug.UI\\bin\\x64\\Debug\\net10.0-windows10.0.22621.0\\win-x64\\Microsoft.WindowsAppRuntime.dll",
+      "name": "Microsoft.WindowsAppRuntime.dll"
+    },
+    {
+      "productVersion": "1.5",
+      "fileVersion": "3.1.5.2403 (11727B30BC17(ContainerAdministrator)-ad6b41f8923522a5ab752dddbe32ac9f38460afd)",
+      "path": "F:\\Cardinal\\Rug\\Rug\\Rug.UI\\bin\\x64\\Debug\\net10.0-windows10.0.22621.0\\win-x64\\Microsoft.ui.xaml.dll",
+      "name": "Microsoft.ui.xaml.dll"
+    },
+    {
+      "productVersion": "1.5",
+      "fileVersion": "5001.70.1338.0",
+      "path": "F:\\Cardinal\\Rug\\Rug\\Rug.UI\\bin\\x64\\Debug\\net10.0-windows10.0.22621.0\\win-x64\\Microsoft.WindowsAppRuntime.Insights.Resource.dll",
+      "name": "Microsoft.WindowsAppRuntime.Insights.Resource.dll"
+    },
+    {
+      "productVersion": "1.0.0+95149f35caa858a52e4754b91f611d1b37e7b11b",
+      "fileVersion": "1.0.0.0",
+      "path": "F:\\Cardinal\\Rug\\Rug\\Rug.UI\\bin\\x64\\Debug\\net10.0-windows10.0.22621.0\\win-x64\\Rug.UI.Core.dll",
+      "name": "Rug.UI.Core.dll"
+    },
+    {
+      "productVersion": "1.5",
+      "fileVersion": "1.5",
+      "path": "F:\\Cardinal\\Rug\\Rug\\Rug.UI\\bin\\x64\\Debug\\net10.0-windows10.0.22621.0\\win-x64\\Microsoft.Windows.AppNotifications.Projection.dll",
+      "name": "Microsoft.Windows.AppNotifications.Projection.dll"
+    },
+    {
+      "productVersion": "2.3.2+e80782e4bddb3bdb911e828738fa8a4271aaebb2",
+      "fileVersion": "2.3.2.0",
+      "path": "F:\\Cardinal\\Rug\\Rug\\Rug.UI\\bin\\x64\\Debug\\net10.0-windows10.0.22621.0\\win-x64\\WinUIEx.dll",
+      "name": "WinUIEx.dll"
+    },
+    {
+      "productVersion": "1.5",
+      "fileVersion": "3.1.5.2403 (11727B30BC17(ContainerAdministrator)-ad6b41f8923522a5ab752dddbe32ac9f38460afd)",
+      "path": "F:\\Cardinal\\Rug\\Rug\\Rug.UI\\bin\\x64\\Debug\\net10.0-windows10.0.22621.0\\win-x64\\Microsoft.UI.Xaml.Controls.dll",
+      "name": "Microsoft.UI.Xaml.Controls.dll"
+    }
+  ],
+  "configuration": "Debug",
+  "assertion": true,
+  "pid": 7564,
+  "noTheme": false,
+  "round": 1,
+  "exitCode": -1073740286,
+  "failure": null,
+  "noNotifications": false
+}

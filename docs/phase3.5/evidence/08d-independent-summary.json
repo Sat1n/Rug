@@ -1,0 +1,40 @@
+{
+  "commit": "034357d1be977459b52f17ecfd4d2ba1b013d95f",
+  "scope": "Independent 3.5-08D-01 review; no production changes",
+  "debugBuild": 0,
+  "releaseBuild": 0,
+  "debugFullScripts": 0,
+  "releaseFullScripts": 0,
+  "debugUiCore": 0,
+  "releaseUiCore": 0,
+  "realSamples": [
+    {
+      "exit": 0,
+      "sample": "visual",
+      "cases": 8,
+      "configuration": "Debug"
+    },
+    {
+      "exit": 0,
+      "sample": "recovery",
+      "cases": 8,
+      "configuration": "Debug"
+    },
+    {
+      "exit": 0,
+      "sample": "visual",
+      "cases": 8,
+      "configuration": "Release"
+    },
+    {
+      "exit": 0,
+      "sample": "recovery",
+      "cases": 8,
+      "configuration": "Release"
+    }
+  ],
+  "naturalPrivateDiscards": 0,
+  "newBranchEvidence": "Deterministic Gateway/transaction tests only; real samples validate compatibility",
+  "initialFailure": "Isolated Debug observed-click offline trace assertion failed; original log retained. Same command passed in normal user environment and in isolation with project-local TEMP/TMP. Root cause not established.",
+  "remaining": "Public/source invalid time, historical spontaneous Stale root cause, Hook gap, cancellation archive classification and SAC compatibility unchanged"
+}

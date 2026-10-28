@@ -1,0 +1,30 @@
+<Page
+    x:Class="Rug.UI.Views.TraceViewerPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Padding="16" RowDefinitions="Auto,Auto,Auto,*,Auto,Auto,Auto,Auto,2*" RowSpacing="8">
+        <TextBlock Text="执行轨迹与异常 · 只读" FontSize="24"/>
+        <TextBlock x:Name="Health" Grid.Row="1" TextWrapping="Wrap" AutomationProperties.AutomationId="Trace recorder health"/>
+        <StackPanel Grid.Row="2" Spacing="8">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Content="刷新轨迹列表" AutomationProperties.Name="Refresh traces" Click="Catalog_Click"/>
+                <Button x:Name="MoreCatalog" Content="下一页历史轨迹" Click="MoreCatalog_Click" IsEnabled="False"/>
+                <Button Content="刷新本页事件" AutomationProperties.Name="Refresh trace events" Click="Refresh_Click"/>
+                <Button x:Name="MoreEvents" Content="下一页事件" AutomationProperties.Name="Next trace events" Click="MoreEvents_Click" IsEnabled="False"/>
+            </StackPanel>
+            <ListView MaxHeight="130" x:Name="Traces" HorizontalAlignment="Stretch" AutomationProperties.Name="Trace selection" SelectionChanged="Trace_Changed"/>
+            <TextBox x:Name="OperationFilter" Header="operationId 过滤（可空，仅 GUID）" AutomationProperties.Name="Trace operation filter" TextChanged="Filter_Changed"/>
+            <TextBlock x:Name="TraceStatus" TextWrapping="Wrap" AutomationProperties.AutomationId="Trace integrity"/>
+        </StackPanel>
+        <ListView x:Name="Events" Grid.Row="3" SelectionChanged="Event_Changed" AutomationProperties.Name="Trace event list"/>
+        <TextBlock Grid.Row="4" Text="sequence 是记录顺序，不证明完整因果。验证帧≠ROI通过；API完成≠目标收到/业务成功；调用方返回≠后台结束；清理尝试完成≠隔离资源恢复。" TextWrapping="Wrap" Opacity="0.75"/>
+        <StackPanel Grid.Row="5" Orientation="Horizontal" Spacing="8">
+            <Button Content="刷新异常列表" AutomationProperties.Name="Refresh incidents" Click="Incidents_Click"/>
+            <Button x:Name="MoreIncidents" Content="下一页异常" Click="MoreIncidents_Click" IsEnabled="False"/>
+            <Button x:Name="Locate" Content="定位关联轨迹" AutomationProperties.Name="Locate incident trace" Click="Locate_Click" IsEnabled="False"/>
+        </StackPanel>
+        <ListView MaxHeight="100" x:Name="Incidents" Grid.Row="6" HorizontalAlignment="Stretch" SelectionChanged="Incident_Changed" AutomationProperties.Name="Incident selection"/>
+        <TextBlock x:Name="IncidentStatus" Grid.Row="7" TextWrapping="Wrap" AutomationProperties.AutomationId="Incident status"/>
+        <TextBox x:Name="Detail" Grid.Row="8" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" ScrollViewer.VerticalScrollBarVisibility="Auto" AutomationProperties.Name="Trace incident detail"/>
+    </Grid>
+</Page>

@@ -1,0 +1,6 @@
+Unhandled exception. System.DllNotFoundException: Unable to load DLL 'F:\Cardinal\Rug\Rug\x64\Release\Rug.Core.dll' or one of its dependencies: An Application Control policy has blocked this file. (0x800711C7)
+   at System.Runtime.InteropServices.NativeLibrary.LoadLibraryByName(String libraryName, Assembly assembly, Nullable`1 searchPath, Boolean throwOnError)
+   at ControlledRecoverySample.LoadNative(String repo) in F:\Cardinal\Rug\Rug\tests\Rug.UI.Core.Script.Tests\ControlledRecoverySample.cs:line 78
+   at ControlledRecoverySample.RunAsync(String output) in F:\Cardinal\Rug\Rug\tests\Rug.UI.Core.Script.Tests\ControlledRecoverySample.cs:line 88
+   at Program.<Main>$(String[] args) in F:\Cardinal\Rug\Rug\tests\Rug.UI.Core.Script.Tests\Program.cs:line 29
+   at Program.<Main>(String[] args)

@@ -1,0 +1,82 @@
+[
+  {
+    "functionalPassed": true,
+    "discardReasons": [],
+    "configuration": "Debug",
+    "phaseEnds": [
+      {
+        "reason": "AcceptedFirst",
+        "count": 4
+      },
+      {
+        "reason": "SceneChanged",
+        "count": 1
+      }
+    ],
+    "discardedCandidates": 0,
+    "sample": "visual",
+    "scenes": 8,
+    "report": "F:\\Cardinal\\Rug\\Rug\\artifacts\\08d-first-Debug-visual\\sample-57c7cb155301453a8818675a2272c0b4\\report.json",
+    "uiExit": 0,
+    "acceptedAfterDiscard": 0,
+    "allSceneAssertionsPassed": true
+  },
+  {
+    "functionalPassed": true,
+    "discardReasons": [],
+    "configuration": "Debug",
+    "phaseEnds": [
+      {
+        "reason": "AcceptedFirst",
+        "count": 22
+      }
+    ],
+    "discardedCandidates": 0,
+    "sample": "recovery",
+    "scenes": 8,
+    "report": "F:\\Cardinal\\Rug\\Rug\\artifacts\\08d-first-Debug-recovery\\recovery-cc4b3aced0a643939fd19c1f6031ebbf\\report.json",
+    "uiExit": 0,
+    "acceptedAfterDiscard": 0,
+    "allSceneAssertionsPassed": true
+  },
+  {
+    "functionalPassed": true,
+    "discardReasons": [],
+    "configuration": "Release",
+    "phaseEnds": [
+      {
+        "reason": "AcceptedFirst",
+        "count": 5
+      },
+      {
+        "reason": "SceneChanged",
+        "count": 1
+      }
+    ],
+    "discardedCandidates": 0,
+    "sample": "visual",
+    "scenes": 8,
+    "report": "F:\\Cardinal\\Rug\\Rug\\artifacts\\08d-first-Release-visual\\sample-f712c1810cdd49e8a17d2b7a4c7ab8cf\\report.json",
+    "uiExit": 0,
+    "acceptedAfterDiscard": 0,
+    "allSceneAssertionsPassed": true
+  },
+  {
+    "functionalPassed": true,
+    "discardReasons": [],
+    "configuration": "Release",
+    "phaseEnds": [
+      {
+        "reason": "AcceptedFirst",
+        "count": 22
+      }
+    ],
+    "discardedCandidates": 0,
+    "sample": "recovery",
+    "scenes": 8,
+    "report": "F:\\Cardinal\\Rug\\Rug\\artifacts\\08d-first-Release-recovery\\recovery-ab51680219d845bc934a4b8ea0c8367c\\report.json",
+    "uiExit": 0,
+    "acceptedAfterDiscard": 0,
+    "allSceneAssertionsPassed": true
+  }
+]

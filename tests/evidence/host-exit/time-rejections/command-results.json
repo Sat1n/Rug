@@ -1,0 +1,40 @@
+[
+  {
+    "uiExit": 0,
+    "aggregateExit": 0,
+    "command": "current recovery first"
+  },
+  {
+    "uiExit": 0,
+    "aggregateExit": 0,
+    "command": "current recovery final"
+  },
+  {
+    "uiExit": -1073740286,
+    "aggregateExit": -532462766,
+    "functionalPassed": true,
+    "command": "95149f3 recovery completed UI"
+  },
+  {
+    "uiExit": 0,
+    "aggregateExit": -532462766,
+    "functionalPassed": false,
+    "command": "current visual"
+  },
+  {
+    "uiExit": -1073740286,
+    "aggregateExit": -532462766,
+    "functionalPassed": true,
+    "command": "95149f3 visual"
+  },
+  {
+    "aggregateExit": 0,
+    "businessAcceptance": "NOT RUN",
+    "command": "current read-only producer"
+  },
+  {
+    "aggregateExit": 0,
+    "businessAcceptance": "NOT RUN",
+    "command": "baseline read-only producer"
+  }
+]

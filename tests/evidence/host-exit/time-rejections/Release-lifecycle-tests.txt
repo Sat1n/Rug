@@ -1,0 +1,10 @@
+Paused wake boundary PASS: stop; token propagation held
+Paused wake boundary PASS: resume-fault; token propagation held
+Paused wake boundary PASS: resume-stop; token propagation held
+Paused host Stop PASS: actual Lua, no resume check/input, normal Stopped and one on_stop
+Host close admission passed: blocked cancellation callback, two real Lua runs, no new Gateway input/start/pause/resume, normal shared cleanup
+Direct anomaly admission passed: host Stop cancels before capture; permission denial and real archive IO failure remain faults
+Host Stop classification passed: synchronous/asynchronous rejection, pause deferral; real Lua/permission/cleanup errors remain faults
+Repeated Gateway Stop passed: pending work/cleanup, timed-out replay, validated identity/policy, shared completion and registry cleanup
+Stop admission barriers passed with uncancelled tokens: adapters, bridge/arbiter/dispatch queues, composite steps, releases, late Resume and terminal states
+Lifecycle barriers passed: init/tick, sleep/vision, actual input/releases, queued input, late work, stop priority, resume validation and cleanup

@@ -1,4 +1,4 @@
-﻿<windowex:WindowEx
+<windowex:WindowEx
     x:Class="Rug.UI.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -13,4 +13,76 @@
     <Window.SystemBackdrop>
         <MicaBackdrop/>
     </Window.SystemBackdrop>
+    <Grid RowDefinitions="*,Auto">
+        <NavigationView x:Name="PluginNavigation" Grid.Row="0" PaneTitle="插件" Header="Rug 自动化"
+                        IsSettingsVisible="False" SelectionChanged="PluginNavigation_SelectionChanged">
+            <NavigationView.FooterMenuItems>
+                <NavigationViewItem Content="开发工具" Tag="__devtools">
+                    <NavigationViewItem.Icon><SymbolIcon Symbol="Edit"/></NavigationViewItem.Icon>
+                </NavigationViewItem>
+            </NavigationView.FooterMenuItems>
+            <NavigationView.Content>
+                <Grid>
+                    <ContentControl x:Name="PluginContent"/>
+                    <TextBlock x:Name="EmptyMessage" Text="正在扫描插件…" HorizontalAlignment="Center"
+                               VerticalAlignment="Center" Visibility="Collapsed"/>
+                </Grid>
+            </NavigationView.Content>
+        </NavigationView>
+        <Border Grid.Row="1" Padding="16,8" BorderThickness="0,1,0,0"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+            <StackPanel Spacing="8">
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                    <Button Content="人工接管" AutomationProperties.Name="Manual takeover" Click="ManualTakeover_Click"/>
+                    <Button Content="交还控制" AutomationProperties.Name="Return control" Click="ReturnControl_Click"/>
+                    <Button Content="轨迹与异常" AutomationProperties.Name="Open trace viewer" Click="OpenTraceViewer_Click"/>
+                    <TextBlock x:Name="InputControlStatus" Text="自动化可用" VerticalAlignment="Center"/>
+                </StackPanel>
+                <TextBlock x:Name="InputDetectorStatus" Text="输入检测器尚未就绪" TextWrapping="Wrap"/>
+                <TextBlock Text="输入任务运行期间，在其他窗口操作键鼠也会触发全局接管。"
+                           Opacity="0.7" TextWrapping="Wrap"/>
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                    <TextBlock Text="当前实例" VerticalAlignment="Center"/>
+                    <ComboBox x:Name="InstancePicker" MinWidth="150" MaxWidth="250"
+                              AutomationProperties.Name="当前实例"
+                              SelectionChanged="InstancePicker_SelectionChanged"/>
+                    <Button x:Name="NextInstanceButton" Content="下一个实例"
+                            AutomationProperties.Name="Next instance"
+                            Click="NextInstanceButton_Click"/>
+                    <Button Content="插件权限" AutomationProperties.Name="Plugin permissions"
+                            Click="PluginPermissions_Click"/>
+                    <Button Content="运行绑定窗口任务" AutomationProperties.Name="Start bound task"
+                            Click="StartBoundTask_Click"/>
+                    <TextBlock x:Name="ReloadStatus" Text="监控中" Opacity="0.7"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                    <TextBlock x:Name="LifecycleStatus" Text="无运行实例" VerticalAlignment="Center"/>
+                    <Button x:Name="PauseInstanceButton" Content="暂停" AutomationProperties.Name="Pause instance"
+                            IsEnabled="False" Click="PauseInstance_Click"/>
+                    <Button x:Name="ResumeInstanceButton" Content="恢复" AutomationProperties.Name="Resume instance"
+                            IsEnabled="False" Click="ResumeInstance_Click"/>
+                    <Button x:Name="VerifyRecoveryButton" Content="验证并继续" AutomationProperties.Name="Verify recovery"
+                            IsEnabled="False" Click="VerifyRecovery_Click"/>
+                    <Button x:Name="StopInstanceButton" Content="停止" AutomationProperties.Name="Stop instance"
+                            IsEnabled="False" Click="StopInstance_Click"/>
+                </StackPanel>
+                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                    <Button x:Name="RefreshCheckpointsButton" Content="查看检查点" AutomationProperties.Name="Refresh checkpoints" Click="RefreshCheckpoints_Click"/>
+                    <ComboBox x:Name="CheckpointPicker" Grid.Column="1" MinWidth="240" HorizontalAlignment="Stretch" AutomationProperties.Name="Checkpoint selection"/>
+                </Grid>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button x:Name="RestoreCheckpointButton" Content="从此检查点恢复" AutomationProperties.Name="Restore checkpoint" Click="RestoreCheckpoint_Click"/>
+                    <Button x:Name="CancelCheckpointButton" Content="取消准备" IsEnabled="False" Click="CancelCheckpoint_Click"/>
+                </StackPanel>
+                <TextBlock x:Name="CheckpointStatus" Text="检查点恢复需要重新绑定目标、显式授权和现场验证。" TextWrapping="Wrap"/>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button x:Name="PrepareUpdateButton" Content="准备运行更新" AutomationProperties.Name="Prepare runtime update" IsEnabled="False" Click="PrepareUpdate_Click"/>
+                    <Button x:Name="CancelUpdateButton" Content="取消更新准备" AutomationProperties.Name="Cancel runtime update" IsEnabled="False" Click="CancelUpdate_Click"/>
+                    <Button x:Name="SwitchUpdateButton" Content="确认切换运行代码" AutomationProperties.Name="Switch runtime update" IsEnabled="False" Click="SwitchUpdate_Click"/>
+                </StackPanel>
+                <TextBlock x:Name="RuntimeUpdateStatus" Text="无运行更新准备；文件保存不会冻结任务。" TextWrapping="Wrap"/>
+            </StackPanel>
+        </Border>
+    </Grid>
 </windowex:WindowEx>

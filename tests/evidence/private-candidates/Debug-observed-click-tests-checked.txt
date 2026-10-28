@@ -1,0 +1,15 @@
+Observed time diagnostics PASS: exact source/QPC, stale-after-move zero down/uncertain, raw suppressed future, unknown/domain isolation, persisted reread; unchanged 1000ms guard
+Candidate late stop/afterMove=False: calls=2, move/down/up=0/0/0, uncertain=False
+Candidate late revoke/afterMove=False: calls=2, move/down/up=0/0/0, uncertain=False
+Candidate late takeover/afterMove=False: calls=2, move/down/up=0/0/0, uncertain=False
+Candidate late cancel/afterMove=False: calls=2, move/down/up=0/0/0, uncertain=False
+Candidate late cancel-blocked/afterMove=False: calls=2, move/down/up=0/0/0, uncertain=False
+Candidate late timeout/afterMove=False: calls=2, move/down/up=0/0/0, uncertain=False
+Candidate late stop/afterMove=True: calls=3, move/down/up=1/0/0, uncertain=True
+Candidate late revoke/afterMove=True: calls=3, move/down/up=1/0/0, uncertain=True
+Candidate late takeover/afterMove=True: calls=3, move/down/up=1/0/0, uncertain=True
+Candidate late cancel/afterMove=True: calls=3, move/down/up=1/0/0, uncertain=True
+Candidate late cancel-blocked/afterMove=True: calls=3, move/down/up=1/0/0, uncertain=True
+Candidate late timeout/afterMove=True: calls=3, move/down/up=1/0/0, uncertain=True
+Private candidates PASS: actual Gateway/transaction, <=3 per phase, shared <=750ms, strict newer/native validity, terminal ROI/geometry/clock/errors, original source/authority/cancellation, late actual work, bounded pool and diagnostic failure isolation
+Observed clicks PASS: actual Lua/Gateway, input arbitration, trusted QPC/ROI, all execution boundaries, one-shot sources, cancellation/Stop/release and bounded resources

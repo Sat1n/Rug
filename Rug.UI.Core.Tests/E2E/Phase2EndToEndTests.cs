@@ -120,6 +120,12 @@ public static class Phase2EndToEndTests
             new AnomalyLogger(new TestLogger<AnomalyLogger>(logs), anomalyDir),
             tickInterval: TimeSpan.FromMilliseconds(100));
 
+        // Explicit trusted E2E host approval for this disposable test installation.
+        foreach (var manifest in new PluginManager(new TestLogger<PluginManager>(logs)).ScanPlugins(root))
+        {
+            scheduler.Gateway.Authorization.Register(manifest);
+            scheduler.Gateway.Authorization.Grant(PluginInstallation.From(manifest), manifest.Permissions);
+        }
         Guid id = await scheduler.StartTaskAsync(PluginId, hwnd);
         TaskExecutionContext context = scheduler.Instances.Single(instance => instance.InstanceId == id);
         try

@@ -1,0 +1,100 @@
+{
+  "configuration": "Release",
+  "passed": true,
+  "scenarios": [
+    {
+      "phase": "Preview",
+      "passed": true,
+      "result": {
+        "InteractionsPassed": true,
+        "ExitCode": 0,
+        "TargetDown": 0,
+        "TargetUp": 0,
+        "IncidentId": null,
+        "TraceId": null,
+        "Diagnostic": null,
+        "ShutdownLog": "info: Rug.UI.Core.Services.TaskScheduler[0]\r\n      Automation operation=df399df7-0e16-490b-a7ad-13887254c213 correlation=host.update.query source=PluginUI target=OperationTarget { PluginId = controlled_visual_recovery, InstanceId = , RunGeneration = , TargetBindingId =  } type=QueryRuntimeUpdate result=Success code=None uncertain=False\r\nshutdown:start:preview-drain\r\nshutdown:start:ui-admission\r\nshutdown:complete:ui-admission\r\nshutdown:start:cancel-preparations\r\nshutdown:complete:cancel-preparations\r\nshutdown:start:theme-callbacks\r\nshutdown:complete:theme-callbacks\r\nshutdown:start:notifications\r\nshutdown:complete:notifications\r\nshutdown:start:viewer\r\nshutdown:complete:viewer\r\nshutdown:start:hot-reload\r\nshutdown:complete:hot-reload\r\nshutdown:start:input-sessions\r\nshutdown:complete:preview-drain\r\nshutdown:start:commands-drain\r\nshutdown:complete:commands-drain\r\nshutdown:complete:input-sessions\r\nshutdown:start:devtools\r\nshutdown:complete:devtools\r\nshutdown:start:scheduler\r\nshutdown:complete:scheduler\r\nshutdown:start:dynamic-ui\r\nshutdown:complete:dynamic-ui\r\nshutdown:start:host-stop\r\nshutdown:complete:host-stop\r\nshutdown:start:container\r\nshutdown:complete:container\r\nshutdown:window-closed\r\n",
+        "Stderr": ""
+      },
+      "runCleanup": []
+    },
+    {
+      "phase": "Active",
+      "passed": true,
+      "result": {
+        "InteractionsPassed": true,
+        "ExitCode": 0,
+        "TargetDown": 1,
+        "TargetUp": 1,
+        "IncidentId": null,
+        "TraceId": null,
+        "Diagnostic": null,
+        "ShutdownLog": "info: Rug.UI.Core.Services.TaskScheduler[0]\r\n      Automation operation=15a221f6-e825-48c1-9ce0-9457b6037b6f correlation=host.update.query source=PluginUI target=OperationTarget { PluginId = controlled_visual_recovery, InstanceId = , RunGeneration = , TargetBindingId =  } type=QueryRuntimeUpdate result=Success code=None uncertain=False\r\ninfo: Rug.UI.Core.Services.TaskScheduler[0]\r\n      Automation operation=aafa5aed-a099-488c-9ced-f1a66e92d6d6 correlation=host.update.query source=PluginUI target=OperationTarget { PluginId = controlled_visual_recovery, InstanceId = , RunGeneration = , TargetBindingId =  } type=QueryRuntimeUpdate result=Success code=None uncertain=False\r\ninfo: Rug.UI.Core.Services.TaskScheduler[0]\r\n      Automation operation=a4d5ca55-5d3b-4fb4-b86c-50384e884de9 correlation=2fd2cec893c1415dabb6bb9a773b5895 source=PluginUI target=OperationTarget { PluginId = controlled_visual_recovery, InstanceId = afd3dca0-8439-40d2-ad6d-41572130479b, RunGeneration = 1, TargetBindingId = d54a9208-4c26-4db2-92df-d8474bc6f1b5 } type=Start result=Success code=None uncertain=False\r\ninfo: Rug.UI.Core.Services.TaskScheduler[0]\r\n      Automation operation=0182ab4a-008f-4d62-afc2-30681d60a0a6 correlation=afd3dca0843940d2ad6d41572130479b source=Lua target=OperationTarget { PluginId = controlled_visual_recovery, InstanceId = afd3dca0-8439-40d2-ad6d-41572130479b, RunGeneration = 1, TargetBindingId = d54a9208-4c26-4db2-92df-d8474bc6f1b5 } type=Capture result=Success code=None uncertain=False\r\ninfo: Rug.UI.Core.Services.TaskScheduler[0]\r\n      Automation operation=94c944e7-a852-44b0-87ee-03ecdc9acf60 correlation=afd3dca0843940d2ad6d41572130479b source=Lua target=OperationTarget { PluginId = controlled_visual_recovery, InstanceId = afd3dca0-8439-40d2-ad6d-41572130479b, RunGeneration = 1, TargetBindingId = d54a9208-4c26-4db2-92df-d8474bc6f1b5 } type=FindImage result=Success code=None uncertain=False\r\ninfo: Rug.UI.Core.Services.TaskScheduler[0]\r\n      Automation operation=e288bb62-2c7d-4a86-8ff9-61e8cd4304b1 correlation=afd3dca0843940d2ad6d41572130479b source=Lua target=OperationTarget { PluginId = controlled_visual_recovery, InstanceId = afd3dca0-8439-40d2-ad6d-41572130479b, RunGeneration = 1, TargetBindingId = d54a9208-4c26-4db2-92df-d8474bc6f1b5 } type=ClickObserved result=Success code=None uncertain=False\r\ninfo: Rug.UI.Core.Services.TaskScheduler[0]\r\n      Automation operation=d898b0a4-8af8-44da-82f1-e266e6c6c70f correlation=afd3dca0843940d2ad6d41572130479b source=Lua target=OperationTarget { PluginId = controlled_visual_recovery, InstanceId = afd3dca0-8439-40d2-ad6d-41572130479b, RunGeneration = 1, TargetBindingId = d54a9208-4c26-4db2-92df-d8474bc6f1b5 } type=Capture result=Success code=None uncertain=False\r\ninfo: Rug.UI.Core.Services.TaskScheduler[0]\r\n      Automation operation=15fdd2b4-2efd-485e-9c59-74520cb32872 correlation=afd3dca0843940d2ad6d41572130479b source=Lua target=OperationTarget { PluginId = controlled_visual_recovery, InstanceId = afd3dca0-8439-40d2-ad6d-41572130479b, RunGeneration = 1, TargetBindingId = d54a9208-4c26-4db2-92df-d8474bc6f1b5 } type=FindImage result=Success code=None uncertain=False\r\ninfo: Rug.UI.Core.Services.TaskScheduler[0]\r\n      Automation operation=c898c2da-9284-414d-8b75-fe93a89d6b3f correlation=afd3dca0843940d2ad6d41572130479b source=Lua target=OperationTarget { PluginId = controlled_visual_recovery, InstanceId = afd3dca0-8439-40d2-ad6d-41572130479b, RunGeneration = 1, TargetBindingId = d54a9208-4c26-4db2-92df-d8474bc6f1b5 } type=Sleep result=Cancelled code=Cancelled uncertain=True\r\ninfo: Rug.UI.Core.Services.LuaRuntime[0]\r\n      Lua: [controlled-visual] stopped\r\nshutdown:start:preview-drain\r\nshutdown:complete:preview-drain\r\nshutdown:start:commands-drain\r\nshutdown:complete:commands-drain\r\nshutdown:start:ui-admission\r\nshutdown:complete:ui-admission\r\nshutdown:start:cancel-preparations\r\nshutdown:complete:cancel-preparations\r\nshutdown:start:theme-callbacks\r\nshutdown:complete:theme-callbacks\r\nshutdown:start:notifications\r\nshutdown:complete:notifications\r\nshutdown:start:viewer\r\nshutdown:complete:viewer\r\nshutdown:start:hot-reload\r\nshutdown:complete:hot-reload\r\nshutdown:start:input-sessions\r\nshutdown:complete:input-sessions\r\nshutdown:start:devtools\r\nshutdown:complete:devtools\r\nshutdown:start:scheduler\r\nshutdown:complete:scheduler\r\nshutdown:start:dynamic-ui\r\nshutdown:complete:dynamic-ui\r\nshutdown:start:host-stop\r\nshutdown:complete:host-stop\r\nshutdown:start:container\r\nshutdown:complete:container\r\nshutdown:window-closed\r\n",
+        "Stderr": ""
+      },
+      "runCleanup": [
+        {
+          "SchemaVersion": 1,
+          "HostSessionId": "3ccdcfdb-1902-44f7-a55e-f3710495ff0e",
+          "TraceId": "04184655-ac39-4be7-a2dd-034eafbe280a",
+          "Run": {
+            "PluginId": "controlled_visual_recovery",
+            "InstanceId": "afd3dca0-8439-40d2-ad6d-41572130479b",
+            "RunGeneration": 1,
+            "TargetBindingId": "d54a9208-4c26-4db2-92df-d8474bc6f1b5"
+          },
+          "FirstPersisted": 17,
+          "LastPersisted": 77,
+          "PersistedEvents": 59,
+          "DroppedEvents": 0,
+          "RunCleanupCompleted": true,
+          "RecordingClosed": true,
+          "Incomplete": false,
+          "ActualWorkOutstanding": 0,
+          "RecordedEvents": 59,
+          "LastRecorded": 77,
+          "CleanupSucceeded": true
+        }
+      ]
+    },
+    {
+      "phase": "Awaiting",
+      "passed": true,
+      "result": {
+        "InteractionsPassed": true,
+        "ExitCode": 0,
+        "TargetDown": 1,
+        "TargetUp": 1,
+        "IncidentId": "1e741860-be6d-450d-a303-72ba08f95aa8",
+        "TraceId": "4dc0c470-2746-4b6c-b59b-4a92858a51c5",
+        "Diagnostic": null,
+        "ShutdownLog": "info: Rug.UI.Core.Services.TaskScheduler[0]\r\n      Automation operation=15227360-7f16-4ceb-880b-bf8c7e458987 correlation=host.update.query source=PluginUI target=OperationTarget { PluginId = controlled_visual_recovery, InstanceId = , RunGeneration = , TargetBindingId =  } type=QueryRuntimeUpdate result=Success code=None uncertain=False\r\ninfo: Rug.UI.Core.Services.TaskScheduler[0]\r\n      Automation operation=be998be7-f0b9-4fd7-8916-7aefadbd7192 correlation=host.update.query source=PluginUI target=OperationTarget { PluginId = controlled_visual_recovery, InstanceId = , RunGeneration = , TargetBindingId =  } type=QueryRuntimeUpdate result=Success code=None uncertain=False\r\ninfo: Rug.UI.Core.Services.TaskScheduler[0]\r\n      Automation operation=b4c47c0f-abf7-4b1a-b97f-ddadf79b5633 correlation=59cd8faf26b3485fb6cef565d52c790e source=PluginUI target=OperationTarget { PluginId = controlled_visual_recovery, InstanceId = 43236de3-3ad9-48b7-954c-f4bb12ce2cd2, RunGeneration = 1, TargetBindingId = a9a1da49-a13f-407c-9466-cd2c7c03f6b1 } type=Start result=Success code=None uncertain=False\r\ninfo: Rug.UI.Core.Services.TaskScheduler[0]\r\n      Automation operation=a7b6349d-14fc-4629-872f-eb94f0bdcf0c correlation=43236de33ad948b7954cf4bb12ce2cd2 source=Lua target=OperationTarget { PluginId = controlled_visual_recovery, InstanceId = 43236de3-3ad9-48b7-954c-f4bb12ce2cd2, RunGeneration = 1, TargetBindingId = a9a1da49-a13f-407c-9466-cd2c7c03f6b1 } type=Capture result=Success code=None uncertain=False\r\ninfo: Rug.UI.Core.Services.TaskScheduler[0]\r\n      Automation operation=143bd4f1-90bf-40ec-8e88-988a821a34c8 correlation=43236de33ad948b7954cf4bb12ce2cd2 source=Lua target=OperationTarget { PluginId = controlled_visual_recovery, InstanceId = 43236de3-3ad9-48b7-954c-f4bb12ce2cd2, RunGeneration = 1, TargetBindingId = a9a1da49-a13f-407c-9466-cd2c7c03f6b1 } type=FindImage result=Success code=None uncertain=False\r\ninfo: Rug.UI.Core.Services.TaskScheduler[0]\r\n      Automation operation=061338e0-efec-49b5-a0b2-17a1282c7016 correlation=43236de33ad948b7954cf4bb12ce2cd2 source=Lua target=OperationTarget { PluginId = controlled_visual_recovery, InstanceId = 43236de3-3ad9-48b7-954c-f4bb12ce2cd2, RunGeneration = 1, TargetBindingId = a9a1da49-a13f-407c-9466-cd2c7c03f6b1 } type=ClickObserved result=Success code=None uncertain=False\r\ninfo: Rug.UI.Core.Services.TaskScheduler[0]\r\n      Automation operation=e3b979f6-098f-4d31-b21d-76d18da8c610 correlation=43236de33ad948b7954cf4bb12ce2cd2 source=Lua target=OperationTarget { PluginId = controlled_visual_recovery, InstanceId = 43236de3-3ad9-48b7-954c-f4bb12ce2cd2, RunGeneration = 1, TargetBindingId = a9a1da49-a13f-407c-9466-cd2c7c03f6b1 } type=Capture result=Success code=None uncertain=False\r\ninfo: Rug.UI.Core.Services.TaskScheduler[0]\r\n      Automation operation=c220faa0-9008-4968-acb7-bad679171c24 correlation=43236de33ad948b7954cf4bb12ce2cd2 source=Lua target=OperationTarget { PluginId = controlled_visual_recovery, InstanceId = 43236de3-3ad9-48b7-954c-f4bb12ce2cd2, RunGeneration = 1, TargetBindingId = a9a1da49-a13f-407c-9466-cd2c7c03f6b1 } type=FindImage result=Success code=None uncertain=False\r\nwarn: Rug.UI.Core.Services.AnomalyLogger[0]\r\n      [Anomaly Detected] Plugin controlled_visual_recovery, instance 43236de3-3ad9-48b7-954c-f4bb12ce2cd2: controlled-visual-ready. Record: F:\\Cardinal\\Rug\\Rug\\artifacts\\host-exit\\ui-Release-3f5c9e115dcb4b1a86d0ca63fe8db6a4\\Awaiting\\incidents\\20261022_092626_8821999_controlled_visual_recovery_43236de33ad948b7954cf4bb12ce2cd2_7ac369a963c343ada75bb1e4cabd956e.json\r\ninfo: Rug.UI.Core.Services.LuaRuntime[0]\r\n      Lua: [controlled-visual-recovery] stopped\r\nshutdown:start:preview-drain\r\nshutdown:complete:preview-drain\r\nshutdown:start:commands-drain\r\nshutdown:complete:commands-drain\r\nshutdown:start:ui-admission\r\nshutdown:complete:ui-admission\r\nshutdown:start:cancel-preparations\r\nshutdown:complete:cancel-preparations\r\nshutdown:start:theme-callbacks\r\nshutdown:complete:theme-callbacks\r\nshutdown:start:notifications\r\nshutdown:complete:notifications\r\nshutdown:start:viewer\r\nshutdown:complete:viewer\r\nshutdown:start:hot-reload\r\nshutdown:complete:hot-reload\r\nshutdown:start:input-sessions\r\nshutdown:complete:input-sessions\r\nshutdown:start:devtools\r\nshutdown:complete:devtools\r\nshutdown:start:scheduler\r\nshutdown:complete:scheduler\r\nshutdown:start:dynamic-ui\r\nshutdown:complete:dynamic-ui\r\nshutdown:start:host-stop\r\nshutdown:complete:host-stop\r\nshutdown:start:container\r\nshutdown:complete:container\r\nshutdown:window-closed\r\n",
+        "Stderr": ""
+      },
+      "runCleanup": [
+        {
+          "SchemaVersion": 1,
+          "HostSessionId": "700a400d-51d4-46bd-8e5a-2aa4f724a717",
+          "TraceId": "4dc0c470-2746-4b6c-b59b-4a92858a51c5",
+          "Run": {
+            "PluginId": "controlled_visual_recovery",
+            "InstanceId": "43236de3-3ad9-48b7-954c-f4bb12ce2cd2",
+            "RunGeneration": 1,
+            "TargetBindingId": "a9a1da49-a13f-407c-9466-cd2c7c03f6b1"
+          },
+          "FirstPersisted": 17,
+          "LastPersisted": 74,
+          "PersistedEvents": 56,
+          "DroppedEvents": 0,
+          "RunCleanupCompleted": true,
+          "RecordingClosed": true,
+          "Incomplete": false,
+          "ActualWorkOutstanding": 0,
+          "RecordedEvents": 56,
+          "LastRecorded": 74,
+          "CleanupSucceeded": true
+        }
+      ]
+    }
+  ]
+}

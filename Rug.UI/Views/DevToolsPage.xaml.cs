@@ -32,6 +32,7 @@ public sealed partial class DevToolsPage : Page
     private bool _picking;
     private bool _coordPicking;
     private bool _welcomed;
+    private volatile bool _attached;
 
     public DevToolsViewModel ViewModel
     {
@@ -53,6 +54,7 @@ public sealed partial class DevToolsPage : Page
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        _attached=true;
         ViewModel.Logged -= OnLogged;       // idempotent subscribe
         ViewModel.FrameReady -= OnFrameReady;
         ViewModel.Logged += OnLogged;
@@ -67,6 +69,7 @@ public sealed partial class DevToolsPage : Page
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
+        _attached=false;
         ViewModel.Logged -= OnLogged;
         ViewModel.FrameReady -= OnFrameReady;
         _ = ViewModel.StopPreviewAsync();
@@ -168,7 +171,7 @@ public sealed partial class DevToolsPage : Page
     // --- Preview rendering ----------------------------------------------------
 
     private void OnFrameReady(object? sender, PreviewFrame pf)
-        => _dispatcher.TryEnqueue(() => RenderFrame(pf));
+    { if(_attached&&!ViewModel.IsClosing)_dispatcher.TryEnqueue(() => {if(_attached&&!ViewModel.IsClosing)RenderFrame(pf);}); }
 
     private void RenderFrame(PreviewFrame pf)
     {
@@ -206,6 +209,7 @@ public sealed partial class DevToolsPage : Page
             return;  // a frame arriving mid-resize; skip it
         }
         _bitmap.Invalidate();
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(PreviewImage,$"Captured preview {w}x{h}");
 
         DrawOverlay(pf.Boxes);
     }
@@ -255,8 +259,11 @@ public sealed partial class DevToolsPage : Page
     // --- Console log ----------------------------------------------------------
 
     private void OnLogged(object? sender, LogEntry entry)
-        => _dispatcher.TryEnqueue(() =>
+    {
+        if(!_attached||ViewModel.IsClosing)return;
+        _dispatcher.TryEnqueue(() =>
         {
+            if(!_attached||ViewModel.IsClosing)return;
             _logs.Add(entry);
             while (_logs.Count > 2000)
             {
@@ -264,6 +271,7 @@ public sealed partial class DevToolsPage : Page
             }
             LogScroller.ChangeView(null, LogScroller.ScrollableHeight, null);
         });
+    }
 
     private void ClearLog_Click(object sender, RoutedEventArgs e) => _logs.Clear();
 

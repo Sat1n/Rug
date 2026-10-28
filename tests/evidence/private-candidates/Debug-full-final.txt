@@ -1,0 +1,178 @@
+Gateway late-frame cache and parameter-boundary regressions passed
+Automation gateway identity, adapters, deduplication, cancellation and lifecycle tests passed
+Fresh recovery panel PASS: settles; samples=3
+Fresh recovery panel PASS: red; samples=32
+Fresh recovery panel PASS: cancel; samples=1
+Fresh recovery panel PASS: stop; samples=1
+Fresh recovery panel PASS: capture-fault; samples=2
+Fresh recovery panel PASS: deadline; samples=1
+Fresh recovery panel PASS: late-green; samples=2
+Recovery commit boundary PASS: caller
+Recovery commit boundary PASS: validation-deadline
+Recovery commit boundary PASS: request-deadline
+Recovery commit boundary PASS: stop
+Recovery commit boundary PASS: changed
+Recovery commit boundary PASS: fault
+Recovery commit boundary PASS: success
+Recovery PASS: real Lua init/tick locals, explicit tables, frozen mainline, trusted validation, dedup, Stop/late work, grants/identity, planned handoff and epoch isolation
+Checkpoint real Lua/filesystem PASS: same-process reopen AND separate child-process read; fresh frames=1
+Checkpoint failure boundary PASS: false
+Checkpoint failure boundary PASS: missing
+Checkpoint failure boundary PASS: timeout
+Checkpoint failure boundary PASS: stop-validation
+Checkpoint failure boundary PASS: stop-before
+Checkpoint failure boundary PASS: stop-publish
+Checkpoint failure boundary PASS: stop-publish-fault
+Checkpoint failure boundary PASS: fault-publish
+Checkpoint failure boundary PASS: fault-capture
+Checkpoint failure boundary PASS: permission
+Checkpoint failure boundary PASS: revoke
+Checkpoint store PASS: first/replace, late sequence, isolation, old/new reads, corruption/half/temp/versions/compatibility and all capacity limits
+Checkpoint version field PASS: overflow/fraction/type/missing => Corrupt; legacy/unknown integers => UnsupportedFormat; bytes unchanged; real IO failure exposed
+Checkpoint JSON PASS: byte/depth/actions/null/missing/duplicates/nonfinite/cycles/unsupported objects and real Lua null
+Checkpoint exact numbers PASS: tiny/underflow/high-precision/large integers, equivalent forms, config hashes, real-file tamper and legacy format rejection
+Checkpoint identity PASS: dual instances, immutable loaded code/config, new-generation replacement and old-callback rejection
+Checkpoint previous-record retention PASS: false
+Checkpoint previous-record retention PASS: missing
+Checkpoint previous-record retention PASS: timeout
+Checkpoint previous-record retention PASS: stop-before
+Checkpoint caller cancellation PASS: previous record retained; late validation ignored
+Checkpoint original-token barrier PASS: before decision retains old record with zero new publications
+Checkpoint original-token barrier PASS: after decision completes actual publication
+Checkpoint native-observation boundary PASS: real completion before disposal; late frame discarded
+Checkpoint shipped sample PASS: embedded code binding, actual Lua and trusted green-frame/schema validation (Fake pixels)
+Checkpoint freeze PASS: zero new input/early mainline; unrelated timer runs independently
+Checkpoint same-source concurrency PASS: admission sequence 1/2; one validation at a time; latest state retained
+Checkpoint restart restore PASS: actual new process, re-granted test host, fresh Fake observation (NOT WGC), AFTER only
+Checkpoint restore rejection PASS: false
+Checkpoint restore rejection PASS: cancel
+Checkpoint restore rejection PASS: stop
+Checkpoint restore rejection PASS: code
+Checkpoint restore rejection PASS: config
+Checkpoint restore rejection PASS: record
+Checkpoint restore rejection PASS: revoke
+Checkpoint restore rejection PASS: target
+Checkpoint restore rejection PASS: node
+Checkpoint restore rejection PASS: deadline
+Checkpoint restore rejection PASS: validation-timeout
+Checkpoint restore decision PASS: blocked original cancellation before commit stops; cancellation after commit keeps tracked new run
+Checkpoint restore definitions PASS: missing hook, input/checkpoint/state/log attempts reject; actual Lua error remains failure; no business input
+Checkpoint restore actual-work PASS: Stopping/resources retained until noncooperative capture ends; late frame never starts Lua
+Checkpoint discovery PASS: bounded real files, installation isolation, corrupt/legacy/oversized reasons and temp/unattributable-fragment exclusion
+Checkpoint selection current-manifest PASS: cached version/default/permission identity not reused
+Checkpoint disk configuration PASS: changed; frozen selection rejected, zero AFTER input
+Checkpoint disk configuration PASS: created; frozen selection rejected, zero AFTER input
+Checkpoint disk configuration PASS: deleted; frozen selection rejected, zero AFTER input
+Checkpoint disk configuration PASS: empty-created; frozen selection rejected, zero AFTER input
+Checkpoint disk configuration PASS: final-boundary; frozen selection rejected, zero AFTER input
+Checkpoint disk configuration PASS: io-fault; frozen selection rejected, zero AFTER input
+Checkpoint restore PASS: actual Lua, new-run links, no BEFORE replay, dedup/exclusion, fresh verification, late results
+Checkpoint PASS: actual Lua, trusted fresh observation, real files/reopen/child, isolated sources, Stop/IO boundaries, corruption/compatibility/limits/JSON
+Plugin updates PASS: immutable candidates, compile-only validation, old runs/UI/config/grants retained, UI-only pause/identity, staged rollback, bounded latest-save ordering
+Late checkpoint ownership PASS: actual Lua old reject/timeout/cancel/success preserve plan B; next valid submission freezes B
+Runtime freeze lifecycle PASS: cancel
+Runtime freeze lifecycle PASS: pause
+Runtime freeze lifecycle PASS: stop
+Runtime freeze lifecycle PASS: revoke
+Runtime freeze lifecycle PASS: takeover
+Runtime freeze lifecycle PASS: target
+Runtime freeze lifecycle PASS: supersede
+Runtime freeze lifecycle PASS: caller-cancel
+Runtime update freeze PASS: actual Lua BEFORE/checkpoint/AFTER, retained identity/coroutine, no publication/restart, multi-run rollback, admission, Pause/Stop/revoke/candidate/late-IO barriers and cleanup
+Runtime switch scenario PASS: success
+Runtime switch scenario PASS: double
+Runtime switch scenario PASS: pause
+Runtime switch scenario PASS: no-rule
+Runtime switch scenario PASS: hash
+Runtime switch scenario PASS: node
+Runtime switch scenario PASS: actions
+Runtime switch scenario PASS: config-rule
+Runtime switch scenario PASS: permissions
+Runtime switch scenario PASS: definition
+Runtime switch scenario PASS: missing-hook
+Runtime switch scenario PASS: second-scene
+Runtime switch scenario PASS: post-scene
+Runtime switch scenario PASS: stop-fault
+Runtime switch scenario PASS: restore-fault
+Runtime switch scenario PASS: cancel-pre
+Runtime switch scenario PASS: cancel-post
+Runtime switch scenario PASS: stop-pre
+Runtime switch scenario PASS: stop-post
+Runtime switch scenario PASS: revoke
+Runtime switch scenario PASS: target
+Runtime switch scenario PASS: supersede
+Runtime switch scenario PASS: disk-config
+Runtime switch scenario PASS: live-config
+Runtime switch scenario PASS: record
+Runtime switch scenario PASS: timeout
+Runtime switch scenario PASS: blocked-cancel
+Runtime switch scenario PASS: concurrent
+Runtime switch scenario PASS: rule-revoked
+Runtime switch scenario PASS: native-pre
+Runtime switch scenario PASS: native-post
+Runtime switch scenario PASS: ui-build
+Runtime switch scenario PASS: ui-publish
+Runtime switch scenario PASS: pause-cancel
+Runtime switch scenario PASS: double-restore-fault
+Runtime switch scenario PASS: takeover-after
+Runtime switch scenario PASS: supersede-post
+Runtime switch scenario PASS: revert-post
+Runtime switch scenario PASS: validator-timeout
+Runtime switch scenario PASS: ui-cleanup-fault
+Runtime switch scenario PASS: shutdown-commit
+Runtime switch scenario PASS: observations
+Runtime switch PASS: actual Lua group AFTER-only, immutable receipts, direct compatibility, staged rollback, irreversible stop, pause inheritance, request races and cleanup
+Capture geometry PASS: QPC rational conversion/domain refusal, invalid time, crop/ROI/borders, scale/letterbox padding, rounding and window identity rejection
+Observations PASS: host identity, actual-frame provenance, padded ROI, global capacity, opaque reference isolation, late/cancel/Stop publication, actual Lua and drained resources
+Observed time diagnostics PASS: exact source/QPC, stale-after-move zero down/uncertain, raw suppressed future, unknown/domain isolation, persisted reread; unchanged 1000ms guard
+Candidate late stop/afterMove=False: calls=2, move/down/up=0/0/0, uncertain=False
+Candidate late revoke/afterMove=False: calls=2, move/down/up=0/0/0, uncertain=False
+Candidate late takeover/afterMove=False: calls=2, move/down/up=0/0/0, uncertain=False
+Candidate late cancel/afterMove=False: calls=2, move/down/up=0/0/0, uncertain=False
+Candidate late cancel-blocked/afterMove=False: calls=2, move/down/up=0/0/0, uncertain=False
+Candidate late timeout/afterMove=False: calls=2, move/down/up=0/0/0, uncertain=False
+Candidate late stop/afterMove=True: calls=3, move/down/up=1/0/0, uncertain=True
+Candidate late revoke/afterMove=True: calls=3, move/down/up=1/0/0, uncertain=True
+Candidate late takeover/afterMove=True: calls=3, move/down/up=1/0/0, uncertain=True
+Candidate late cancel/afterMove=True: calls=3, move/down/up=1/0/0, uncertain=True
+Candidate late cancel-blocked/afterMove=True: calls=3, move/down/up=1/0/0, uncertain=True
+Candidate late timeout/afterMove=True: calls=3, move/down/up=1/0/0, uncertain=True
+Private candidates PASS: actual Gateway/transaction, <=3 per phase, shared <=750ms, strict newer/native validity, terminal ROI/geometry/clock/errors, original source/authority/cancellation, late actual work, bounded pool and diagnostic failure isolation
+Observed clicks PASS: actual Lua/Gateway, input arbitration, trusted QPC/ROI, all execution boundaries, one-shot sources, cancellation/Stop/release and bounded resources
+Trace subprocess offline read PASS; no task/authorization/window restored
+Execution traces PASS: actual Gateway/Lua, dedup, actual-work vs caller, source/validation/release, bounded writer/reader, corruption, quotas and stuck IO isolation
+Trace review PASS: bounded latest-only background reads/closed views, live+history identities, real PNG/JSON boundary links, recovery preservation, legacy/unknown/corrupt and recorder fault isolation
+Paused wake boundary PASS: stop; token propagation held
+Paused wake boundary PASS: resume-fault; token propagation held
+Paused wake boundary PASS: resume-stop; token propagation held
+Paused host Stop PASS: actual Lua, no resume check/input, normal Stopped and one on_stop
+Host close admission passed: blocked cancellation callback, two real Lua runs, no new Gateway input/start/pause/resume, normal shared cleanup
+Direct anomaly admission passed: host Stop cancels before capture; permission denial and real archive IO failure remain faults
+Host Stop classification passed: synchronous/asynchronous rejection, pause deferral; real Lua/permission/cleanup errors remain faults
+Repeated Gateway Stop passed: pending work/cleanup, timed-out replay, validated identity/policy, shared completion and registry cleanup
+Stop admission barriers passed with uncancelled tokens: adapters, bridge/arbiter/dispatch queues, composite steps, releases, late Resume and terminal states
+Lifecycle barriers passed: init/tick, sleep/vision, actual input/releases, queued input, late work, stop priority, resume validation and cleanup
+Explicit grants, revocation, queued dispatch, installation isolation and reload tests passed
+Foreground confirmation: bounded asynchronous activation, live checks, leases and Gateway deduplication passed
+Gateway input outcome boundaries and retained duplicate results passed (9 deterministic scenarios)
+Shared input conflict-FIFO, composite leases, queue cancellation, late native tasks, manual takeover and window lifetime tests passed
+Scheduler takeover cancellation callback order passed (init/tick); unexplained stops remain faults
+Candidate intervention policy, session boundaries, faults, delayed native cleanup and scheduler integration tests passed
+Production diagnostic aggregate/verdict tests passed; synthetic tests are not human or software acceptance
+Native keyboard callback parser/intersections/software key aggregates/owner/unload guard passed (no input or Hook chain emitted)
+Hook/Raw operation order, real registrations, deferred single installation, phase clocks, failures and full cleanup passed (6 success + 4 failure lifecycles; no software AUTO)
+External observer: real separate-process Hook ownership, parent Raw/target preservation, single install, pre-install refusal, EOF and full cleanup passed (5 lifecycles; no software AUTO or human acceptance)
+Manual Hook install: three real B/C order pairs, single install, Raw identity preservation, pre-install refusal, three incomplete-session cleanups and four fail-before-load CLI checks passed (no input emission/AUTO acceptance)
+Split target/receiver threads with both/no/keyboard-only Hooks, optional Raw Input, target protocol, observable thread fault and repeated cleanup passed (12 lifecycles)
+Unregistered receiver window/thread/timer, repeated startup/disposal, observable fault and foreign registration preservation passed (3 lifecycles)
+Registered direct receiver readiness, ownership conflict, generations, faults and cleanup passed (3 lifecycles; software AUTO not inferred)
+Registered message-only receiver native=False keyboard=True mouse=True managedKeyboardHook=True nativeCallback=False originalHookModule=False, omitted parsing/evidence, WM_INPUT cleanup, conflicts, ownership loss and generations passed (3 lifecycles; AUTO not inferred)
+Registered message-only receiver native=False keyboard=False mouse=True managedKeyboardHook=True nativeCallback=False originalHookModule=False, omitted parsing/evidence, WM_INPUT cleanup, conflicts, ownership loss and generations passed (3 lifecycles; AUTO not inferred)
+Registered message-only receiver native=False keyboard=True mouse=False managedKeyboardHook=True nativeCallback=False originalHookModule=False, omitted parsing/evidence, WM_INPUT cleanup, conflicts, ownership loss and generations passed (3 lifecycles; AUTO not inferred)
+Registered message-only receiver native=True keyboard=True mouse=False managedKeyboardHook=True nativeCallback=False originalHookModule=False, omitted parsing/evidence, WM_INPUT cleanup, conflicts, ownership loss and generations passed (3 lifecycles; AUTO not inferred)
+Registered message-only receiver native=True keyboard=True mouse=False managedKeyboardHook=False nativeCallback=False originalHookModule=False, omitted parsing/evidence, WM_INPUT cleanup, conflicts, ownership loss and generations passed (3 lifecycles; AUTO not inferred)
+Registered message-only receiver native=True keyboard=True mouse=False managedKeyboardHook=True nativeCallback=True originalHookModule=False, omitted parsing/evidence, WM_INPUT cleanup, conflicts, ownership loss and generations passed (3 lifecycles; AUTO not inferred)
+Registered message-only receiver native=True keyboard=True mouse=False managedKeyboardHook=True nativeCallback=True originalHookModule=True, omitted parsing/evidence, WM_INPUT cleanup, conflicts, ownership loss and generations passed (3 lifecycles; AUTO not inferred)
+Raw Input parsing, generations, bounded delivery, consumers and registration ownership tests passed
+Native PostMessage isolated-window click/key release and manual takeover passed
+Lua bridge, scheduler and state/command bus tests passed

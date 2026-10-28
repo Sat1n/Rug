@@ -1,0 +1,74 @@
+{
+  "type": "Page",
+  "id": "demo-page",
+  "title": "明日方舟自动化演示",
+  "children": [{
+    "type": "SelectorBarGroup",
+    "id": "demo-tabs",
+    "tabs": [
+      {
+        "type": "Tab",
+        "id": "farming",
+        "title": "一键刷图",
+        "children": [
+          {
+            "type": "InfoBanner",
+            "id": "demo-notice",
+            "title": "演示模式",
+            "description": "本插件只模拟步骤，不会操作游戏或模拟器。",
+            "severity": "Informational"
+          },
+          {
+            "type": "ToggleCard",
+            "id": "auto-refill",
+            "title": "自动补充理智",
+            "stateKey": "demo.auto_refill",
+            "default": false
+          },
+          {
+            "type": "TaskSelectorCard",
+            "id": "task-selector",
+            "title": "任务编排",
+            "description": "选择步骤后开始执行",
+            "stateKey": "demo.selected_tasks",
+            "command": "demo.start_selected",
+            "default": ["wake", "ocr"],
+            "tasks": [
+              { "id": "wake", "title": "唤醒模拟器" },
+              { "id": "ocr", "title": "OCR 识别主页" },
+              { "id": "farm", "title": "模拟刷图" }
+            ]
+          },
+          {
+            "type": "StepFlowView",
+            "id": "step-flow",
+            "title": "执行步骤",
+            "stateKey": "demo.steps",
+            "steps": []
+          }
+        ]
+      },
+      {
+        "type": "Tab",
+        "id": "tools",
+        "title": "小工具",
+        "children": [
+          {
+            "type": "TextCard",
+            "id": "note",
+            "title": "备注",
+            "stateKey": "demo.note",
+            "default": ""
+          },
+          {
+            "type": "InfoBanner",
+            "id": "tools-info",
+            "title": "热重载已启用",
+            "description": "保存 ui.json 或 main.lua 后自动重建界面。",
+            "severity": "Informational"
+          }
+        ]
+      }
+    ]
+  }]
+}

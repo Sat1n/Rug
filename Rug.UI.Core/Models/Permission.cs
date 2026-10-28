@@ -3,6 +3,8 @@ namespace Rug.UI.Core.Models;
 /// <summary>Exact manifest permission names. No wildcard or prefix matching.</summary>
 public static class Permission
 {
+    public static bool IsKnown(string permission) => permission is Timer or VisionCapture or VisionMatch or
+        VisionOcr or ControlInput or Network or FileSystem or Agent or Checkpoint;
     public const string Timer = "timer";
     public const string VisionCapture = "vision.capture";
     public const string Capture = VisionCapture;
@@ -12,4 +14,5 @@ public static class Permission
     public const string Network = "network";
     public const string FileSystem = "filesystem";
     public const string Agent = "agent";
+    public const string Checkpoint = "checkpoint";
 }

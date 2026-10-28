@@ -178,6 +178,7 @@
     <ClInclude Include="Input\IInputController.h" />
     <ClInclude Include="Input\KmboxInputController.h" />
     <ClInclude Include="Input\Win32InputController.h" />
+    <ClInclude Include="Input\InputSendEvidence.h" />
     <ClInclude Include="IOcrEngine.h" />
     <ClInclude Include="ImageView.h" />
     <ClInclude Include="ModelCatalog.h" />
@@ -185,6 +186,7 @@
     <ClInclude Include="PaddleOcrEngine.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="WgcCapturer.h" />
+    <ClInclude Include="CaptureContract.h" />
     <ClInclude Include="WinRtOcrEngine.h" />
   </ItemGroup>
   <ItemGroup>

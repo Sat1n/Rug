@@ -1,0 +1,3 @@
+CLR: Assert failure(PID 21864 [0x00005568], Thread: 36972 [0x906c]): !"Attempt to execute managed code after the .NET runtime thread state has been destroyed."
+    File: D:\a\_work\1\s\src\runtime\src\coreclr\vm\ceemain.cpp:1721 Image:
+F:\Cardinal\Rug\Rug\Rug.UI\bin\x64\Debug\net10.0-windows10.0.22621.0\win-x64\Rug.UI.exe

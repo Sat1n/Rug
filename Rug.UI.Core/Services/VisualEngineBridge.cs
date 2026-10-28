@@ -7,9 +7,8 @@ using Rug.UI.Core.Security;
 namespace Rug.UI.Core.Services;
 
 /// <summary>
-/// Keeps one managed WGC frame per script instance and passes it to native OCR and
-/// matching without transferring pixel ownership. Each new capture replaces the
-/// previous frame; region operations use a short-lived managed BGRA crop.
+/// Owner-scoped single-frame cache and recognition leases in a shared bounded host pool.
+/// Public values contain metadata only; trusted service pixels never escape to Lua/Gateway.
 /// </summary>
 public sealed class VisualEngineBridge : IDisposable
 {
@@ -19,46 +18,81 @@ public sealed class VisualEngineBridge : IDisposable
     private readonly PermissionInterceptor _permissions;
     private readonly string? _pluginDirectory;
     private readonly object _frameGate = new();
-    private CapturedFrame? _frame;
-    private bool _disposed;
+    private readonly ObservationFramePool _frames;
+    private readonly ObservationFramePool.Session _session;
+    private readonly TaskExecutionContext? _context;
+    private readonly Action? _validateRun;
+    private readonly RunIdentity _identity;
+    private volatile bool _disposed;
 
     public VisualEngineBridge(ICaptureService capture, IOcrService ocr,
         ITemplateMatchService matcher, PermissionInterceptor permissions,
-        string? pluginDirectory = null)
+        RunIdentity identity, string? pluginDirectory = null, ObservationFramePool? frames = null,
+        TaskExecutionContext? context = null, Action? validateRun = null)
     {
         _capture = capture ?? throw new ArgumentNullException(nameof(capture));
         _ocr = ocr ?? throw new ArgumentNullException(nameof(ocr));
         _matcher = matcher ?? throw new ArgumentNullException(nameof(matcher));
         _permissions = permissions ?? throw new ArgumentNullException(nameof(permissions));
+        if (context is not null && context.Identity != identity) throw new ArgumentException("Observation lifecycle/identity mismatch.", nameof(identity));
+        _frames = frames ?? ObservationFramePool.Shared;
+        _identity = identity;
+        _context = context; _validateRun = validateRun;
         _pluginDirectory = string.IsNullOrWhiteSpace(pluginDirectory)
             ? null : Path.GetFullPath(pluginDirectory);
+        _session = _frames.Open(identity);
     }
 
-    public async Task<CapturedFrame?> CaptureAsync(CancellationToken cancellationToken = default)
+    /// <summary>@shape return: metadata/null only; producer/copy bytes reserved globally before capture.
+    /// @source pool: Services/ObservationFramePool.cs#class:ObservationFramePool</summary>
+    public async Task<CapturedFrameMetadata?> CaptureAsync(CancellationToken cancellationToken = default)
     {
         _permissions.Demand(Permission.VisionCapture, "rug.capture");
         ThrowIfDisposed();
-        CapturedFrame? frame = await _capture.GrabFrameAsync(cancellationToken).ConfigureAwait(false);
-        if (frame is not null) ValidateFrame(frame);
+        _validateRun?.Invoke();
+        using var work = _context?.EnterOperation(false);
+        CheckCancellation(cancellationToken);
+        using var operation = _frames.Capture(_session);
+        long requested = _frames.Timestamp; var requestedUtc = _frames.UtcNow;
+        CapturedFrame? frame = await (_capture is IBoundedFrameCapture bounded
+            ? bounded.GrabFrameBoundedAsync(_frames.Limits.MaxFrameBytes, cancellationToken)
+            : _capture.GrabFrameAsync(cancellationToken)).ConfigureAwait(false);
+        long received = _frames.Timestamp; var receivedUtc = _frames.UtcNow;
+        CheckCancellation(cancellationToken);
+        var owned = frame is null ? null : operation.Detach(frame);
+        _permissions.Demand(Permission.VisionCapture, "rug.capture.publish");
+        ObservationEnvelope? observation = null;
         lock (_frameGate)
         {
             ThrowIfDisposed();
-            _frame = frame;
+            CheckCancellation(cancellationToken);
+            _validateRun?.Invoke();
+            if (_context is null) Publish(); else _context.PublishObservation(Publish, cancellationToken);
+            void Publish() => observation = operation.Publish(owned, requestedUtc, requested, receivedUtc, received, cancellationToken);
         }
-        return frame;
+        return observation is null ? null : new(observation.Image.Width, observation.Image.Height, observation.Image.Stride, observation);
     }
 
+    /// <summary>@shape region: source-image ROI; hit: legacy client coordinates plus actual held-frame provenance.
+    /// @source source: Services/ObservationFramePool.cs#class:ObservationFramePool</summary>
     public async Task<ImageFindResult?> FindImageAsync(string templatePath, float threshold = 0.8f,
-        Rect? region = null, CancellationToken cancellationToken = default)
+        Rect? region = null, CancellationToken cancellationToken = default, string? frameReference = null)
     {
         _permissions.Demand(Permission.VisionMatch, "rug.find_image");
         ThrowIfDisposed();
+        _validateRun?.Invoke();
+        using var work = _context?.EnterOperation(false);
         if (!float.IsFinite(threshold) || threshold is < 0 or > 1)
             throw new ArgumentOutOfRangeException(nameof(threshold), "Threshold must be between 0 and 1.");
         string path = ResolveTemplatePath(templatePath);
-        CapturedFrame source = CurrentFrame();
+        using var lease = _frames.Read(_session, frameReference, region);
+        CapturedFrame source = lease.Frame;
         CapturedFrame target = Crop(source, region);
+        long started = _frames.Timestamp;
+        CheckCancellation(cancellationToken); _validateRun?.Invoke();
         IReadOnlyList<TemplateMatchResult> hits;
+        ExecutionTraceScope.Current.Value?.Emit(TraceEventKind.Observation,reason:"template input leased",
+            observation:new(lease.Observation.ObservationId,lease.Observation.FrameId));
         try
         {
             hits = await _matcher.MatchFrameAsync(target, path, threshold, cancellationToken).ConfigureAwait(false);
@@ -67,21 +101,41 @@ public sealed class VisualEngineBridge : IDisposable
         {
             throw new InvalidDataException($"Template image is unreadable or invalid: {path}", ex);
         }
+        CheckCancellation(cancellationToken); _validateRun?.Invoke(); ThrowIfDisposed();
         TemplateMatchResult? best = hits.Where(hit => double.IsFinite(hit.Score) && hit.Score >= threshold)
             .OrderByDescending(hit => hit.Score).FirstOrDefault();
-        if (best is null) return null;
-        return new ImageFindResult(best.X + (region?.X ?? 0), best.Y + (region?.Y ?? 0), best.Score);
+        if (best is null)
+        {
+            ExecutionTraceScope.Current.Value?.Emit(TraceEventKind.Observation,status:"NoMatch",reason:"template-match:result",
+                observation:new(lease.Observation.ObservationId,lease.Observation.FrameId));
+            return null;
+        }
+        var recognized=Recognized(lease.Observation,target,region,"template-match",started);
+        ExecutionTraceScope.Current.Value?.Emit(TraceEventKind.Observation,status:"Matched",reason:"template-match:result",
+            observation:new(recognized.ObservationId,recognized.FrameId));
+        return new ImageFindResult(best.X + (region?.X ?? 0), best.Y + (region?.Y ?? 0), best.Score,
+            recognized);
     }
 
+    /// <summary>@shape blocks: ROI-local native boxes translated once, with the leased source envelope.
+    /// @source source: Services/ObservationFramePool.cs#class:ObservationFramePool</summary>
     public async Task<VisionOcrResult> OcrAsync(Rect? region = null, string? language = null,
-        OcrEngineType engine = OcrEngineType.WinRt, CancellationToken cancellationToken = default)
+        OcrEngineType engine = OcrEngineType.WinRt, CancellationToken cancellationToken = default, string? frameReference = null)
     {
         _permissions.Demand(Permission.VisionOcr, "rug.ocr");
         ThrowIfDisposed();
-        CapturedFrame source = CurrentFrame();
+        _validateRun?.Invoke();
+        using var work = _context?.EnterOperation(false);
+        using var lease = _frames.Read(_session, frameReference, region);
+        CapturedFrame source = lease.Frame;
         CapturedFrame target = Crop(source, region);
+        long started = _frames.Timestamp;
+        CheckCancellation(cancellationToken); _validateRun?.Invoke();
+        ExecutionTraceScope.Current.Value?.Emit(TraceEventKind.Observation,reason:"ocr input leased",
+            observation:new(lease.Observation.ObservationId,lease.Observation.FrameId));
         IReadOnlyList<OcrTextBlock> local = await _ocr.RecognizeFrameAsync(
             target, engine, language, cancellationToken).ConfigureAwait(false);
+        CheckCancellation(cancellationToken); _validateRun?.Invoke(); ThrowIfDisposed();
         IReadOnlyList<OcrTextBlock> absolute = region is { } rect
             ? local.Select(block => block with
             {
@@ -92,13 +146,31 @@ public sealed class VisualEngineBridge : IDisposable
                 }
             }).ToArray()
             : local;
-        return new VisionOcrResult(string.Join("\n", absolute.Select(block => block.Text)), absolute);
+        return new VisionOcrResult(string.Join("\n", absolute.Select(block => block.Text)), Array.AsReadOnly(absolute.ToArray()),
+            Recognized(lease.Observation, target, region, "ocr", started));
     }
+    private ObservationEnvelope Recognized(ObservationEnvelope source, CapturedFrame input, Rect? region, string kind, long started)
+        => _frames.RegisterRecognition(_session, source with { ObservationId = Guid.NewGuid(), Processing = new(kind,
+            region ?? new Rect(0, 0, source.Image.Width, source.Image.Height), input.Width, input.Height, input.Stride,
+            region?.X ?? 0, region?.Y ?? 0, started, _frames.Timestamp) });
 
-    private CapturedFrame CurrentFrame()
+    internal IDisposable BeginInput() => _frames.BeginInput();
+    internal void InputSideEffect() => _frames.InvalidateActions();
+    internal ObservedClickTransaction PrepareObservedClick(ObservedClickRequest request, ObservedClickServices services)
     {
-        lock (_frameGate)
-            return _frame ?? throw new InvalidOperationException("Call rug.capture before vision recognition.");
+        ThrowIfDisposed(); _permissions.Demand(Permission.Capture,"rug.click_observed.verify"); _validateRun?.Invoke();
+        var source=_frames.ResolveAction(_session,request);
+        try
+        {
+            return new(_frames,_session,source,_capture,_identity,services,request,()=>_validateRun?.Invoke(),
+                ()=>_permissions.Demand(Permission.Capture,"rug.click_observed.verify"));
+        }
+        catch(ObservedClickException error)
+        {
+            var result=error.Result with { ObservationId=source.Observation.ObservationId, FrameId=source.Observation.FrameId };
+            source.Dispose(); throw new ObservedClickException(error.Reason,result);
+        }
+        catch { source.Dispose(); throw; }
     }
 
     private string ResolveTemplatePath(string templatePath)
@@ -126,7 +198,6 @@ public sealed class VisualEngineBridge : IDisposable
 
     private static CapturedFrame Crop(CapturedFrame frame, Rect? region)
     {
-        ValidateFrame(frame);
         if (region is null) return frame;
         Rect rect = region.Value;
         if (rect.X < 0 || rect.Y < 0 || rect.Width <= 0 || rect.Height <= 0 ||
@@ -140,24 +211,19 @@ public sealed class VisualEngineBridge : IDisposable
         return new CapturedFrame(pixels, rect.Width, rect.Height, stride);
     }
 
-    private static void ValidateFrame(CapturedFrame frame)
-    {
-        if (frame.Width <= 0 || frame.Height <= 0 || frame.Stride < checked(frame.Width * 4) ||
-            frame.Pixels.Length < checked(frame.Stride * frame.Height))
-            throw new InvalidDataException("Captured BGRA frame has invalid dimensions or buffer length.");
-    }
-
     private void ThrowIfDisposed()
     {
         if (_disposed) throw new ObjectDisposedException(nameof(VisualEngineBridge));
     }
+    private static void CheckCancellation(CancellationToken token)
+    { token.ThrowIfCancellationRequested(); ObservationCallBoundary.Current.Value?.Check(); }
 
     public void Dispose()
     {
         lock (_frameGate)
         {
             _disposed = true;
-            _frame = null;
+            _session.Dispose();
         }
     }
 }

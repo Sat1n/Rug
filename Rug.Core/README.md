@@ -8,6 +8,9 @@ tags: [core, native, cabi]
 
 # Rug.Core Index (L2)
 
+For stage evidence, actual Native configuration checks and retained capture-time
+limits, see [Phase 3.5 acceptance](../docs/phase3.5/ACCEPTANCE.md).
+
 Native C++20 DLL owning the perception-and-input pipeline: window capture (WGC),
 OCR (WinRT), coordinate normalization and humanized input synthesis. Everything is
 exposed to the managed host through a stable C-ABI. It contains **no** UI,
@@ -44,7 +47,7 @@ scripting, scheduling or plugin logic — those live above it.
 |---|---|
 | `include/RugCoreAbi.h` | **C-ABI surface** — exports, status codes, handles, structs (exists) |
 | `RugCoreAbi.cpp` | C-ABI impl — capture, image I/O, OCR, discovery, template-matching exports + buffer ownership (exists) |
-| `WgcCapturer.h` / `.cpp` | WGC + D3D11 capture: window resolve, black-frame retry, DPI scale (exists) |
+| `WgcCapturer.h` / `.cpp` | WGC + D3D11 capture: window resolve/exact mode, atomic final-frame time/content facts, resize recreation, sampled DWM client mapping (exists) |
 | `IOcrEngine.h` | OCR strategy interface + `OcrResult`/`OcrLine` types (exists) |
 | `ImageView.h` | Shared non-owning BGRA8 pixel view (exists) |
 | `OcrTextUtils.h` | Shared `CompactText` / `IsCjk` CJK space stripping (both OCR back-ends) (exists) |
@@ -61,6 +64,15 @@ scripting, scheduling or plugin logic — those live above it.
 | `Input/KmboxInputController.*` | KMBox B+/Pro/Net back-end — **guarded skeleton**, returns `RUG_ERR_UNSUPPORTED` until the vendor protocol lands (exists) |
 | `Input/InputControllerFactory.cpp` | `CreateInputController(mode, hwnd)` — routes to the Win32 or KMBox back-end (exists) |
 | `pch.h` / `framework.h` | Precompiled Win32 + WinRT headers |
+
+08A-02A adds `Rug_CreateCapturerExact` and `Rug_GrabFrameWithFacts` without changing
+RugFrame or old calls. [Capture facts contract](CaptureFacts.md) specifies V1 layout,
+QPC time, supported geometry, refusal and ownership.
+08A-02B adds `Rug_CheckCaptureGeometry`: a no-allocation current-window/lifetime
+and supported mapping check against the exact facts carried with the source frame.
+It does not re-capture or certify scene content; the host performs fresh ROI checks.
+Known window-lifetime loss/change rejects the complete frame at acquisition and
+the final delivery boundary; ordinary geometry changes can remain unverified.
 
 ## Symbol Anchors (C-ABI)
 
@@ -109,6 +121,12 @@ scripting, scheduling or plugin logic — those live above it.
 * Client-rect confinement: `[Win32InputController::ClampClient](Input/Win32InputController.cpp#function:ClampClient)`
 * KMBox back-end (skeleton): `[KmboxInputController](Input/KmboxInputController.h#class:KmboxInputController)`
 
+Win32 emitters attach dwExtraInfo `0x52554749` to all SendInput move/button/key/text
+events, including releases. Keyboard supplies mapped scan metadata while retaining
+virtual-key delivery. Managed observation treats the exact tag as cooperating Rug
+software, not a human candidate. The hint is spoofable, never authorization;
+C-ABI signatures/layouts are unchanged. See [diagnostics](../Rug.UI.Core/RawInputEvents.md).
+
 ## C-ABI Contract (CRITICAL)
 
 1. **Exports:** every exported API uses `extern "C"` and returns `int32_t` error
@@ -121,6 +139,12 @@ scripting, scheduling or plugin logic — those live above it.
    managed-side import restriction is enforced in [Rug.UI L2](../Rug.UI/README.md).
 
 ## Coding Standards (C++20)
+
+Diagnostic-only [InputSendEvidence](Input/InputSendEvidence.h#class:InputSendEvidence) observes actual EmitKey send returns
+through a host-created, same-process bounded mapping; disabled by default, it
+does not change key construction/timing/retries or C-ABI statuses. Failure errors
+are captured immediately; insertion is not target delivery. See
+[evidence contract and deployment](../tests/NativeInputProbe/InputEvidenceControl.md).
 
 * Compile with `/utf-8`.
 * Normalize OCR coordinates against **Per-Monitor V2** DPI scaling before passing

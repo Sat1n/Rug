@@ -1,0 +1,2 @@
+Observed time diagnostics PASS: exact source/QPC, stale-after-move zero down/uncertain, raw suppressed future, unknown/domain isolation, persisted reread; unchanged 1000ms guard
+Observed clicks PASS: actual Lua/Gateway, input arbitration, trusted QPC/ROI, all execution boundaries, one-shot sources, cancellation/Stop/release and bounded resources

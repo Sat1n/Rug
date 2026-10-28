@@ -1,0 +1,333 @@
+#nullable enable
+using System.Runtime.InteropServices;
+
+namespace Rug.UI.Core.Native;
+
+/// <summary>Opt-in diagnostic target/probes only; not part of the Raw Input event source.</summary>
+internal sealed class RawInputDiagnosticWindow : IDisposable
+{
+    internal sealed record HookCounts(long CallbackTotal, long ActionableTotal, long Injected, long Unflagged,
+        long TaggedTotal, long TaggedInjected, long TaggedUnflagged, long ParseErrors,
+        long OwnTicks, long OwnMaxTicks, long ChainTicks, long ChainMaxTicks)
+    {
+        public HookCounts Delta(HookCounts before) => new(CallbackTotal - before.CallbackTotal, ActionableTotal - before.ActionableTotal,
+            Injected - before.Injected, Unflagged - before.Unflagged, TaggedTotal - before.TaggedTotal,
+            TaggedInjected - before.TaggedInjected, TaggedUnflagged - before.TaggedUnflagged, ParseErrors - before.ParseErrors,
+            OwnTicks - before.OwnTicks, OwnMaxTicks, ChainTicks - before.ChainTicks, ChainMaxTicks);
+    }
+    internal sealed class HookCounter
+    {
+        private long _callbacks, _actions, _injected, _unflagged, _tagged, _tagInjected, _tagUnflagged, _errors;
+        private long _ownTicks, _ownMax, _chainTicks, _chainMax;
+        public HookCounts Snapshot => new(Interlocked.Read(ref _callbacks), Interlocked.Read(ref _actions),
+            Interlocked.Read(ref _injected), Interlocked.Read(ref _unflagged), Interlocked.Read(ref _tagged),
+            Interlocked.Read(ref _tagInjected), Interlocked.Read(ref _tagUnflagged), Interlocked.Read(ref _errors),
+            Interlocked.Read(ref _ownTicks), Interlocked.Read(ref _ownMax), Interlocked.Read(ref _chainTicks), Interlocked.Read(ref _chainMax));
+        // @shape Only detached aggregate counts survive. Negative codes never dereference data.
+        internal void Observe(int code, nint data, bool keyboard)
+        {
+            Interlocked.Increment(ref _callbacks);
+            if (code != 0) return; // Only HC_ACTION has a documented structure.
+            Interlocked.Increment(ref _actions);
+            try
+            {
+                if (data == 0) throw new ArgumentException("Missing hook data");
+                bool injected = (ReadHookFlags(data, keyboard) & (keyboard ? 0x10u : 1u)) != 0;
+                bool tagged = ReadHookExtraInformation(data, keyboard) == Models.InputObservation.RugSoftwareInputTag;
+                if (injected) Interlocked.Increment(ref _injected); else Interlocked.Increment(ref _unflagged);
+                if (tagged)
+                {
+                    Interlocked.Increment(ref _tagged);
+                    if (injected) Interlocked.Increment(ref _tagInjected); else Interlocked.Increment(ref _tagUnflagged);
+                }
+            }
+            catch (Exception) { Interlocked.Increment(ref _errors); } // No exception crosses the callback boundary.
+        }
+        internal void Timing(long ticks, bool chain)
+        {
+            if (chain) { Interlocked.Add(ref _chainTicks, ticks); Max(ref _chainMax, ticks); }
+            else { Interlocked.Add(ref _ownTicks, ticks); Max(ref _ownMax, ticks); }
+        }
+        private static void Max(ref long target, long value)
+        {
+            long previous = Interlocked.Read(ref target);
+            while (previous < value) { long seen = Interlocked.CompareExchange(ref target, value, previous); if (seen == previous) return; previous = seen; }
+        }
+    }
+    internal sealed record Counters(long Move, long MouseDown, long MouseUp, long KeyDown, long KeyUp, HookCounts Keyboard, HookCounts Mouse)
+    {
+        public long InjectedKeyboard => Keyboard.Injected;
+        public long InjectedMouse => Mouse.Injected;
+        public long Unflagged => Keyboard.Unflagged + Mouse.Unflagged;
+        public long TaggedKeyboard => Keyboard.TaggedInjected;
+        public long TaggedMouse => Mouse.TaggedInjected;
+    }
+    internal sealed record ProbeStatus(long Generation, uint InstallThreadId, string Architecture,
+        bool KeyboardInstalled, int KeyboardInstallError, bool MouseInstalled, int MouseInstallError,
+        bool ThreadExited, string? Failure, string? ExitReason);
+    private static long _nextGeneration;
+    private readonly long _generation = Interlocked.Increment(ref _nextGeneration);
+    private uint _installThreadId;
+    private int _keyboardInstalled, _mouseInstalled, _keyboardInstallError, _mouseInstallError, _exited;
+    private string? _failure, _exitReason;
+    public ProbeStatus Status => new(_generation, _installThreadId, RuntimeInformation.ProcessArchitecture.ToString(),
+        Volatile.Read(ref _keyboardInstalled) != 0, Volatile.Read(ref _keyboardInstallError), Volatile.Read(ref _mouseInstalled) != 0,
+        Volatile.Read(ref _mouseInstallError), Volatile.Read(ref _exited) != 0, Volatile.Read(ref _failure), Volatile.Read(ref _exitReason));
+    public readonly TaskCompletionSource<ProbeStatus> Completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly HookCounter _keyCounts = new(), _mouseCounts = new();
+    private readonly NativeKeyboardHookDiagnostic? _nativeKeyboard;
+    internal NativeKeyboardHookDiagnostic? NativeKeyboard => _nativeKeyboard;
+    internal nint HookInstallModule { get; private set; }
+    internal nint WindowInstanceModule { get; private set; }
+    internal bool OriginalHookModule { get; }
+    private readonly bool _deferKeyboardHook;
+    private readonly TaskCompletionSource _keyboardHookReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _keyboardHookRequested, _failDeferredHook;
+    private long _keyboardInstallStartedTicks, _keyboardInstallCompletedTicks;
+    internal long KeyboardInstallStartedTicks => Interlocked.Read(ref _keyboardInstallStartedTicks);
+    internal long KeyboardInstallCompletedTicks => Interlocked.Read(ref _keyboardInstallCompletedTicks);
+    private long _targetF8Down, _targetF8Up, _targetBDown, _targetBUp;
+    // Diagnostic-only scalar reads of existing counters; no message-loop or forwarding change.
+    internal (long Down, long Up) TargetKeyCounts(int virtualKey) => virtualKey switch
+    {
+        119 => (Interlocked.Read(ref _targetF8Down), Interlocked.Read(ref _targetF8Up)),
+        66 => (Interlocked.Read(ref _targetBDown), Interlocked.Read(ref _targetBUp)),
+        _ => throw new ArgumentOutOfRangeException(nameof(virtualKey), "Only diagnostic F8/B counters are retained")
+    };
+    public readonly TaskCompletionSource<nint> Ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly Thread _thread;
+    private readonly bool _installKeyboard, _installMouse, _messageOnly;
+    private readonly WindowsRawInputReceiver.WindowProc _proc;
+    private readonly HookProc _keyboard, _mouse;
+    private readonly System.Collections.Concurrent.ConcurrentQueue<TaskCompletionSource> _barriers = new();
+    private nint _hwnd, _keyHook, _mouseHook;
+    private long _move, _down, _up, _keyDown, _keyUp;
+    public Counters Counts => new(Interlocked.Read(ref _move), Interlocked.Read(ref _down), Interlocked.Read(ref _up),
+        Interlocked.Read(ref _keyDown), Interlocked.Read(ref _keyUp), _nativeKeyboard?.Status.Counts ?? _keyCounts.Snapshot, _mouseCounts.Snapshot);
+    public RawInputDiagnosticWindow(bool installKeyboard = true, bool installMouse = true, bool messageOnly = false, string? nativeKeyboardPath = null, bool originalHookModule = false, bool deferKeyboardHook = false)
+    {
+        if (nativeKeyboardPath is not null && (!installKeyboard || installMouse || !messageOnly))
+            throw new ArgumentException("Native callback comparison requires the separate keyboard-only Hook probe.");
+        if (originalHookModule && nativeKeyboardPath is null) throw new ArgumentException("Original-module control requires the native callback mode.");
+        if (deferKeyboardHook && (nativeKeyboardPath is null || originalHookModule))
+            throw new ArgumentException("Deferred installation requires the corrected native keyboard callback mode.");
+        _deferKeyboardHook = deferKeyboardHook;
+        OriginalHookModule = originalHookModule;
+        _nativeKeyboard = nativeKeyboardPath is null ? null : new NativeKeyboardHookDiagnostic(nativeKeyboardPath);
+        _installKeyboard = installKeyboard; _installMouse = installMouse; _messageOnly = messageOnly;
+        _proc = Message;
+        _keyboard = (code, w, l) => Hook(code, w, l, true);
+        _mouse = (code, w, l) => Hook(code, w, l, false);
+        _thread = new Thread(Run) { IsBackground = true, Name = messageOnly ? "Rug diagnostic Hook receiver" : "Rug raw diagnostics isolated window" };
+        try { _thread.Start(); } catch { _nativeKeyboard?.Dispose(); throw; }
+    }
+    private nint Hook(int code, nuint w, nint l, bool keyboard)
+    {
+        var counter = keyboard ? _keyCounts : _mouseCounts;
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        counter.Observe(code, l, keyboard);
+        long forwarding = System.Diagnostics.Stopwatch.GetTimestamp();
+        counter.Timing(forwarding - started, false);
+        try { return CallNextHookEx(0, code, w, l); } // Negative codes also forward unchanged.
+        finally { counter.Timing(System.Diagnostics.Stopwatch.GetTimestamp() - forwarding, true); }
+    }
+    internal static uint ReadHookFlags(nint data, bool keyboard) => unchecked((uint)Marshal.ReadInt32(data, keyboard ? 8 : 12));
+    internal static nuint ReadHookExtraInformation(nint data, bool keyboard) => unchecked((nuint)Marshal.ReadIntPtr(data, keyboard ? 16 : IntPtr.Size == 8 ? 24 : 20));
+    public bool Activate() { ShowWindow(_hwnd, 5); return GetForegroundWindow() == _hwnd || SetForegroundWindow(_hwnd) && GetForegroundWindow() == _hwnd; }
+    public async Task SynchronizeAsync()
+    {
+        ThrowIfThreadUnavailable();
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _barriers.Enqueue(completion);
+        if (!PostMessageW(_hwnd, 0x8001, 0, 0)) completion.TrySetException(new Exception("Diagnostic window barrier failed"));
+        await completion.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        ThrowIfThreadUnavailable(); // Pump health is not proof of hook health.
+    }
+    private void ThrowIfThreadUnavailable()
+    {
+        if (Status is { Failure: not null } failed) throw new InvalidOperationException(failed.Failure);
+        if (Status.ThreadExited) throw new InvalidOperationException("Diagnostic message thread exited");
+    }
+    internal void InjectThreadFailureForTest() => PostMessageW(_hwnd, 0x8002, 0, 0);
+    internal void FailDeferredHookForTest() => Volatile.Write(ref _failDeferredHook, 1);
+    // @shape One posted installation command on the existing message thread; no Hook replacement.
+    // @source NativeKeyboardHookDiagnostic.cs#class:NativeKeyboardHookDiagnostic
+    internal async Task InstallDeferredKeyboardHookAsync()
+    {
+        if (!_deferKeyboardHook) throw new InvalidOperationException("Hook installation was not deferred");
+        await Ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposeRequested) != 0, this);
+        ThrowIfThreadUnavailable();
+        if (Interlocked.CompareExchange(ref _keyboardHookRequested, 1, 0) == 0
+            && !PostMessageW(_hwnd, 0x8003, 0, 0))
+            _keyboardHookReady.TrySetException(new InvalidOperationException("Deferred Hook command could not be posted"));
+        await _keyboardHookReady.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        ThrowIfThreadUnavailable();
+    }
+    // Diagnostic-only cross-process counters; no pointers, key contents or C-ABI changes.
+    internal const uint TargetMetricMessage = 0x8010;
+    internal const int TargetMetricMagic = 0x52554744;
+    internal const int TargetMetricVersion = 2;
+    internal nint QueryTargetMetricForTest(uint index)
+    {
+        if (SendMessageTimeoutW(_hwnd, TargetMetricMessage + index, 0, 0, 3, 3000, out var value) == 0)
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError());
+        return (nint)value;
+    }
+    internal void PostTargetMessagesForTest()
+    {
+        foreach (uint message in new uint[] { 0x200, 0x201, 0x202, 0x100, 0x101 }) PostMessageW(_hwnd, message, 0, 0);
+    }
+    internal void PostTestKeyMessages(int key, bool system = false)
+    {
+        if (!PostMessageW(_hwnd, system ? 0x104u : 0x100u, (nuint)key, 0)
+            || !PostMessageW(_hwnd, system ? 0x105u : 0x101u, (nuint)key, 0))
+            throw new InvalidOperationException("Diagnostic key-message post failed");
+    }
+    internal static nint CheckHookInstallation(nint handle, int error, string name)
+        => handle != 0 ? handle : throw new System.ComponentModel.Win32Exception(error, name + " installation failed; win32Error=" + error);
+    private void Run()
+    {
+        _installThreadId = GetCurrentThreadId();
+        string name = "RugRawDiagnostic" + Guid.NewGuid().ToString("N");
+        nint instance = GetModuleHandleW(null);
+        WindowInstanceModule = instance;
+        HookInstallModule = _nativeKeyboard is not null && !OriginalHookModule ? _nativeKeyboard.ProcedureModule : instance;
+        bool registered = false;
+        try
+        {
+            var wc = new WindowClass { Proc = Marshal.GetFunctionPointerForDelegate(_proc), Name = name, Instance = instance };
+            if (RegisterClassW(ref wc) == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError(), "Diagnostic window registration failed");
+            registered = true;
+            _hwnd = CreateWindowExW(0, name, "Rug Raw Input diagnostics - isolated input target", _messageOnly ? 0u : 0x00cf0000u,
+                300, 200, 440, 300, _messageOnly ? (nint)(-3) : 0, 0, instance, 0);
+            if (_hwnd == 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError(), "Diagnostic window creation failed");
+            if (_installKeyboard && !_deferKeyboardHook) InstallKeyboardHook();
+            if (_installMouse)
+            {
+                _mouseHook = SetWindowsHookExW(14, _mouse, instance, 0);
+                _mouseInstallError = _mouseHook == 0 ? Marshal.GetLastPInvokeError() : 0;
+                CheckHookInstallation(_mouseHook, _mouseInstallError, "Mouse hook");
+                Volatile.Write(ref _mouseInstalled, 1);
+            }
+            if (!_messageOnly) ShowWindow(_hwnd, 5);
+            Ready.SetResult(_hwnd);
+            int status;
+            while ((status = GetMessageW(out var m, 0, 0, 0)) > 0)
+            {
+                if (m.Id == 0x8002) throw new InvalidOperationException("Controlled diagnostic thread failure");
+                if (m.Id == 0x8003 && m.Hwnd == _hwnd && _deferKeyboardHook && Volatile.Read(ref _keyboardHookRequested) != 0)
+                {
+                    ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposeRequested) != 0, this);
+                    if (Volatile.Read(ref _failDeferredHook) != 0) throw new InvalidOperationException("Controlled deferred Hook installation failure");
+                    if (_keyHook == 0) InstallKeyboardHook();
+                    _keyboardHookReady.TrySetResult(); continue;
+                }
+                TranslateMessage(ref m); DispatchMessageW(ref m);
+            }
+            if (status < 0) throw new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError(), "Diagnostic message pump failed");
+            _exitReason = "WM_QUIT";
+        }
+        catch (Exception error)
+        {
+            _failure = error.GetType().Name + ": " + error.Message; _exitReason = "Fault"; Ready.TrySetException(error);
+            if (Volatile.Read(ref _keyboardHookRequested) != 0) _keyboardHookReady.TrySetException(error);
+        }
+        finally
+        {
+            bool keyboardRemoved = RemoveHook(_keyHook, "Keyboard hook"); RemoveHook(_mouseHook, "Mouse hook");
+            if (keyboardRemoved && _nativeKeyboard?.Status.Attached == 1)
+            {
+                try { _nativeKeyboard.Detach(); }
+                catch (Exception error) { _failure = (_failure is null ? "" : _failure + "; ") + error.Message; _exitReason = "CleanupFault"; }
+            }
+            if (_hwnd != 0) DestroyWindow(_hwnd); if (registered) UnregisterClassW(name, instance);
+            while (_barriers.TryDequeue(out var b)) b.TrySetException(new InvalidOperationException(_failure ?? "Diagnostic thread exited"));
+            if (Volatile.Read(ref _keyboardHookRequested) != 0) _keyboardHookReady.TrySetException(new InvalidOperationException(_failure ?? "Diagnostic thread exited before Hook installation"));
+            Volatile.Write(ref _exited, 1); Completion.TrySetResult(Status);
+        }
+    }
+    // @shape Installation-thread-only handle + monotonic interval; immediate error capture before timing.
+    // @source NativeKeyboardHookDiagnostic.cs#class:NativeKeyboardHookDiagnostic
+    private void InstallKeyboardHook()
+    {
+        Interlocked.Exchange(ref _keyboardInstallStartedTicks, System.Diagnostics.Stopwatch.GetTimestamp());
+        _nativeKeyboard?.Attach();
+        _keyHook = _nativeKeyboard is null ? SetWindowsHookExW(13, _keyboard, WindowInstanceModule, 0)
+            : SetWindowsHookPointer(13, _nativeKeyboard.Procedure, HookInstallModule, 0);
+        _keyboardInstallError = _keyHook == 0 ? Marshal.GetLastPInvokeError() : 0;
+        CheckHookInstallation(_keyHook, _keyboardInstallError, "Keyboard hook");
+        Interlocked.Exchange(ref _keyboardInstallCompletedTicks, System.Diagnostics.Stopwatch.GetTimestamp());
+        Volatile.Write(ref _keyboardInstalled, 1);
+    }
+    private bool RemoveHook(nint handle, string name)
+    {
+        if (handle == 0 || UnhookWindowsHookEx(handle)) return true;
+        int error = Marshal.GetLastPInvokeError();
+        _failure = (_failure is null ? "" : _failure + "; ") + name + " removal failed; win32Error=" + error;
+        _exitReason = "CleanupFault";
+        return false;
+    }
+    private nint Message(nint hwnd, uint message, nuint wParam, nint lParam)
+    {
+        if (message is >= TargetMetricMessage and <= TargetMetricMessage + 10)
+            return (nint)((message - TargetMetricMessage) switch
+            {
+                0 => TargetMetricMagic, 1 => Interlocked.Read(ref _move), 2 => Interlocked.Read(ref _down),
+                3 => Interlocked.Read(ref _up), 4 => Interlocked.Read(ref _keyDown), 5 => Interlocked.Read(ref _keyUp),
+                6 => Interlocked.Read(ref _targetF8Down), 7 => Interlocked.Read(ref _targetF8Up),
+                8 => Interlocked.Read(ref _targetBDown), 9 => Interlocked.Read(ref _targetBUp), _ => TargetMetricVersion
+            });
+        if (message == 0x200) Interlocked.Increment(ref _move);
+        if (message == 0x201) Interlocked.Increment(ref _down);
+        if (message == 0x202) Interlocked.Increment(ref _up);
+        if (message is 0x100 or 0x104)
+        {
+            Interlocked.Increment(ref _keyDown);
+            if (wParam == 0x77) Interlocked.Increment(ref _targetF8Down);
+            if (wParam == 0x42) Interlocked.Increment(ref _targetBDown);
+        }
+        if (message is 0x101 or 0x105)
+        {
+            Interlocked.Increment(ref _keyUp);
+            if (wParam == 0x77) Interlocked.Increment(ref _targetF8Up);
+            if (wParam == 0x42) Interlocked.Increment(ref _targetBUp);
+        }
+        if (message == 0x8001) { if (_barriers.TryDequeue(out var b)) b.TrySetResult(); return 0; }
+        if (message == 2) PostQuitMessage(0);
+        return DefWindowProcW(hwnd, message, wParam, lParam);
+    }
+    private int _disposeRequested;
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposeRequested, 1) != 0) return;
+        if (_hwnd != 0) PostMessageW(_hwnd, 0x10, 0, 0);
+        if (!_thread.Join(TimeSpan.FromSeconds(5))) throw new Exception("Diagnostic window cleanup timed out");
+        _nativeKeyboard?.Dispose();
+        GC.KeepAlive(_proc); GC.KeepAlive(_keyboard); GC.KeepAlive(_mouse);
+    }
+    private delegate nint HookProc(int code, nuint wParam, nint lParam);
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct WindowClass { public uint Style; public nint Proc; public int ClassExtra, WindowExtra; public nint Instance, Icon, Cursor, Background; public string? Menu, Name; }
+    [StructLayout(LayoutKind.Sequential)] private struct NativeMessage { public nint Hwnd; public uint Id; public nuint WParam; public nint LParam; public uint Time; public int X, Y; public uint Private; }
+    [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern nint GetModuleHandleW(string? name);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern ushort RegisterClassW(ref WindowClass wc);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern nint CreateWindowExW(uint ex, string name, string title, uint style, int x, int y, int width, int height, nint parent, nint menu, nint instance, nint data);
+    [DllImport("user32.dll")] private static extern bool ShowWindow(nint hwnd, int cmd);
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(nint hwnd);
+    [DllImport("user32.dll")] private static extern nint GetForegroundWindow();
+    [DllImport("user32.dll", SetLastError = true)] private static extern int GetMessageW(out NativeMessage m, nint hwnd, uint min, uint max);
+    [DllImport("user32.dll")] private static extern bool TranslateMessage(ref NativeMessage m);
+    [DllImport("user32.dll")] private static extern nint DispatchMessageW(ref NativeMessage m);
+    [DllImport("user32.dll")] private static extern nint DefWindowProcW(nint hwnd, uint msg, nuint w, nint l);
+    [DllImport("user32.dll")] private static extern bool PostMessageW(nint hwnd, uint msg, nuint w, nint l);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern nint SendMessageTimeoutW(nint hwnd, uint msg, nuint w, nint l, uint flags, uint timeout, out nuint result);
+    [DllImport("user32.dll")] private static extern void PostQuitMessage(int code);
+    [DllImport("user32.dll")] private static extern bool DestroyWindow(nint hwnd);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern bool UnregisterClassW(string name, nint instance);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern nint SetWindowsHookExW(int id, HookProc proc, nint instance, uint thread);
+    [DllImport("user32.dll", EntryPoint = "SetWindowsHookExW", CharSet = CharSet.Unicode, SetLastError = true)] private static extern nint SetWindowsHookPointer(int id, nint proc, nint instance, uint thread);
+    [DllImport("user32.dll")] private static extern nint CallNextHookEx(nint hook, int code, nuint w, nint l);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool UnhookWindowsHookEx(nint hook);
+}

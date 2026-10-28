@@ -23,6 +23,10 @@
 
 #include <cstring>
 #include <new>
+#include <mutex>
+#include <dwmapi.h>
+#include "CaptureContract.h"
+#pragma comment(lib, "dwmapi.lib")
 
 #pragma comment(lib, "windowsapp.lib")
 #pragma comment(lib, "d3d11.lib")
@@ -107,6 +111,40 @@ double WindowDpiScale(HWND hwnd) {
     return dpi > 0 ? static_cast<double>(dpi) / 96.0 : 1.0;
 }
 
+constexpr wchar_t kLifetimeProperty[] = L"Rug.Capture.WindowLifetime.v1";
+uint64_t WindowLifetime(HWND hwnd, bool create) {
+    static std::mutex gate;
+    std::lock_guard lock(gate);
+    auto value = GetPropW(hwnd, kLifetimeProperty);
+    if (!value && create && IsWindow(hwnd)) {
+        GUID id{};
+        if (FAILED(CoCreateGuid(&id))) return 0;
+        uintptr_t token = 0;
+        std::memcpy(&token, &id, sizeof(token));
+        token = (token >> 1) | 1;
+        if (SetPropW(hwnd, kLifetimeProperty, reinterpret_cast<HANDLE>(token))) value = reinterpret_cast<HANDLE>(token);
+    }
+    return reinterpret_cast<uintptr_t>(value);
+}
+struct DpiScope {
+    DPI_AWARENESS_CONTEXT previous = SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    ~DpiScope() { if (previous) SetThreadDpiAwarenessContext(previous); }
+};
+WindowSample SampleWindow(HWND hwnd) {
+    DpiScope physical;
+    WindowSample s;
+    s.tid = GetWindowThreadProcessId(hwnd, &s.pid);
+    s.lifetime = WindowLifetime(hwnd, false);
+    s.dpi = GetDpiForWindow(hwnd);
+    s.style = GetWindowLongPtrW(hwnd, GWL_STYLE); s.exStyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+    s.monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL);
+    s.valid = s.tid && s.lifetime && physical.previous && s.dpi && IsWindowVisible(hwnd) && !IsIconic(hwnd) &&
+        GetClientRect(hwnd, &s.client) && ClientToScreen(hwnd, &s.origin) &&
+        SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &s.bounds, sizeof(s.bounds)));
+    return s;
+}
+int64_t Qpc() { LARGE_INTEGER q{}; return QueryPerformanceCounter(&q) ? q.QuadPart : 0; }
+
 bool IsAllBlack(SoftwareBitmap const& bitmap) {
     BitmapBuffer buffer = bitmap.LockBuffer(BitmapBufferAccessMode::Read);
     auto reference  = buffer.CreateReference();
@@ -133,6 +171,8 @@ struct WgcCapturer::Impl {
     HWND   resolved = nullptr;
     double dpiScale = 1.0;
     bool   started  = false;
+    uint64_t boundLifetime = 0, capturedLifetime = 0;
+    std::mutex gate;
 
     com_ptr<ID3D11Device>        d3dDevice;
     com_ptr<ID3D11DeviceContext> d3dContext;
@@ -184,8 +224,10 @@ struct WgcCapturer::Impl {
     int32_t Start() {
         EnsureApartment();
 
-        resolved = ResolveRenderWindow(cfg.targetWindow);
-        if (!resolved) return RUG_ERR_INVALID_PARAM;
+        resolved = cfg.exactWindow ? cfg.targetWindow : ResolveRenderWindow(cfg.targetWindow);
+        if (!resolved || !IsWindow(resolved)) return RUG_ERR_INVALID_PARAM;
+        boundLifetime = WindowLifetime(cfg.targetWindow, true);
+        capturedLifetime = WindowLifetime(resolved, true);
 
         if (!GraphicsCaptureSession::IsSupported()) return RUG_ERR_UNSUPPORTED;
 
@@ -213,25 +255,45 @@ struct WgcCapturer::Impl {
         return RUG_OK;
     }
 
+    bool WindowsStillValid() const {
+        return IsWindow(cfg.targetWindow) && IsWindow(resolved) &&
+            KnownLifetimeMatches(boundLifetime, WindowLifetime(cfg.targetWindow, false)) &&
+            KnownLifetimeMatches(capturedLifetime, WindowLifetime(resolved, false));
+    }
+
+    // @shape out: owned padded BGRA8 + same-final-frame facts; failure owns no buffer.
+    // @source frame: Direct3D11CaptureFrame ContentSize/SystemRelativeTime/Surface.
     int32_t GrabFrame(CapturedFrame& out) {
         if (!started) return RUG_ERR_NOT_INITIALIZED;
 
+        if (!WindowsStillValid()) return RUG_ERR_CAPTURE_FAILED;
+        const auto before = SampleWindow(resolved);
+        if (!KnownLifetimeMatches(capturedLifetime, before.lifetime)) return RUG_ERR_CAPTURE_FAILED;
+        const int64_t beforeQpc = Qpc();
         dpiScale = WindowDpiScale(resolved);
-
-        Direct3D11CaptureFrame frame = TryGetLatestFrame();
-        if (!frame) return RUG_ERR_CAPTURE_FAILED;
-
-        SoftwareBitmap raw = SoftwareBitmap::CreateCopyFromSurfaceAsync(frame.Surface()).get();
-        frame.Close();
-
-        for (int retry = 0; raw && IsAllBlack(raw) && retry < kBlackFrameMaxRetries; ++retry) {
-            Sleep(100);
-            Direct3D11CaptureFrame next = TryGetLatestFrame();
-            if (!next) break;
-            raw = SoftwareBitmap::CreateCopyFromSurfaceAsync(next.Surface()).get();
-            next.Close();
-        }
-
+        struct Candidate { SoftwareBitmap pixels{ nullptr }; SizeInt32 content{}; int64_t time100ns = 0; };
+        auto read = [&]() -> Candidate {
+            auto frame = TryGetLatestFrame();
+            if (!frame) return {};
+            Candidate c;
+            try {
+                c.content = frame.ContentSize();
+                try { c.time100ns = frame.SystemRelativeTime().count(); } catch (...) { c.time100ns = 0; }
+                if (c.content.Width <= 0 || c.content.Height <= 0) { frame.Close(); return {}; }
+                if (c.content.Width != poolSize.Width || c.content.Height != poolSize.Height) {
+                    poolSize = c.content; frame.Close();
+                    framePool.Recreate(winrtDevice, DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, poolSize);
+                    return {}; // Reacquire: old surface may have been clipped.
+                }
+                c.pixels = SoftwareBitmap::CreateCopyFromSurfaceAsync(frame.Surface()).get();
+                frame.Close(); return c;
+            } catch (...) { frame.Close(); throw; }
+        };
+        auto candidate = ReadCaptureCandidate<Candidate>(read,
+            [&](const Candidate& c) { return c.pixels && !IsAllBlack(c.pixels) &&
+                (!cfg.exactWindow || FrameAtOrAfter(c.time100ns, beforeQpc, [] { LARGE_INTEGER f{}; QueryPerformanceFrequency(&f); return f.QuadPart; }())); },
+            [] { Sleep(100); }, kBlackFrameMaxRetries);
+        auto raw = candidate.pixels;
         if (!raw || IsAllBlack(raw)) return RUG_ERR_CAPTURE_FAILED;
 
         SoftwareBitmap bgra =
@@ -249,25 +311,67 @@ struct WgcCapturer::Impl {
 
         const int32_t w = bgra.PixelWidth();
         const int32_t h = bgra.PixelHeight();
-        // Bgra8 is single-plane; derive the row stride from the buffer capacity
-        // (capacity == stride * height) rather than BitmapBuffer::GetPlaneDescriptor,
-        // which is not projected in every Windows SDK.
-        const int32_t stride = (h > 0) ? static_cast<int32_t>(capacity / static_cast<uint32_t>(h))
-                                       : (w * 4);
-        const uint32_t len   = static_cast<uint32_t>(stride) * static_cast<uint32_t>(h);
-        if (stride < w * 4 || len == 0 || len > capacity) { buffer.Close(); return RUG_ERR_CAPTURE_FAILED; }
-
-        uint8_t* dst = new (std::nothrow) uint8_t[len];
+        const auto plane = buffer.GetPlaneDescription(0);
+        const int32_t stride = plane.Stride;
+        const int64_t len64 = static_cast<int64_t>(stride) * h;
+        const int64_t end = static_cast<int64_t>(plane.StartIndex) + (static_cast<int64_t>(h) - 1) * stride + static_cast<int64_t>(w) * 4;
+        if (w <= 0 || h <= 0 || stride < static_cast<int64_t>(w) * 4 || plane.StartIndex < 0 ||
+            end > capacity || len64 <= 0) { buffer.Close(); return RUG_ERR_CAPTURE_FAILED; }
+        if (len64 > 64LL * 1024 * 1024) { buffer.Close(); return RUG_ERR_OUT_OF_MEMORY; }
+        const auto len = static_cast<uint32_t>(len64);
+        RugCaptureFacts facts{};
+        facts.structSize = sizeof(facts); facts.version = 1;
+        facts.systemRelative100ns = candidate.time100ns;
+        LARGE_INTEGER frequency{}; QueryPerformanceFrequency(&frequency);
+        facts.qpcFrequency = frequency.QuadPart;
+        const auto after = SampleWindow(resolved);
+        // Identity loss rejects pixels, unlike resize/unsupported geometry.
+        if (!KnownLifetimeMatches(capturedLifetime, after.lifetime) || !WindowsStillValid()) {
+            buffer.Close(); return RUG_ERR_CAPTURE_FAILED;
+        }
+        facts.geometryBeforeQpc = beforeQpc; facts.geometryAfterQpc = Qpc(); facts.qpcSample = Qpc();
+        facts.boundWindow = reinterpret_cast<uintptr_t>(cfg.targetWindow); facts.capturedWindow = reinterpret_cast<uintptr_t>(resolved);
+        facts.boundLifetime = boundLifetime; facts.capturedLifetime = capturedLifetime;
+        facts.contentWidth = candidate.content.Width; facts.contentHeight = candidate.content.Height;
+        facts.bufferWidth = w; facts.bufferHeight = h;
+        facts.clientWidth = after.client.right; facts.clientHeight = after.client.bottom;
+        facts.clientScreenX = after.origin.x; facts.clientScreenY = after.origin.y;
+        facts.imageClientX = after.origin.x - after.bounds.left; facts.imageClientY = after.origin.y - after.bounds.top;
+        facts.dpi = static_cast<int32_t>(after.dpi);
+        const bool timeValid = ValidFrameTime(facts.systemRelative100ns, facts.qpcSample, facts.qpcFrequency);
+        if (timeValid) facts.flags |= 1;
+        if (resolved == cfg.targetWindow) facts.flags |= 4;
+        facts.geometryStatus = 4;
+        if (resolved != cfg.targetWindow) facts.geometryStatus = 3;
+        else if (!SameSample(before, after)) facts.geometryStatus = 2;
+        else if (!timeValid || !FrameAtOrAfter(candidate.time100ns, beforeQpc, facts.qpcFrequency)) facts.geometryStatus = 5;
+        else if (boundLifetime && capturedLifetime && (after.style & WS_OVERLAPPEDWINDOW) == WS_OVERLAPPEDWINDOW && !(after.style & WS_CHILD) &&
+            !(after.exStyle & (WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_LAYOUTRTL)) &&
+            facts.contentWidth == w && facts.contentHeight == h &&
+            w == after.bounds.right - after.bounds.left && h == after.bounds.bottom - after.bounds.top &&
+            facts.clientWidth > 0 && facts.clientHeight > 0 && facts.imageClientX >= 0 && facts.imageClientY >= 0 &&
+            static_cast<int64_t>(facts.imageClientX) + facts.clientWidth <= w &&
+            static_cast<int64_t>(facts.imageClientY) + facts.clientHeight <= h) {
+            facts.flags |= 2; facts.geometryStatus = 1;
+        }
+        if (len > 64u * 1024u * 1024u) { buffer.Close(); return RUG_ERR_OUT_OF_MEMORY; }
+        auto dst = std::unique_ptr<uint8_t[]>(new (std::nothrow) uint8_t[len]{});
         if (!dst) { buffer.Close(); return RUG_ERR_OUT_OF_MEMORY; }
-        std::memcpy(dst, srcData, len);
+        for (int32_t row = 0; row < h; ++row)
+            std::memcpy(dst.get() + static_cast<size_t>(row) * stride, srcData + plane.StartIndex + static_cast<size_t>(row) * stride, static_cast<size_t>(w) * 4);
         buffer.Close();
+        if (cfg.beforeDeliveryForTesting) cfg.beforeDeliveryForTesting();
+        // Last native delivery decision. No allocation or pixel copy follows it.
+        // Unknown-at-start tokens stay unknown; known tokens must still match.
+        if (!WindowsStillValid()) return RUG_ERR_CAPTURE_FAILED;
 
-        out.data       = dst;
+        out.data       = dst.release();
         out.dataLength = len;
         out.width      = w;
         out.height     = h;
         out.stride     = stride;
         out.dpiScale   = dpiScale;
+        out.facts      = facts;
         return RUG_OK;
     }
 
@@ -285,6 +389,24 @@ struct WgcCapturer::Impl {
 // -----------------------------------------------------------------------------
 // WgcCapturer
 // -----------------------------------------------------------------------------
+int32_t CheckCaptureGeometry(HWND bound, const RugCaptureFacts& f) {
+    if (!bound || reinterpret_cast<uintptr_t>(bound)!=f.boundWindow || f.boundWindow!=f.capturedWindow ||
+        !f.boundLifetime || !f.capturedLifetime || !IsWindow(bound) ||
+        WindowLifetime(bound,false)!=f.boundLifetime || WindowLifetime(bound,false)!=f.capturedLifetime) return RUG_ERR_WINDOW_IDENTITY;
+    if ((f.flags & 6)!=6 || f.geometryStatus!=1) return RUG_ERR_CAPTURE_FAILED;
+    const auto s=SampleWindow(bound);
+    if (s.lifetime!=f.capturedLifetime) return RUG_ERR_WINDOW_IDENTITY;
+    if (!s.valid) return RUG_ERR_CAPTURE_FAILED;
+    if ((s.style & WS_OVERLAPPEDWINDOW)!=WS_OVERLAPPEDWINDOW || (s.style & WS_CHILD) ||
+        (s.exStyle & (WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_LAYOUTRTL)) ||
+        s.dpi!=static_cast<UINT>(f.dpi) || s.client.right!=f.clientWidth || s.client.bottom!=f.clientHeight ||
+        s.origin.x!=f.clientScreenX || s.origin.y!=f.clientScreenY ||
+        s.origin.x-s.bounds.left!=f.imageClientX || s.origin.y-s.bounds.top!=f.imageClientY ||
+        s.bounds.right-s.bounds.left!=f.contentWidth || s.bounds.bottom-s.bounds.top!=f.contentHeight ||
+        f.contentWidth!=f.bufferWidth || f.contentHeight!=f.bufferHeight) return RUG_ERR_CAPTURE_FAILED;
+    return IsWindow(bound) && WindowLifetime(bound,false)==f.boundLifetime ? RUG_OK : RUG_ERR_WINDOW_IDENTITY;
+}
+
 WgcCapturer::WgcCapturer(Config config)
     : m_impl(std::make_unique<Impl>()) {
     m_impl->cfg = config;
@@ -295,7 +417,7 @@ WgcCapturer::~WgcCapturer() {
 }
 
 int32_t WgcCapturer::Start()     { return m_impl->Start(); }
-int32_t WgcCapturer::GrabFrame(CapturedFrame& out) { return m_impl->GrabFrame(out); }
+int32_t WgcCapturer::GrabFrame(CapturedFrame& out) { std::lock_guard lock(m_impl->gate); return m_impl->GrabFrame(out); }
 void    WgcCapturer::Stop()      { m_impl->Stop(); }
 
 HWND   WgcCapturer::ResolvedWindow() const { return m_impl->resolved; }

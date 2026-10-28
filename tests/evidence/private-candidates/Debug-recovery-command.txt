@@ -1,0 +1,14 @@
+RECOVERY success: BEFORE=1/1 AFTER=1/1; preserved=True; terminal=Stopped; incident=30ef2ad6-ab8f-4481-a9e9-4734e27828a3; trace=993625e3-4f1b-4bba-86f7-f565b1732384/7a9cb7c1-176e-4a3b-9dcf-e75d554746c3 Valid; resources=drained
+RECOVERY stop-wait: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Stopped; incident=6b8bb122-62c5-495c-b123-9d8d64a18a94; trace=a34e3ebf-89fb-4910-92bc-368ab603aeb8/516f1ec9-735f-4e24-8866-9a680e92720a Valid; resources=drained
+RECOVERY revoke-wait: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Stopped; incident=e240e5f5-9b6f-400e-bb84-1366aa5c94d6; trace=a2f4dc11-e426-476c-83c9-ab1cc1cf1250/1c6c62de-c852-40a8-80ae-3c394160d116 Valid; resources=drained
+RECOVERY stop-validation: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Stopped; incident=e08b453c-d039-453f-8334-8d9bfb438c87; trace=b1cd1dde-3e6e-4c95-8833-f5f6dcd16a94/8983c284-6e86-4a60-9453-96f0a44d6f8a Valid; resources=drained
+RECOVERY revoke-validation: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Stopped; incident=b9bac5f7-cbe9-464a-8c68-6fc8b853ef24; trace=2839ba29-b734-4c16-b6e7-ddd07a8a9a4b/22c7c2a0-2942-493f-bcc0-bf3ee8a11b65 Valid; resources=drained
+RECOVERY cancel-late: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Stopped; incident=8a109c06-d045-4b91-a631-49bd765ebed6; trace=27c40722-073a-449e-af91-021cc9ebb12b/d106e928-5254-40cd-9195-e754ab2cec4f Valid; resources=drained
+RECOVERY stop-late: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Stopped; incident=484cce82-3f84-4704-b715-40717b3abe25; trace=ca123426-33d8-41a4-9147-7efbb8ad5267/c7ad125f-d2ab-4051-987b-c8e16ca090c2 Valid; resources=drained
+RECOVERY lua-error: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Faulted; incident=; trace=c9da0de4-44e5-4dc5-84c2-19aefd829a7b/99c480da-87d3-44f9-a814-f3034bcb1e92 Valid; resources=drained
+RECOVERY UI: BEFORE received/visually confirmed, planned handoff
+RECOVERY UI: red rejected, original run remains waiting
+RECOVERY UI PASS: explicit fresh WGC verification, AFTER-only, real incident -> trace. Human acceptance NOT RUN.
+RECOVERY UI interactions=True; target=(2, 2); exit=0;
+RECOVERY REPORT F:\Cardinal\Rug\Rug\artifacts\08d-first-Debug-recovery\recovery-cc4b3aced0a643939fd19c1f6031ebbf\report.json
+[ INFO:0@0.682] global registry_parallel.impl.hpp:96 cv::parallel::ParallelBackendRegistry::ParallelBackendRegistry core(parallel): Enabled backends(0, sorted by priority): N/A

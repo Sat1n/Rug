@@ -1,0 +1,7 @@
+Ordinary desktop: artifacts/review-08d01/Debug-desktop-observed-click-tests.log
+Private candidates PASS: actual Gateway/transaction, <=3 per phase, shared <=750ms, strict newer/native validity, terminal ROI/geometry/clock/errors, original source/authority/cancellation, late actual work, bounded pool and diagnostic failure isolation
+Observed clicks PASS: actual Lua/Gateway, input arbitration, trusted QPC/ROI, all execution boundaries, one-shot sources, cancellation/Stop/release and bounded resources
+Isolation with project-local TEMP/TMP: artifacts/review-08d01/Debug-isolated-local-temp-observed-click-tests.log
+Private candidates PASS: actual Gateway/transaction, <=3 per phase, shared <=750ms, strict newer/native validity, terminal ROI/geometry/clock/errors, original source/authority/cancellation, late actual work, bounded pool and diagnostic failure isolation
+Observed clicks PASS: actual Lua/Gateway, input arbitration, trusted QPC/ROI, all execution boundaries, one-shot sources, cancellation/Stop/release and bounded resources
+Source review-summary records contrast success; exact original failure exit code and complete launch environment are NOT COLLECTED in this excerpt. Root cause remains unknown.
