@@ -47,6 +47,8 @@ internal sealed class ObservedClickTransaction : IDisposable
     private readonly Action _validateRun;
     private readonly Action _demandCapture;
     private readonly List<ObservedValidationFrame> _validations=[];
+    private string? _verificationStage;
+    private int _candidateNumber;
     internal PointInt Point { get; }
     internal InputDeliveryMode Mode => _request.Mode;
     internal MouseButton Button => _request.Button;
@@ -109,9 +111,11 @@ internal sealed class ObservedClickTransaction : IDisposable
         if(age.TotalMilliseconds>(_request.MaxAgeMs??_policy.MaxAgeMs)) throw TimeRejected(frame,t,now,ObservedClickReason.Stale);
         return t;
     }
-    private ObservedClickException TimeRejected(CapturedFrame frame, NativeFrameTime? time, QpcReading now, ObservedClickReason reason)
+    private ObservedClickException TimeRejected(CapturedFrame frame, NativeFrameTime? time, QpcReading now, ObservedClickReason reason,
+        TraceVerificationCandidate? candidate = null)
     {
         var raw=frame.NativeCaptureFacts;
+        candidate??=_verificationStage is {} stage?new(stage,_candidateNumber,"Rejected",reason.ToString()):null;
         long? source=raw?.SystemRelative100ns??time?.SystemRelative100ns;
         long? frequency=raw?.QpcFrequency??time?.QpcFrequency;
         string? domain=raw is not null?"Windows boot QPC":time?.ClockDomain;
@@ -127,7 +131,8 @@ internal sealed class ObservedClickTransaction : IDisposable
             _request.MaxAgeMs??_policy.MaxAgeMs,original?.SystemRelative100ns,original?.QpcFrequency,
             SignedAge(original?.SystemRelative100ns,original?.QpcFrequency,original?.ClockDomain));
         ExecutionTraceScope.Current.Value?.Emit(TraceEventKind.Validation,status:"Rejected",error:reason.ToString(),reason:"frame-time-rejected",
-            observation:new(_source.Observation.ObservationId,_source.Observation.FrameId,_policy.Id,Point,TimeRejection:detail));
+            observation:new(_source.Observation.ObservationId,_source.Observation.FrameId,_policy.Id,Point,
+                Array.AsReadOnly(_validations.Select(v=>v.FrameId).ToArray()),TimeRejection:detail,Candidate:candidate));
         return new(reason);
     }
     private void ValidateFrame(CapturedFrame frame)
@@ -143,52 +148,118 @@ internal sealed class ObservedClickTransaction : IDisposable
         Validate(token,validateInput);
         _source.Consume(); InputExecutionBoundary.MarkStarted();
     }
-    /// <summary>@shape stage: one of at most three bounded fresh comparisons; source/cache are never replaced.
+    private enum CandidateTime { Valid, Missing, NativeInvalid, Future, NotNewerThanDiscarded, NotFresh }
+    private int VerificationMilliseconds => Math.Min(750,_policy.VerificationTimeoutMs);
+    /// <summary>Only candidate-local invalidity is discardable; clock/frequency/domain errors are terminal.
+    /// @shape frame: unpublished owned candidate; discarded: greatest positive discarded render100ns.
+    /// @source time: Models/CaptureFacts.cs#class:NativeFrameTime</summary>
+    private CandidateTime InspectCandidateTime(CapturedFrame frame,QpcReading now,long discarded,QpcReading requested)
+    {
+        var t=frame.CaptureFacts?.NativeTime;var raw=frame.NativeCaptureFacts;
+        if(raw is {} f && (f.QpcFrequency<=0||f.QpcFrequency!=now.Frequency) ||
+            t is not null && (t.ClockDomain!=now.Domain||t.QpcFrequency!=now.Frequency))
+            throw TimeRejected(frame,t,now,ObservedClickReason.TimeUnavailable);
+        if(raw is {} native && (native.Flags&1)==0)return CandidateTime.NativeInvalid;
+        if(t is null || t.SystemRelative100ns<=0)return CandidateTime.Missing;
+        if(t.AgeAtNativeSample is null)return CandidateTime.NativeInvalid;
+        if(raw is {} facts && (facts.SystemRelative100ns!=t.SystemRelative100ns||facts.QpcSample!=t.QpcSample))
+            throw TimeRejected(frame,t,now,ObservedClickReason.TimeUnavailable);
+        if(t.AgeAt(now.Ticks,now.Frequency,now.Domain) is not {} age)return CandidateTime.Future;
+        if(age.TotalMilliseconds>(_request.MaxAgeMs??_policy.MaxAgeMs))throw TimeRejected(frame,t,now,ObservedClickReason.Stale);
+        if((Int128)t.SystemRelative100ns*requested.Frequency<(Int128)requested.Ticks*TimeSpan.TicksPerSecond)return CandidateTime.NotFresh;
+        if(t.SystemRelative100ns<=discarded)return CandidateTime.NotNewerThanDiscarded;
+        return CandidateTime.Valid;
+    }
+    private void CandidateEvent(string stage,int number,string kind,string reason)
+    {
+        try { ExecutionTraceScope.Current.Value?.Emit(TraceEventKind.Validation,reason:"private-verification:"+kind,
+            observation:new(_source.Observation.ObservationId,_source.Observation.FrameId,_policy.Id,Point,
+                Array.AsReadOnly(_validations.Select(v=>v.FrameId).ToArray()),Candidate:new(stage,number,kind,reason))); }
+        catch { /* Diagnostic failure cannot change the decision. */ }
+    }
+    /// <summary>@shape stage: <=3 sequential candidates, one shared <=750ms deadline and <=1 private publication.
     /// @source capture: Contracts/Services/ICaptureService.cs#class:ICaptureService</summary>
     internal async Task VerifyAsync(string stage, CancellationToken token)
     {
-        Validate(token);
-        var started=_environment.ReadQpc();
-        using var timeout=new CancellationTokenSource(_policy.VerificationTimeoutMs);
-        using var linked=CancellationTokenSource.CreateLinkedTokenSource(token,timeout.Token);
+        int number=0;string ending="Failed";
+        _verificationStage=stage;_candidateNumber=0;
         try
         {
-            using var capture=_pool.Capture(_session,privateFrame:true);
-            long requested=_pool.Timestamp;var requestedUtc=_pool.UtcNow;
-            var frame=await (_capture is IBoundedFrameCapture bounded ? bounded.GrabFrameBoundedAsync(_pool.Limits.MaxFrameBytes,linked.Token)
-                : _capture.GrabFrameAsync(linked.Token)).ConfigureAwait(false);
-            long received=_pool.Timestamp;var receivedUtc=_pool.UtcNow;
-            // Await the real service even if it ignores cancellation. Stop retains this work/lease.
             Validate(token);
-            CheckVerificationDeadline(started);
-            if(timeout.IsCancellationRequested) throw new ObservedClickException(ObservedClickReason.ValidationUnavailable);
-            if(frame is null) throw new ObservedClickException(ObservedClickReason.ValidationUnavailable);
-            var owned=capture.Detach(frame); ValidateFrame(owned);
-            var time=CheckTime(owned);
-            if(started.Domain!=time.ClockDomain || started.Frequency!=time.QpcFrequency ||
-                (Int128)time.SystemRelative100ns*started.Frequency < (Int128)started.Ticks*TimeSpan.TicksPerSecond)
-                throw new ObservedClickException(ObservedClickReason.ValidationUnavailable);
-            capture.PublishPrivate(owned,requestedUtc,requested,receivedUtc,received,token);
-            _validations.Add(new(capture.Observation.FrameId,time,stage));
-            if(_validations.Count>3) throw new InvalidOperationException("Unexpected observed verification stage.");
-            PublishDetails(stage);
-            Compare(_source.Frame,owned);
-            PublishDetails(stage+":roi-passed");
-            Validate(token); CheckVerificationDeadline(started); linked.Token.ThrowIfCancellationRequested();
+            var started=_environment.ReadQpc();var latest=started;
+            using var timeout=new CancellationTokenSource(VerificationMilliseconds);
+            using var linked=CancellationTokenSource.CreateLinkedTokenSource(token,timeout.Token);
+            QpcReading Guard()
+            {
+                Validate(token); // Original cancellation, run/grants and original source always win.
+                latest=CheckVerificationDeadline(started,latest);
+                if(timeout.IsCancellationRequested)throw new ObservedClickException(ObservedClickReason.ValidationUnavailable);
+                return latest;
+            }
+            try
+            {
+                long discarded=0;
+                for(number=1;number<=3;number++)
+                {
+                    _candidateNumber=number;
+                    Guard();CandidateEvent(stage,number,"Acquiring","Candidate");
+                    using var capture=_pool.Capture(_session,privateFrame:true);
+                    var requestQpc=Guard();long requested=_pool.Timestamp;var requestedUtc=_pool.UtcNow;
+                    // Await the real service: never abandon Native work or its capacity reservation.
+                    var frame=await (_capture is IBoundedFrameCapture bounded?bounded.GrabFrameBoundedAsync(_pool.Limits.MaxFrameBytes,linked.Token)
+                        :_capture.GrabFrameAsync(linked.Token)).ConfigureAwait(false);
+                    long received=_pool.Timestamp;var receivedUtc=_pool.UtcNow;
+                    var now=Guard();
+                    if(frame is null){ending="NoFrame";throw new ObservedClickException(ObservedClickReason.ValidationUnavailable);}
+                    var owned=capture.Detach(frame);
+                    var verdict=InspectCandidateTime(owned,now,discarded,requestQpc);
+                    if(verdict==CandidateTime.NotFresh){ending="NotFresh";throw new ObservedClickException(ObservedClickReason.ValidationUnavailable);}
+                    if(verdict!=CandidateTime.Valid)
+                    {
+                        _=TimeRejected(owned,owned.CaptureFacts?.NativeTime,now,ObservedClickReason.TimeUnavailable,
+                            new(stage,number,"Discarded",verdict.ToString()));
+                        long rendered=owned.NativeCaptureFacts?.SystemRelative100ns??owned.CaptureFacts?.NativeTime?.SystemRelative100ns??0;
+                        if(rendered>0)discarded=Math.Max(discarded,rendered);
+                        if(number==3){ending="AttemptsExhausted";throw new ObservedClickException(ObservedClickReason.TimeUnavailable);}
+                        owned=null!;frame=null; // Drop discarded buffers before awaiting another producer call.
+                        continue;
+                    }
+                    var time=owned.CaptureFacts!.NativeTime!;
+                    if((Int128)time.SystemRelative100ns*requestQpc.Frequency<(Int128)requestQpc.Ticks*TimeSpan.TicksPerSecond)
+                    {ending="NotFresh";throw new ObservedClickException(ObservedClickReason.ValidationUnavailable);}
+                    ValidateFrame(owned); // No geometry or ROI failure is eligible for another candidate.
+                    Compare(_source.Frame,owned);
+                    now=Guard();
+                    if(InspectCandidateTime(owned,now,discarded,requestQpc)!=CandidateTime.Valid)
+                        throw TimeRejected(owned,time,now,ObservedClickReason.TimeUnavailable);
+                    capture.PublishPrivate(owned,requestedUtc,requested,receivedUtc,received,token);
+                    _validations.Add(new(capture.Observation.FrameId,time,stage));
+                    if(_validations.Count>3)throw new InvalidOperationException("Unexpected observed verification stage.");
+                    ending=number==1?"AcceptedFirst":"AcceptedAfterDiscard";
+                    PublishDetails(stage);PublishDetails(stage+":roi-passed");return;
+                }
+            }
+            catch(ObservationCapacityException){Guard();ending="CapacityUnavailable";throw new ObservedClickException(ObservedClickReason.ValidationUnavailable);}
+            catch(OperationCanceledException) when(timeout.IsCancellationRequested&&!token.IsCancellationRequested)
+            {Guard();throw new ObservedClickException(ObservedClickReason.ValidationUnavailable);}
         }
-        catch(ObservationCapacityException) { throw new ObservedClickException(ObservedClickReason.ValidationUnavailable); }
-        catch(OperationCanceledException) when(timeout.IsCancellationRequested && !token.IsCancellationRequested)
-        { Validate(token); throw new ObservedClickException(ObservedClickReason.ValidationUnavailable); }
+        catch(ObservedClickException error){if(ending=="Failed")ending=error.Reason==ObservedClickReason.ValidationUnavailable?"ValidationTimedOut":error.Reason.ToString();throw;}
+        catch(OperationCanceledException){ending="Cancelled";throw;}
+        catch(ObservationDeadlineException){ending="RequestDeadline";throw;}
+        catch(AutomationGateway.GatewayRejectedException){ending="AdmissionRejected";throw;}
+        catch(Rug.UI.Core.Exceptions.PermissionDeniedException){ending="PermissionDenied";throw;}
+        finally{CandidateEvent(stage,Math.Min(number,3),"StageEnd",ending);_verificationStage=null;_candidateNumber=0;}
     }
-    private void CheckVerificationDeadline(QpcReading started)
+    private QpcReading CheckVerificationDeadline(QpcReading started,QpcReading latest)
     {
         var now=_environment.ReadQpc();
         if(now.Domain!=started.Domain || now.Frequency!=started.Frequency || now.Frequency<=0 ||
-            started.Ticks<=0 || now.Ticks<started.Ticks)
+            now.Domain!="Windows boot QPC" || started.Ticks<=0 || now.Ticks<latest.Ticks)
             throw new ObservedClickException(ObservedClickReason.TimeUnavailable);
         // The final check must not depend on timer/cancellation callback scheduling.
-        if((Int128)(now.Ticks-started.Ticks)*1000 >= (Int128)_policy.VerificationTimeoutMs*now.Frequency)
+        if((Int128)(now.Ticks-started.Ticks)*1000 >= (Int128)VerificationMilliseconds*now.Frequency)
             throw new ObservedClickException(ObservedClickReason.ValidationUnavailable);
+        return now;
     }
     private void Compare(CapturedFrame source, CapturedFrame fresh)
     {

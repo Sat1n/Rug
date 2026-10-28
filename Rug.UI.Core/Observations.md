@@ -272,3 +272,12 @@ is retired; it is not an action capability by itself. Up to 64 IDs per current
 frame, shared resident/work limits and one-shot input epochs bound the registry.
 Verification uses private fresh captures with separate leases; it never replaces
 the script cache. Existing v2 metadata and old recognition coordinates are retained.
+
+08D-01 adds bounded selection only for observed-click private validation frames:
+up to3 sequential service candidates per phase under one <=750ms deadline.
+Discarded positive render times form a strict increasing acceptance boundary;
+invalid native time is never rehabilitated using a later host sample. Geometry,
+ROI, source qualification/age and lifecycle refusals are terminal. No public cache,
+OCR/match reference or ordinary capture semantics change; raw capture-time-probe
+still counts every unknown/future observation without filtering. See
+[private verification contract](ObservedClicks.md).

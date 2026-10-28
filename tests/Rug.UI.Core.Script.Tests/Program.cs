@@ -22,6 +22,7 @@ if (args.Contains("--checkpoint-restore-ui")) { await ManualCheckpointRestore.Ru
 if (args.Contains("--checkpoint-restore-native")) { await NativeCheckpointRestore.RunAsync(); return; }
 if (args.Contains("--checkpoint-restore-tests")) { await CheckpointTests.RunRestoreAsync(); return; }
 if (args.Contains("--observed-click-tests")) { await CheckpointTests.RunObservedClicksAsync(); return; }
+if (args.Contains("--private-candidate-tests")) { await CheckpointTests.RunPrivateCandidatesAsync(); return; }
 if (args.Contains("--execution-trace-tests")) { await CheckpointTests.RunExecutionTracesAsync(); return; }
 if (args.Contains("--trace-review-tests")) { await CheckpointTests.RunTraceReviewAsync(); return; }
 if (args.Contains("--trace-review-ui")) { await TraceReviewUi.RunAsync(); return; }

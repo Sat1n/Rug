@@ -122,8 +122,8 @@ Verification requires its frame render time not precede its own capture request.
 Missing native facts, unknown lifetime, unsupported/non-exact geometry, future
 time, inaccessible/changed window or stale frame always reject. The default
 17x17 neighborhood must remain visually stable through post-move capture; hover
-animations inside it are unsupported and reject. No retry, waiting for a stable
-scene or alternate locator is attempted.
+animations inside it are unsupported and reject. No input retry or search for a stable
+ROI/alternate locator is attempted. Private time-invalid candidate selection is bounded separately below.
 
 Pause closes new input admission. Already admitted work follows 06A and drains
 including releases before pause confirmation. Resume does not revive consumed
@@ -166,3 +166,59 @@ The normal recorder limits, nonblocking emission and fault isolation still apply
 The controlled recovery report includes at most 16 time rejections per failed
 scene, read from bounded checked trace pages. UI launch errors are preserved in
 the report and keep the command nonzero, instead of losing completed scene evidence.
+
+## 3.5-08D-01 private verification candidate selection
+
+Only ObservedClickTransaction.VerifyAsync changes. Every existing phase (lease,
+optional foreground, after-move) obtains at most **3 final service candidates,
+including the first**. Candidates are sequential and share one QPC deadline plus
+one cancellation timer: min(750ms, host VerificationTimeoutMs). Nothing resets
+that budget. Source default1000ms/caller-tightened age, IDs, coordinates,
+qualification and the existing input lease remain unchanged. Ordinary capture,
+OCR/matching, public cache and the unfiltered capture-time-probe are unchanged.
+No recognition, Gateway request or input side effect is retried.
+
+Structured CandidateTime distinguishes discardable Missing/NativeInvalid/Future/
+NotNewerThanDiscarded from terminal clock/frequency/domain/metadata errors. A
+candidate rejected by native flags, or whose own native sample cannot validate
+its render time, stays rejected even when current QPC catches up. A managed time
+object cannot override invalid native flags. Track the greatest positive render
+time of all discarded candidates: acceptance requires a strictly greater render
+time. A time-valid frame must also be at or after its **own acquisition request**;
+old-but-comparable frames are rejected, not searched past.
+
+After time eligibility, the original geometry and ROI checks run once for that
+candidate. Neither geometry failure nor changed content can select another frame.
+Recheck original cancellation/deadline, source/identity/authorization, trusted
+QPC and source age before acquisition, after real completion and before final
+acceptance. Current clock anomalies fail immediately. Source Stale wins over
+candidate replacement; stage timeout is ValidationUnavailable; three time-invalid
+candidates end TimeUnavailable. Null frame, capacity and real capture errors
+remain terminal. Required input releases and existing OutcomeUncertain rules
+are unchanged; post-move rejection still reports uncertain.
+
+A private reservation covers ingress/copy using existing pool limits. Discarded
+buffers/references and the reservation are released before the next acquisition.
+No private frame is published until time, geometry and ROI succeed; at most one
+per phase. Discards mint no observation ID/action reference and never replace
+session.Current. Underlying WGC's existing internal frame selection is unchanged;
+the three-candidate limit counts final ICaptureService acquisitions.
+
+Noncooperative service tasks are awaited to actual completion with their work,
+input and capacity ownership retained. Stop/timeout cannot detach the task or
+release its resources. Late results fail the admission/deadline guards before
+publication/input. No new lock or await under a pool/lifecycle/arbiter lock exists.
+
+TraceObservation.Candidate is an additive nullable schema-v1 field: Stage,
+Number(0..3; 0 means before first attempt), Event(Acquiring/Discarded/StageEnd)
+and a bounded reason. Acquiring is an attempt, not proof that Native ran (capacity
+can reject first). Discarded retains TimeRejection raw/source/QPC/age facts and
+has no candidate frameId. StageEnd distinguishes AcceptedFirst,
+AcceptedAfterDiscard, AttemptsExhausted, ValidationTimedOut, Stale, Cancelled,
+RequestDeadline, AdmissionRejected, PermissionDenied, NoFrame, NotFresh,
+CapacityUnavailable and other unchanged refusals/service failure. Acceptance is
+phase-level ROI validation, never proof of overall business success. Recording
+remains best effort/bounded and cannot change an execution decision.
+
+[08D verification](../tests/evidence/private-candidates/README.md) keeps deterministic,
+real Native, UI, command-exit and resource evidence separate.

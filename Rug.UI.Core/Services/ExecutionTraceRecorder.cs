@@ -150,9 +150,12 @@ public sealed class ExecutionTraceRecorder : IAsyncDisposable
                 Array.AsReadOnly(authorization.Required.Take(16).Select(p=>Text(p,64)!).ToArray()),authorization.Revision,
                 authorization.Missing is null?null:Array.AsReadOnly(authorization.Missing.Take(16).Select(p=>Text(p,64)!).ToArray()));
             var obs=observation is null?null:observation with{PolicyId=Text(observation.PolicyId,64),
+                Candidate=observation.Candidate is not {} candidate?null:candidate with{Stage=Text(candidate.Stage,32)!,Event=Text(candidate.Event,32)!,Reason=Text(candidate.Reason,48)!},
                 TimeRejection=observation.TimeRejection is not {} time?null:time with{FrameRole=Text(time.FrameRole,32)!,NativeDomain=Text(time.NativeDomain,40),CurrentDomain=Text(time.CurrentDomain,40)!},
                 ValidationFrames=observation.ValidationFrames is null?null:Array.AsReadOnly(observation.ValidationFrames.Take(3).ToArray())};
             int chars=(st?.Length??0)+(er?.Length??0)+(why?.Length??0)+(handle.Run?.PluginId.Length??0)+
+                (obs?.Candidate?.Stage.Length??0)+(obs?.Candidate?.Event.Length??0)+(obs?.Candidate?.Reason.Length??0)+
+                (obs?.TimeRejection?.FrameRole.Length??0)+(obs?.TimeRejection?.NativeDomain?.Length??0)+(obs?.TimeRejection?.CurrentDomain.Length??0)+
                 (handle.Origin?.NodeId.Length??0)+(handle.Origin?.CompatibilityRuleId?.Length??0)+(op?.CorrelationId.Length??0)+(op?.Caller.Length??0)+
                 (op?.Operation.Length??0)+(op?.Target.PluginId.Length??0)+(obs?.PolicyId?.Length??0)+
                 (auth?.Required.Sum(s=>s.Length)??0)+(auth?.Missing?.Sum(s=>s.Length)??0)+(auth?.Decision.Length??0);

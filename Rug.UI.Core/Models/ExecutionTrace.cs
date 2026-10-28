@@ -16,7 +16,9 @@ public sealed record TraceOrigin(Guid ParentInstanceId, Guid CheckpointId, long 
 public sealed record TraceAuthorization(string Decision, IReadOnlyList<string> Required, long? Revision,
     IReadOnlyList<string>? Missing = null);
 public sealed record TraceObservation(Guid ObservationId, Guid FrameId, string? PolicyId = null,
-    PointInt? ClientPoint = null, IReadOnlyList<Guid>? ValidationFrames = null, TraceFrameTimeRejection? TimeRejection = null);
+    PointInt? ClientPoint = null, IReadOnlyList<Guid>? ValidationFrames = null, TraceFrameTimeRejection? TimeRejection = null,
+    TraceVerificationCandidate? Candidate = null);
+public sealed record TraceVerificationCandidate(string Stage, int Number, string Event, string Reason);
 // Bounded detached facts at a rejected check. Raw native fields are diagnostics, not execution authority.
 public sealed record TraceFrameTimeRejection(string FrameRole, long? SystemRelative100ns, long? NativeSampleQpc,
     long? NativeFrequency, uint? NativeFlags, string? NativeDomain, long CurrentQpc, long CurrentFrequency, string CurrentDomain,

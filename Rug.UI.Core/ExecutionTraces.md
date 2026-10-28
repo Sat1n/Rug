@@ -174,3 +174,11 @@ QPC/native-time/age facts only at a rejected observed-click check. Old schema-v1
 records have null. Source frame identity and unpublished verification candidates
 remain distinct; diagnostic raw time never grants action eligibility. See
 [time guard diagnostic contract](ObservedClicks.md). No retry or threshold change.
+
+08D-01 adds nullable TraceObservation.Candidate, with bounded Stage(32 chars),
+Number(0..3), Event(32) and Reason(48). It records candidate acquisition attempts,
+time-only discards and phase end, while TimeRejection preserves exact native/QPC
+facts. Source IDs always remain the original action source. A discarded candidate
+has no published frameId. Previously accepted phase IDs remain attached to later
+candidate events; no active frame or lease is retained by tracing. Producer byte
+accounting also includes these diagnostic strings. See [selection contract](ObservedClicks.md).

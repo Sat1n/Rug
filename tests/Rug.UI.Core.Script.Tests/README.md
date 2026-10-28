@@ -774,3 +774,17 @@ These diagnostics do not relax age/ROI rules or retry input.
 no fabricated observation identities. It is not a business acceptance substitute.
 The [EXIT-01 directed comparison](../evidence/host-exit/time-rejections/README.md)
 keeps actual failures and baseline/new-code results separate.
+
+## 08D-01 private candidate selection
+
+`--private-candidate-tests` drives actual Gateway/transaction paths with trusted
+clock/capture doubles, not injected validation success. It is also part of the
+observed-click/default script suites. Covers first-valid, one/two discard then
+success (both delivery modes), same timestamp/caught-up/invalid flags, shared
+budget and stricter limit, source age, terminal ROI/geometry/freshness/service/
+clock failures, stopped/revoked/taken-over/cancelled and noncooperative captures,
+blocked original cancellation propagation, multiple runs/capacity and failed
+trace writer. Counts and pool drainage are asserted. Temporary checked-file tests
+await actual test-writer completion before removing their owned directories;
+production bounded flush/stop is unchanged. Real sample first-run reports are in
+[08D verification](../evidence/private-candidates/README.md).

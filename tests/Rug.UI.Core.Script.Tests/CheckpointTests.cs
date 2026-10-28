@@ -139,10 +139,11 @@ internal static partial class CheckpointTests
         public bool Fail,Disposed,Hold;public int Calls;
         public readonly TaskCompletionSource Entered=Signal(),Release=Signal();
         public readonly TaskCompletionSource Blocked=Signal();
+        public CancellationToken LastToken;
         public bool IsCapturing=>!Disposed;
         public Task StartAsync(nint hwnd,CancellationToken cancellationToken=default)=>Task.CompletedTask;
         public async Task<CapturedFrame?> GrabFrameAsync(CancellationToken cancellationToken=default)
-        {Calls++;Entered.TrySetResult();if(Hold){Blocked.TrySetResult();await Release.Task;}if(Fail)throw new IOException("capture fault");if(Next is not null)return await Next();var pixels=new byte[8*8*4];for(int i=0;i<pixels.Length;i+=4){pixels[i+1]=200;pixels[i+3]=255;}return new CapturedFrame(pixels,8,8,32){CaptureFacts=Facts};}
+        {LastToken=cancellationToken;Calls++;Entered.TrySetResult();if(Hold){Blocked.TrySetResult();await Release.Task;}if(Fail)throw new IOException("capture fault");if(Next is not null)return await Next();var pixels=new byte[8*8*4];for(int i=0;i<pixels.Length;i+=4){pixels[i+1]=200;pixels[i+3]=255;}return new CapturedFrame(pixels,8,8,32){CaptureFacts=Facts};}
         public Task StopAsync()=>Task.CompletedTask;
         public ValueTask DisposeAsync(){Disposed=true;return ValueTask.CompletedTask;}
     }

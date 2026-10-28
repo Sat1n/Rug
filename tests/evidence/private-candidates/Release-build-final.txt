@@ -1,0 +1,11 @@
+  Determining projects to restore...
+  Restored F:\Cardinal\Rug\Rug\Rug.UI\Rug.UI.csproj (in 244 ms).
+  1 of 2 projects are up-to-date for restore.
+  Rug.UI.Core -> F:\Cardinal\Rug\Rug\Rug.UI.Core\bin\x64\Release\net10.0\Rug.UI.Core.dll
+  Rug.UI -> F:\Cardinal\Rug\Rug\Rug.UI\bin\x64\Release\net10.0-windows10.0.22621.0\win-x64\Rug.UI.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:10.89

@@ -1,0 +1,133 @@
+Gateway late-frame cache and parameter-boundary regressions passed
+Automation gateway identity, adapters, deduplication, cancellation and lifecycle tests passed
+Fresh recovery panel PASS: settles; samples=3
+Fresh recovery panel PASS: red; samples=32
+Fresh recovery panel PASS: cancel; samples=1
+Fresh recovery panel PASS: stop; samples=1
+Fresh recovery panel PASS: capture-fault; samples=2
+Fresh recovery panel PASS: deadline; samples=1
+Fresh recovery panel PASS: late-green; samples=2
+Recovery commit boundary PASS: caller
+Recovery commit boundary PASS: validation-deadline
+Recovery commit boundary PASS: request-deadline
+Recovery commit boundary PASS: stop
+Recovery commit boundary PASS: changed
+Recovery commit boundary PASS: fault
+Recovery commit boundary PASS: success
+Recovery PASS: real Lua init/tick locals, explicit tables, frozen mainline, trusted validation, dedup, Stop/late work, grants/identity, planned handoff and epoch isolation
+Checkpoint real Lua/filesystem PASS: same-process reopen AND separate child-process read; fresh frames=1
+Checkpoint failure boundary PASS: false
+Checkpoint failure boundary PASS: missing
+Checkpoint failure boundary PASS: timeout
+Checkpoint failure boundary PASS: stop-validation
+Checkpoint failure boundary PASS: stop-before
+Checkpoint failure boundary PASS: stop-publish
+Checkpoint failure boundary PASS: stop-publish-fault
+Checkpoint failure boundary PASS: fault-publish
+Checkpoint failure boundary PASS: fault-capture
+Checkpoint failure boundary PASS: permission
+Checkpoint failure boundary PASS: revoke
+Checkpoint store PASS: first/replace, late sequence, isolation, old/new reads, corruption/half/temp/versions/compatibility and all capacity limits
+Checkpoint version field PASS: overflow/fraction/type/missing => Corrupt; legacy/unknown integers => UnsupportedFormat; bytes unchanged; real IO failure exposed
+Checkpoint JSON PASS: byte/depth/actions/null/missing/duplicates/nonfinite/cycles/unsupported objects and real Lua null
+Checkpoint exact numbers PASS: tiny/underflow/high-precision/large integers, equivalent forms, config hashes, real-file tamper and legacy format rejection
+Checkpoint identity PASS: dual instances, immutable loaded code/config, new-generation replacement and old-callback rejection
+Checkpoint previous-record retention PASS: false
+Checkpoint previous-record retention PASS: missing
+Checkpoint previous-record retention PASS: timeout
+Checkpoint previous-record retention PASS: stop-before
+Checkpoint caller cancellation PASS: previous record retained; late validation ignored
+Checkpoint original-token barrier PASS: before decision retains old record with zero new publications
+Checkpoint original-token barrier PASS: after decision completes actual publication
+Checkpoint native-observation boundary PASS: real completion before disposal; late frame discarded
+Checkpoint shipped sample PASS: embedded code binding, actual Lua and trusted green-frame/schema validation (Fake pixels)
+Checkpoint freeze PASS: zero new input/early mainline; unrelated timer runs independently
+Checkpoint same-source concurrency PASS: admission sequence 1/2; one validation at a time; latest state retained
+Checkpoint restart restore PASS: actual new process, re-granted test host, fresh Fake observation (NOT WGC), AFTER only
+Checkpoint restore rejection PASS: false
+Checkpoint restore rejection PASS: cancel
+Checkpoint restore rejection PASS: stop
+Checkpoint restore rejection PASS: code
+Checkpoint restore rejection PASS: config
+Checkpoint restore rejection PASS: record
+Checkpoint restore rejection PASS: revoke
+Checkpoint restore rejection PASS: target
+Checkpoint restore rejection PASS: node
+Checkpoint restore rejection PASS: deadline
+Checkpoint restore rejection PASS: validation-timeout
+Checkpoint restore decision PASS: blocked original cancellation before commit stops; cancellation after commit keeps tracked new run
+Checkpoint restore definitions PASS: missing hook, input/checkpoint/state/log attempts reject; actual Lua error remains failure; no business input
+Checkpoint restore actual-work PASS: Stopping/resources retained until noncooperative capture ends; late frame never starts Lua
+Checkpoint discovery PASS: bounded real files, installation isolation, corrupt/legacy/oversized reasons and temp/unattributable-fragment exclusion
+Checkpoint selection current-manifest PASS: cached version/default/permission identity not reused
+Checkpoint disk configuration PASS: changed; frozen selection rejected, zero AFTER input
+Checkpoint disk configuration PASS: created; frozen selection rejected, zero AFTER input
+Checkpoint disk configuration PASS: deleted; frozen selection rejected, zero AFTER input
+Checkpoint disk configuration PASS: empty-created; frozen selection rejected, zero AFTER input
+Checkpoint disk configuration PASS: final-boundary; frozen selection rejected, zero AFTER input
+Checkpoint disk configuration PASS: io-fault; frozen selection rejected, zero AFTER input
+Checkpoint restore PASS: actual Lua, new-run links, no BEFORE replay, dedup/exclusion, fresh verification, late results
+Checkpoint PASS: actual Lua, trusted fresh observation, real files/reopen/child, isolated sources, Stop/IO boundaries, corruption/compatibility/limits/JSON
+Plugin updates PASS: immutable candidates, compile-only validation, old runs/UI/config/grants retained, UI-only pause/identity, staged rollback, bounded latest-save ordering
+Late checkpoint ownership PASS: actual Lua old reject/timeout/cancel/success preserve plan B; next valid submission freezes B
+Runtime freeze lifecycle PASS: cancel
+Runtime freeze lifecycle PASS: pause
+Runtime freeze lifecycle PASS: stop
+Runtime freeze lifecycle PASS: revoke
+Runtime freeze lifecycle PASS: takeover
+Runtime freeze lifecycle PASS: target
+Runtime freeze lifecycle PASS: supersede
+Runtime freeze lifecycle PASS: caller-cancel
+Runtime update freeze PASS: actual Lua BEFORE/checkpoint/AFTER, retained identity/coroutine, no publication/restart, multi-run rollback, admission, Pause/Stop/revoke/candidate/late-IO barriers and cleanup
+Runtime switch scenario PASS: success
+Runtime switch scenario PASS: double
+Runtime switch scenario PASS: pause
+Runtime switch scenario PASS: no-rule
+Runtime switch scenario PASS: hash
+Runtime switch scenario PASS: node
+Runtime switch scenario PASS: actions
+Runtime switch scenario PASS: config-rule
+Runtime switch scenario PASS: permissions
+Runtime switch scenario PASS: definition
+Runtime switch scenario PASS: missing-hook
+Runtime switch scenario PASS: second-scene
+Runtime switch scenario PASS: post-scene
+Runtime switch scenario PASS: stop-fault
+Runtime switch scenario PASS: restore-fault
+Runtime switch scenario PASS: cancel-pre
+Runtime switch scenario PASS: cancel-post
+Runtime switch scenario PASS: stop-pre
+Runtime switch scenario PASS: stop-post
+Runtime switch scenario PASS: revoke
+Runtime switch scenario PASS: target
+Runtime switch scenario PASS: supersede
+Runtime switch scenario PASS: disk-config
+Runtime switch scenario PASS: live-config
+Runtime switch scenario PASS: record
+Runtime switch scenario PASS: timeout
+Runtime switch scenario PASS: blocked-cancel
+Runtime switch scenario PASS: concurrent
+Runtime switch scenario PASS: rule-revoked
+Runtime switch scenario PASS: native-pre
+Runtime switch scenario PASS: native-post
+Runtime switch scenario PASS: ui-build
+Runtime switch scenario PASS: ui-publish
+Runtime switch scenario PASS: pause-cancel
+Runtime switch scenario PASS: double-restore-fault
+Runtime switch scenario PASS: takeover-after
+Runtime switch scenario PASS: supersede-post
+Runtime switch scenario PASS: revert-post
+Runtime switch scenario PASS: validator-timeout
+Runtime switch scenario PASS: ui-cleanup-fault
+Runtime switch scenario PASS: shutdown-commit
+Runtime switch scenario PASS: observations
+Runtime switch PASS: actual Lua group AFTER-only, immutable receipts, direct compatibility, staged rollback, irreversible stop, pause inheritance, request races and cleanup
+Capture geometry PASS: QPC rational conversion/domain refusal, invalid time, crop/ROI/borders, scale/letterbox padding, rounding and window identity rejection
+Observations PASS: host identity, actual-frame provenance, padded ROI, global capacity, opaque reference isolation, late/cancel/Stop publication, actual Lua and drained resources
+Unhandled exception. System.IO.IOException: The process cannot access the file '.rugtrace.lock' because it is being used by another process.
+   at System.IO.FileSystem.RemoveDirectoryRecursive(String fullPath, WIN32_FIND_DATA& findData, Boolean topLevel)
+   at System.IO.Directory.Delete(String path, Boolean recursive)
+   at CheckpointTests.ObservedTimeDiagnosticsAsync() in F:\Cardinal\Rug\Rug\tests\Rug.UI.Core.Script.Tests\ObservedClickTests.cs:line 126
+   at CheckpointTests.RunObservedClicksAsync() in F:\Cardinal\Rug\Rug\tests\Rug.UI.Core.Script.Tests\ObservedClickTests.cs:line 77
+   at Program.<Main>$(String[] args) in F:\Cardinal\Rug\Rug\tests\Rug.UI.Core.Script.Tests\Program.cs:line 1163
+   at Program.<Main>(String[] args)

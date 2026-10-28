@@ -9,7 +9,8 @@ internal static partial class CheckpointTests
         public long Now=100_000_000;
         public ObservedClickReason? Invalid;
         public Action? OnGeometry;
-        public QpcReading ReadQpc()=>new(Now,10_000_000);
+        public Func<QpcReading>? Reading;
+        public QpcReading ReadQpc()=>Reading?.Invoke()??new(Now,10_000_000);
         public void ValidateGeometry(RunIdentity run,CapturedFrame frame)
         {if(Invalid is {} reason)throw new ObservedClickException(reason);OnGeometry?.Invoke();}
         public CapturedFrame Frame(byte value=80)
@@ -75,6 +76,7 @@ internal static partial class CheckpointTests
         await ObservedFinalGeometryAsync();
         await ObservedTimeDiagnosticsAsync();
         await ObservedConcurrentAsync();await ObservedPauseAsync();await ObservedCleanupFailureAsync();await ObservedLuaAsync();
+        await RunPrivateCandidatesAsync();
         Console.WriteLine("Observed clicks PASS: actual Lua/Gateway, input arbitration, trusted QPC/ROI, all execution boundaries, one-shot sources, cancellation/Stop/release and bounded resources");
     }
     private static async Task ObservedTimeDiagnosticsAsync()
@@ -102,7 +104,9 @@ internal static partial class CheckpointTests
                     };
                     var result=await f.Click();
                     ClickRejected(result,mode=="stale-after-move"?OperationError.ObservationStale:OperationError.ObservationTimeUnavailable,mode=="stale-after-move");
-                    var rejected=traces.Query(trace,limit:256).Events.Single(e=>e.Reason=="frame-time-rejected");
+                    var rejections=traces.Query(trace,limit:256).Events.Where(e=>e.Reason=="frame-time-rejected").ToArray();
+                    Check(rejections.Length==(mode is "future-private" or "unknown-private"?3:1),"candidate-local rejection count changed unexpectedly");
+                    var rejected=rejections[0];
                     var time=rejected.Observation!.TimeRejection!;
                     Check(rejected.Observation.FrameId==f.Source.FrameId&&time.CurrentQpc==f.Clock.Now&&time.CurrentFrequency==10_000_000&&
                         time.MaxAgeMs==1000&&time.SourceSystemRelative100ns==100_000_000&&time.SourceFrequency==10_000_000&&
@@ -113,8 +117,9 @@ internal static partial class CheckpointTests
                     if(mode=="unknown-private")Check(time.SystemRelative100ns is null&&time.SignedAge100ns is null,"unknown time fabricated");
                     if(mode=="foreign-private")Check(time.NativeDomain=="foreign"&&time.SignedAge100ns is null,"different clock domains subtracted");
                 }
+                await Bound(traces.WriterCompletion); // Dispose's bounded flush is not actual file-IO completion.
                 var offline=new TraceFileStore(area).Read(traces.HostSessionId,trace,limit:256);
-                Check(offline.Status==TraceReadStatus.Valid&&offline.Events.Single(e=>e.Reason=="frame-time-rejected").Observation?.TimeRejection is not null,
+                Check(offline.Status==TraceReadStatus.Valid&&offline.Events.First(e=>e.Reason=="frame-time-rejected").Observation?.TimeRejection is not null,
                     "time diagnostics not retained by offline checked trace");
             }
             Console.WriteLine("Observed time diagnostics PASS: exact source/QPC, stale-after-move zero down/uncertain, raw suppressed future, unknown/domain isolation, persisted reread; unchanged 1000ms guard");

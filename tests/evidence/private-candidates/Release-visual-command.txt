@@ -1,0 +1,16 @@
+CONTROLLED SAMPLE: explicit trusted test-host grants; exact-window WGC, real OpenCV and PostMessage only. Output=F:\Cardinal\Rug\Rug\artifacts\08d-first-Release-visual\sample-f712c1810cdd49e8a17d2b7a4c7ab8cf
+SCENE stable: API=completed/RoiConsistent; target=(1, 1); business=confirmed; trace=Valid f80dc52c-0362-4667-9bb4-f4678f7c21fe/61cc0d0a-23ba-456c-b916-a7fef431d865; instance=2c355167-42d9-48a1-b41b-6f04bf9fcb06 g1; resources=drained
+SCENE changed: API=rejected/SceneChanged; target=(0, 0); business=not_confirmed; trace=Valid 37631f4e-131c-4bea-837d-e71d0da7489d/584030e3-4205-4dae-a6d9-3ea8cedb52bf; instance=51c868eb-3767-4414-9912-adb5a8bc6811 g1; resources=drained
+SCENE resize: API=rejected/GeometryChanged; target=(0, 0); business=not_confirmed; trace=Valid d07761a6-79e8-4ad2-9348-2c7182b820a2/322e2d02-f24c-4466-9126-2065bce75e1f; instance=e822bf61-d654-4117-82a7-0bfbbe124977 g1; resources=drained
+SCENE stale: API=rejected/Stale; target=(0, 0); business=not_confirmed; trace=Valid 235f91b4-8921-4441-b680-f2ae7ab12725/5b2c4750-1f8c-4753-8ebc-149b676747f4; instance=5662afe1-26e6-422b-86f3-9a68a87b9404 g1; resources=drained
+SCENE invalidated: API=rejected/InvalidReference; target=(0, 0); business=not_confirmed; trace=Valid 5229fb03-6f22-4007-8eed-ec90c904d7f5/ac6f387c-25bf-48f4-adfd-0595079226ec; instance=dc853a0c-0f40-4943-8b2a-a2c9e8c365f3 g1; resources=drained
+SCENE stop: API=NOT RUN/NOT RUN; target=(0, 0); business=NOT RUN; trace=Valid 0710fc92-6fca-40a3-8272-aa7aaa349964/e6261494-01e9-482a-b266-2b69c8061b30; instance=f94b6b20-8ec0-49c4-bb41-77c6218b289a g1; resources=drained
+SCENE revoked: API=NOT RUN/NOT RUN; target=(0, 0); business=NOT RUN; trace=Valid caf31a93-0b06-414a-8151-d87b883fcc92/7ee6a40d-4879-4e9e-acb4-04cff4228677; instance=7954c42e-8590-4f66-a901-0d89622f2269 g1; resources=drained
+SCENE no-completion: API=completed/RoiConsistent; target=(1, 1); business=unconfirmed_timeout; trace=Valid 2b488f44-c7a3-4e99-a230-ae13c062c820/bf72406c-960d-4cb1-91a0-eb6449554292; instance=08a28bb5-d08a-4b7d-ad27-09152d71bd06 g1; resources=drained
+VIEWER stage: host ready
+VIEWER stage: catalog ready
+VIEWER stage: stable trace selected
+VIEWER stage: persisted page Valid
+CONTROLLED VIEWER PASS: read-only historical trace 文件 · controlled_visual / 2c35516742d948a1b41b6f04bf9fcb06 g1 · session f80dc52c036246679bb4f4678f7c21fe · trace 61cc0d0a23ba456cb916a7fef431d865 · Valid
+VIEWER interactions=True; processExit=0;
+REPORT F:\Cardinal\Rug\Rug\artifacts\08d-first-Release-visual\sample-f712c1810cdd49e8a17d2b7a4c7ab8cf\report.json
