@@ -8,6 +8,10 @@ tags: [host, logic, interop, vision, lua, plugins]
 
 # Rug.UI.Core Index (L2)
 
+Current stage scope and evidence: [Phase 3.5 acceptance matrix](../docs/phase3.5/ACCEPTANCE.md).
+Historical diagnostic restrictions are dated; use the matrix to distinguish later
+production integration, user acceptance and still-open limitations.
+
 EXIT-01: host-wide business admission closes before cancellation propagation; repeated
 disposal shares actual cleanup completion. See [lifecycle boundary](Lifecycle.md) and
 [UI shutdown ownership/evidence](../Rug.UI/Shutdown.md).

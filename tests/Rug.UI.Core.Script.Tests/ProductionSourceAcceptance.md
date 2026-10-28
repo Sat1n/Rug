@@ -21,6 +21,12 @@ tags: [diagnostics, raw-input, acceptance]
 保留不可变计数快照，真人键只计数量；仅已带 Rug 标记的测试 F8/B 分开计数。
 聚合在事件源消费者线程中执行，不增加消息回调的工作或事件订阅数量。
 
+Current scope clarification: this document preserves the 05B production-source
+diagnostic sessions. Its “no takeover” statements describe that fixture/stage;
+later 05B-02 production integration and user confirmation are recorded in
+[InputIntervention](../../Rug.UI.Core/InputIntervention.md) and the
+[stage matrix](../../docs/phase3.5/ACCEPTANCE.md). The independent Hook gap remains open.
+
 ## 一次完整会话，返回一份输出和视觉确认
 
 在仓库目录中，先只构建托管项目，再运行：

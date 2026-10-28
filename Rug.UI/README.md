@@ -8,6 +8,9 @@ tags: [host, winui, ui]
 
 # Rug.UI Index (L2)
 
+Stage scope, historical UI evidence and remaining limits:
+[Phase 3.5 acceptance](../docs/phase3.5/ACCEPTANCE.md).
+
 EXIT-01: [orderly shutdown contract, dependency evidence and validation](Shutdown.md).
 Windows App SDK 1.6.240829007; runtime/SDK baseline and native ownership stay explicit.
 

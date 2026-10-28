@@ -1,0 +1,316 @@
+[
+  {
+    "Name": "Build-Debug-scripts",
+    "Arguments": [
+      "build",
+      "tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj",
+      "-c",
+      "Debug",
+      "-p:Platform=x64",
+      "-warnaserror"
+    ],
+    "ExitCode": 0,
+    "Forced": false,
+    "StartError": null
+  },
+  {
+    "Name": "Build-Debug-winui",
+    "Arguments": [
+      "build",
+      "Rug.UI/Rug.UI.csproj",
+      "-c",
+      "Debug",
+      "-p:Platform=x64",
+      "-warnaserror"
+    ],
+    "ExitCode": 0,
+    "Forced": false,
+    "StartError": null
+  },
+  {
+    "Name": "Build-Release-scripts",
+    "Arguments": [
+      "build",
+      "tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj",
+      "-c",
+      "Release",
+      "-p:Platform=x64",
+      "-warnaserror"
+    ],
+    "ExitCode": 0,
+    "Forced": false,
+    "StartError": null
+  },
+  {
+    "Name": "Build-Release-winui",
+    "Arguments": [
+      "build",
+      "Rug.UI/Rug.UI.csproj",
+      "-c",
+      "Release",
+      "-p:Platform=x64",
+      "-warnaserror"
+    ],
+    "ExitCode": 0,
+    "Forced": false,
+    "StartError": null
+  },
+  {
+    "Name": "Verify-Debug-scripts",
+    "Arguments": [
+      "run",
+      "--project",
+      "tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj",
+      "-c",
+      "Debug",
+      "-p:Platform=x64",
+      "--no-build"
+    ],
+    "ExitCode": 0,
+    "Forced": false,
+    "StartError": null
+  },
+  {
+    "Name": "Verify-Debug-ui-tests",
+    "Arguments": [
+      "run",
+      "--project",
+      "Rug.UI.Tests/Rug.UI.Tests.csproj",
+      "-c",
+      "Debug",
+      "-p:Platform=x64"
+    ],
+    "ExitCode": 0,
+    "Forced": false,
+    "StartError": null
+  },
+  {
+    "Name": "Verify-Debug-host-exit",
+    "Arguments": [
+      "-NoProfile",
+      "-File",
+      "tests/run_host_exit_probe.ps1",
+      "-Configuration",
+      "Debug",
+      "-Count",
+      "2",
+      "-OutputRoot",
+      "artifacts/environment-recheck/env01-20261028/Verify-Debug-host-exit"
+    ],
+    "ExitCode": 0,
+    "Forced": false,
+    "StartError": null
+  },
+  {
+    "Name": "Verify-Debug-capture",
+    "Arguments": [
+      "run",
+      "--project",
+      "tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj",
+      "-c",
+      "Debug",
+      "-p:Platform=x64",
+      "--no-build",
+      "--",
+      "--capture-time-probe",
+      "artifacts/environment-recheck/debug"
+    ],
+    "ExitCode": 0,
+    "Forced": false,
+    "StartError": null
+  },
+  {
+    "Name": "Verify-Release-scripts",
+    "Arguments": [
+      "run",
+      "--project",
+      "tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj",
+      "-c",
+      "Release",
+      "-p:Platform=x64",
+      "--no-build"
+    ],
+    "ExitCode": 0,
+    "Forced": false,
+    "StartError": null
+  },
+  {
+    "Name": "Verify-Release-ui-tests",
+    "Arguments": [
+      "run",
+      "--project",
+      "Rug.UI.Tests/Rug.UI.Tests.csproj",
+      "-c",
+      "Release",
+      "-p:Platform=x64"
+    ],
+    "ExitCode": 0,
+    "Forced": false,
+    "StartError": null
+  },
+  {
+    "Name": "Verify-Release-host-exit",
+    "Arguments": [
+      "-NoProfile",
+      "-File",
+      "tests/run_host_exit_probe.ps1",
+      "-Configuration",
+      "Release",
+      "-Count",
+      "2",
+      "-OutputRoot",
+      "artifacts/environment-recheck/env01-20261028/Verify-Release-host-exit"
+    ],
+    "ExitCode": 0,
+    "Forced": false,
+    "StartError": null
+  },
+  {
+    "Name": "Verify-Release-capture",
+    "Arguments": [
+      "run",
+      "--project",
+      "tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj",
+      "-c",
+      "Release",
+      "-p:Platform=x64",
+      "--no-build",
+      "--",
+      "--capture-time-probe",
+      "artifacts/environment-recheck/release"
+    ],
+    "ExitCode": 0,
+    "Forced": false,
+    "StartError": null
+  },
+  {
+    "Name": "Rebuild-Debug-scripts",
+    "Arguments": [
+      "build",
+      "tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj",
+      "-c",
+      "Debug",
+      "-p:Platform=x64",
+      "-warnaserror",
+      "-t:Rebuild"
+    ],
+    "ExitCode": 0,
+    "Forced": false,
+    "StartError": null
+  },
+  {
+    "Name": "Rebuild-Debug-winui",
+    "Arguments": [
+      "build",
+      "Rug.UI/Rug.UI.csproj",
+      "-c",
+      "Debug",
+      "-p:Platform=x64",
+      "-warnaserror",
+      "-t:Rebuild"
+    ],
+    "ExitCode": 0,
+    "Forced": false,
+    "StartError": null
+  },
+  {
+    "Name": "Rebuild-Release-scripts",
+    "Arguments": [
+      "build",
+      "tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj",
+      "-c",
+      "Release",
+      "-p:Platform=x64",
+      "-warnaserror",
+      "-t:Rebuild"
+    ],
+    "ExitCode": 0,
+    "Forced": false,
+    "StartError": null
+  },
+  {
+    "Name": "Rebuild-Release-winui",
+    "Arguments": [
+      "build",
+      "Rug.UI/Rug.UI.csproj",
+      "-c",
+      "Release",
+      "-p:Platform=x64",
+      "-warnaserror",
+      "-t:Rebuild"
+    ],
+    "ExitCode": 0,
+    "Forced": false,
+    "StartError": null
+  },
+  {
+    "Name": "Final-Debug-host-exit",
+    "Arguments": [
+      "-NoProfile",
+      "-File",
+      "tests/run_host_exit_probe.ps1",
+      "-Configuration",
+      "Debug",
+      "-Count",
+      "2",
+      "-OutputRoot",
+      "artifacts/environment-recheck/env01-20261028/Final-Debug-host-exit"
+    ],
+    "ExitCode": 0,
+    "Forced": false,
+    "StartError": null
+  },
+  {
+    "Name": "Final-Debug-capture",
+    "Arguments": [
+      "run",
+      "--project",
+      "tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj",
+      "-c",
+      "Debug",
+      "-p:Platform=x64",
+      "--no-build",
+      "--",
+      "--capture-time-probe",
+      "artifacts/environment-recheck/env01-20261028/rebuilt-debug"
+    ],
+    "ExitCode": 0,
+    "Forced": false,
+    "StartError": null
+  },
+  {
+    "Name": "Final-Release-host-exit",
+    "Arguments": [
+      "-NoProfile",
+      "-File",
+      "tests/run_host_exit_probe.ps1",
+      "-Configuration",
+      "Release",
+      "-Count",
+      "2",
+      "-OutputRoot",
+      "artifacts/environment-recheck/env01-20261028/Final-Release-host-exit"
+    ],
+    "ExitCode": 0,
+    "Forced": false,
+    "StartError": null
+  },
+  {
+    "Name": "Final-Release-capture",
+    "Arguments": [
+      "run",
+      "--project",
+      "tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj",
+      "-c",
+      "Release",
+      "-p:Platform=x64",
+      "--no-build",
+      "--",
+      "--capture-time-probe",
+      "artifacts/environment-recheck/env01-20261028/rebuilt-release"
+    ],
+    "ExitCode": 0,
+    "Forced": false,
+    "StartError": null
+  }
+]

@@ -8,6 +8,9 @@ tags: [core, native, cabi]
 
 # Rug.Core Index (L2)
 
+For stage evidence, actual Native configuration checks and retained capture-time
+limits, see [Phase 3.5 acceptance](../docs/phase3.5/ACCEPTANCE.md).
+
 Native C++20 DLL owning the perception-and-input pipeline: window capture (WGC),
 OCR (WinRT), coordinate normalization and humanized input synthesis. Everything is
 exposed to the managed host through a stable C-ABI. It contains **no** UI,

@@ -8,6 +8,10 @@ tags: [tests, native, cabi]
 
 # Rug.Core Native Tests
 
+Stage-wide evidence/configuration audit: [Phase 3.5 acceptance](../docs/phase3.5/ACCEPTANCE.md)
+and [evidence index](../docs/phase3.5/EVIDENCE.md). Historical and current Native
+configuration claims are kept separate.
+
 A console harness that exercises Rug.Core pipeline operations through its public
 C-ABI (`RugCoreAbi.h`) — the same boundary the C# host uses. It validates OCR
 correctness, OCR memory/stability under repetition, and OpenCV template matching.

@@ -1,0 +1,186 @@
+{
+  "schemaVersion": 1,
+  "auditDate": "2026-10-28",
+  "codeBaseline": "034357d1be977459b52f17ecfd4d2ba1b013d95f",
+  "auditMode": "Read-only evidence inspection; no test rerun",
+  "files": [
+    {
+      "path": "tests/evidence/private-candidates/README.md",
+      "exists": true,
+      "trackedAtCodeBaseline": true,
+      "sha256": "348BC5438F8CF5D0C5B70AF994D7C79234C2290B0BB981BECB53206C6C27C725"
+    },
+    {
+      "path": "tests/evidence/host-exit/README.md",
+      "exists": true,
+      "trackedAtCodeBaseline": true,
+      "sha256": "934B1E0579156CA9B300CE41A209C80EC344A5DCE9B1AFECC324BD40337A1E68"
+    },
+    {
+      "path": "tests/evidence/host-exit/time-rejections/README.md",
+      "exists": true,
+      "trackedAtCodeBaseline": true,
+      "sha256": "24F7D20E579E13345239E5F28F9FC5EA6C55828A874F2A81D95E640E0899C147"
+    },
+    {
+      "path": "tests/evidence/environment-recheck/README.md",
+      "exists": true,
+      "trackedAtCodeBaseline": true,
+      "sha256": "E69C40C6E867C91F76E2316C9F3257E879B21F14241B3118B04D02D90AAE0EB2"
+    },
+    {
+      "path": "artifacts/review-08d01/review-summary.json",
+      "exists": true,
+      "trackedAtCodeBaseline": false,
+      "sha256": "6EAC398A8FB8B4CEB16FB619B9CCD28AF6BD253E1C7909BB196E7D930DDEAE61"
+    },
+    {
+      "path": "artifacts/review-08d01/Debug-observed-click-tests.log",
+      "exists": true,
+      "trackedAtCodeBaseline": false,
+      "sha256": "26058095B599F4585EABE3253A3CB30F37CE02B22990DAA971140E3BEFFFE5FD"
+    },
+    {
+      "path": "artifacts/review-08d01/Debug-desktop-observed-click-tests.log",
+      "exists": true,
+      "trackedAtCodeBaseline": false,
+      "sha256": "0BDC78D810950D5E03D339B17F5140A01EE9029DAE7E78BF7BEE86102DD23AA4"
+    },
+    {
+      "path": "artifacts/review-08d01/Debug-isolated-local-temp-observed-click-tests.log",
+      "exists": true,
+      "trackedAtCodeBaseline": false,
+      "sha256": "0BDC78D810950D5E03D339B17F5140A01EE9029DAE7E78BF7BEE86102DD23AA4"
+    },
+    {
+      "path": "artifacts/environment-recheck/env01-20261028/all-commands.json",
+      "exists": true,
+      "trackedAtCodeBaseline": false,
+      "sha256": "446D7691558B6480EC590F7DBD38313BA4976AA38D096FACFC7FD4E67A035736"
+    },
+    {
+      "path": ".codex/capture-geometry-native-debug-verified.log",
+      "exists": true,
+      "trackedAtCodeBaseline": false,
+      "sha256": "53FC548ED227C712B21233F506FDD52B19EDB709F2AC083540A2AAE7F53D611E"
+    },
+    {
+      "path": ".codex/capture-geometry-native-release-verified.log",
+      "exists": true,
+      "trackedAtCodeBaseline": false,
+      "sha256": "E33074939D6D3FABB81A8E2D7F80032FCDE1745280F002D9D762F0FFC7871750"
+    },
+    {
+      "path": ".codex/native-full-Debug.log",
+      "exists": true,
+      "trackedAtCodeBaseline": false,
+      "sha256": "F30C687CACDE0D99AAB01A93BDC9543234472DA21F15AA4E08CBCF67735AF795"
+    },
+    {
+      "path": ".codex/native-full-Release.log",
+      "exists": true,
+      "trackedAtCodeBaseline": false,
+      "sha256": "2E04F04E91470907D298C2031D003D8E3DFF63AA954293DDD3EF79B4D89D5A7B"
+    }
+  ],
+  "currentRealReports": [
+    {
+      "path": "tests/evidence/private-candidates/Debug-visual-report.json",
+      "sha256": "9C4B24996DDF58917523D2AE8B5A176B174AFEB02D792BBC303695F53D0B8188",
+      "configuration": "Debug",
+      "sample": "visual",
+      "sceneCount": 8,
+      "functionalPassed": true,
+      "allSceneAssertionsPassed": true,
+      "allResourcesDrained": true,
+      "allTracesValid": true,
+      "uiExitCode": 0,
+      "localOriginalExists": true,
+      "localOriginalHashMatches": true,
+      "nativeCandidateDiscardCount": 0
+    },
+    {
+      "path": "tests/evidence/private-candidates/Debug-recovery-report.json",
+      "sha256": "ABD26EF52DAA520BABFB52BC69D939ED43EC9105F231D8AC4BED6C813F1ACE06",
+      "configuration": "Debug",
+      "sample": "recovery",
+      "sceneCount": 8,
+      "functionalPassed": true,
+      "allSceneAssertionsPassed": true,
+      "allResourcesDrained": true,
+      "allTracesValid": true,
+      "uiExitCode": 0,
+      "localOriginalExists": true,
+      "localOriginalHashMatches": true,
+      "nativeCandidateDiscardCount": 0
+    },
+    {
+      "path": "tests/evidence/private-candidates/Release-visual-report.json",
+      "sha256": "F90294893CA5D47A8DC01488EBCCA0EB3D2F633C38F46C9D248F87D0DD2E4F1D",
+      "configuration": "Release",
+      "sample": "visual",
+      "sceneCount": 8,
+      "functionalPassed": true,
+      "allSceneAssertionsPassed": true,
+      "allResourcesDrained": true,
+      "allTracesValid": true,
+      "uiExitCode": 0,
+      "localOriginalExists": true,
+      "localOriginalHashMatches": true,
+      "nativeCandidateDiscardCount": 0
+    },
+    {
+      "path": "tests/evidence/private-candidates/Release-recovery-report.json",
+      "sha256": "719B917E2EB3722E87A3C7443283EFB12045C49F45B718AFC2BFC86A340FB39E",
+      "configuration": "Release",
+      "sample": "recovery",
+      "sceneCount": 8,
+      "functionalPassed": true,
+      "allSceneAssertionsPassed": true,
+      "allResourcesDrained": true,
+      "allTracesValid": true,
+      "uiExitCode": 0,
+      "localOriginalExists": true,
+      "localOriginalHashMatches": true,
+      "nativeCandidateDiscardCount": 0
+    }
+  ],
+  "nativeFiles": [
+    {
+      "path": "x64/Debug/Rug.Core.dll",
+      "recordedSha256": "643AD2467F7139B909DB3972BD41A46E0641502D26827728C605040F3CAADF64",
+      "currentSha256": "643AD2467F7139B909DB3972BD41A46E0641502D26827728C605040F3CAADF64",
+      "matches": true
+    },
+    {
+      "path": "x64/Release/Rug.Core.dll",
+      "recordedSha256": "4C84E319E4D81714ADCA7D00CEF01D7E0BCF3A262E9CD64FC5E90C2F632E0E5D",
+      "currentSha256": "4C84E319E4D81714ADCA7D00CEF01D7E0BCF3A262E9CD64FC5E90C2F632E0E5D",
+      "matches": true
+    }
+  ],
+  "envCommandCount": 20,
+  "envAllExitZero": true,
+  "limits": [
+    "Hash and source loader audit is not a substitute for a missing historical process module log.",
+    "Review initial isolation exit code NOT COLLECTED in retained log; failure retained, not counted as pass."
+  ],
+  "historicalEmptyExitReports": [
+    {
+      "path": "tests/evidence/host-exit/Debug-empty.json",
+      "sha256": "AFB797A11377018D7E655D03C9ED0F5BF576613FC0954DD75C4A26CA64F731EF",
+      "count": 5,
+      "allNaturalZero": true,
+      "stderrFileCount": 5,
+      "allStderrEmpty": true
+    },
+    {
+      "path": "tests/evidence/host-exit/Release-empty.json",
+      "sha256": "4C43B5CDB9883BCF73BBDD1BD850C31D61E0184254F3EB0AE4E9F0AA0E04037E",
+      "count": 5,
+      "allNaturalZero": true,
+      "stderrFileCount": 5,
+      "allStderrEmpty": true
+    }
+  ]
+}

@@ -8,6 +8,10 @@ tags: [lua, tests, input]
 
 # Lua coroutine bridge tests
 
+For the current stage matrix, retained first failures and evidence gaps, see
+[Phase 3.5 acceptance](../../docs/phase3.5/ACCEPTANCE.md). Commands below are
+test entries, not proof that every mode ran at the latest baseline.
+
 08C-02 `--controlled-recovery-sample [outputRoot]` runs the persistent visual recovery
 sample through real WGC/OpenCV/PostMessage, actual archive/trace services and eight
 barrier-controlled scenarios. It also starts real WinUI for consent, red refusal,
