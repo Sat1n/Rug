@@ -176,3 +176,7 @@ The real scenario matrix is the script test host's `--host-exit-ui` entry.
 [Shutdown contract](../Rug.UI/Shutdown.md) and [preserved evidence](evidence/host-exit/README.md)
 separate functional assertions, resource drain and process exit. Owned timeout
 cleanup is a failure, never a substitute for natural exit.
+
+3.5-ENV-01: [Application Control and regression recheck](evidence/environment-recheck/README.md)
+separates historical blocks, current security state, rebuilt-process validation
+and read-only capture-time counts; current success is not permanent trust acceptance.
