@@ -8,28 +8,27 @@ tags: [host, logic, interop, vision, lua, plugins]
 
 # Rug.UI.Core Index (L2)
 
+Current stage scope and evidence: [Phase 3.5 acceptance matrix](../docs/phase3.5/ACCEPTANCE.md).
+Historical diagnostic restrictions are dated; use the matrix to distinguish later
+production integration, user acceptance and still-open limitations.
+
+EXIT-01: host-wide business admission closes before cancellation propagation; repeated
+disposal shares actual cleanup completion. See [lifecycle boundary](Lifecycle.md) and
+[UI shutdown ownership/evidence](../Rug.UI/Shutdown.md).
+
+
 Managed host logic between the native core and the UI. It is the **single managed
 P/Invoke boundary** to `Rug.Core.dll` and exposes safe, async vision services
 (OCR, template matching, WGC capture) plus model discovery, humanized input
-synthesis and OS window inspection; it will also host task scheduling, plugin
+synthesis and OS window inspection; it also hosts task scheduling, plugin
 loading and the sandboxed Lua runtime. It contains no XAML.
 
-> **Status:** native interop + vision services implemented (Phase 1, Task 1.4):
-> `Native/`, `Models/Vision.cs`, `Services/OcrService.cs`,
-> `Services/TemplateMatchService.cs`; input service added (Task 1.5):
-> `Models/Input.cs`, `Native/InputControllerHandle.cs`, `Services/InputService.cs`;
-> capture + window-spy added (Task 1.6): `Native/CapturerHandle.cs`,
-> `Native/WindowNative.cs`, `Models/Capture.cs`, `Models/WindowInfo.cs`,
-> `Services/CaptureService.cs`, `Services/WindowSpyService.cs`, `OcrService.RecognizeFrameAsync`.
-> `FileService`/`Json` pre-exist.
-> `LuaRuntime` coroutine bridge (Task 2.1.1), plugin manifest/config loading and
-> permission interception (Task 2.1.2), and multi-instance lifecycle scheduling
-> with a Lua instruction watchdog (Task 2.1.3), plus anomaly black-box logging
-> and the Agent rescue hook (Task 2.1.4), are implemented.
-> Task 2.2 adds the managed input bridge and physical coordinate mapper.
-> Task 2.3 connects WGC frames to in-memory template matching and OCR for Lua.
-> Task 2.4 adds a real Minecraft Chinese-menu E2E harness without fake services.
-> Task 3.1.1 adds shared state and a named-command bus for UI/Lua coordination.
+> **Status:** native vision/input/capture interop, Lua/plugins/scheduler,
+> black-box logs, scoped state/commands, schema/hot reload and Gateway are implemented.
+> Process-local explicit grants and shared input arbitration support host manual takeover.
+> Task 3.5-05B-02 connects production candidate-input monitoring to safe takeover;
+> 05B-02 human UI acceptance is user-confirmed; the independent Hook gap remains incomplete.
+> 06B-01 retains Lua through verified recovery; the human main loop is user-confirmed.
 
 ## Internal Topology
 
@@ -46,36 +45,59 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 | `Contracts/Services/` | `IOcrService`, `ITemplateMatchService`, `IInputService`, `ICaptureService`, `IWindowSpyService`, `IFileService` |
 | `Services/OcrService.cs` | Async OCR (Task.Run / MTA) from a file **or** an in-memory `CapturedFrame`; engine = WinRT or Paddle by discovered id; frees native memory |
 | `Services/TemplateMatchService.cs` | Async template match over `Rug_MatchTemplate`, accepting a file or pinned managed BGRA frame |
-| `Services/VisualEngineBridge.cs` | Single-frame cache per runtime, permission-gated capture/match/OCR, safe template paths, region crops and client-space result coordinates |
+| `Services/VisualEngineBridge.cs` · `Services/ObservationFramePool.cs` · `Models/Observation.cs` · `Models/CaptureFacts.cs` | Shared bounded host frame leases, immutable run/frame provenance, opaque current-cache references, safe template paths and ROI transforms; [08A observation/facts contract](Observations.md) |
+| `Services/ObservedClickServices.cs` · `Models/ObservedClick.cs` · `Native/ObservedInputEnvironment.cs` · `Native/ObservedInputCoordinates.cs` | Observation-bound click with shared post-geometry cancellation/deadline, live admission and QPC guard before activation/move/down; bounded private candidate selection/ROI comparison and typed time-rejection trace facts, PMv2 input and one-shot source qualification; [08A-02B contract](ObservedClicks.md) |
+| `Models/ExecutionTrace.cs` · `Services/ExecutionTraceRecorder.cs` · `Services/TraceFileStore.cs` | Host-issued run/control trace identities, detached Gateway/lifecycle/observation summaries, bounded nonblocking producer and local checked append/query; [08B-01 contract](ExecutionTraces.md) |
+| `Models/TraceReview.cs` · `Services/TraceReviewService.cs` · `Services/IncidentStore.cs` | Host-root bounded background review, latest-only dispatch, versioned incident reads and boundary links; [08B-02 contract](TraceReview.md) |
 | `Services/InputService.cs` | Async humanized input (Task.Run / MTA): mouse move/click/drag, key press, `SendText`, dry-run `PlanTrajectoryAsync`; `SetTargetAsync(hwnd, background)` binds the window + delivery mode. Mouse coords are **client-space**, confined to the window by native |
 | `Abstractions/ICoordinateMapper.cs` · `Services/CoordinateMapper.cs` | Validate a physical client point against the target HWND and project it through Win32 `ClientToScreen` for diagnostics and tests |
-| `Services/InputBridge.cs` | Permission-gated input dispatch, per-call foreground/background selection, focus guard, button selection and cancellable key hold |
-| `Services/CaptureService.cs` | Async WGC capture (Task.Run / MTA): start/stop a native capturer, copy each frame to managed BGRA8, free the native buffer |
+| `Services/InputBridge.cs` · `Native/ForegroundWindowActivation.cs` | Permission-gated dispatch, cancellable foreground confirmation and full-action shared leases; [contract](InputArbitration.md) |
+| `Abstractions/IInputArbiter.cs` · `Models/InputOwnership.cs` · `Services/InputArbiter.cs` · `Services/InputWindowValidator.cs` · `Services/InputExecutionBoundary.cs` | Host owners, window lifetimes, bounded conflict-FIFO input queue, manual takeover and Gateway focus/input-progress outcome boundary; [contract](InputArbitration.md) |
+| `Abstractions/IInputEventSource.cs` · `Models/InputEvents.cs` · `Services/RawInputEventSource.cs` · `Native/WindowsRawInputReceiver.cs` | Explicit host-owned Raw Input receiver, bounded detached events and diagnostics; [contract and acceptance](RawInputEvents.md) |
+| `Abstractions/IInputInterventionCoordinator.cs` · `Services/InputInterventionCoordinator.cs` | Host input sessions, readiness guards and global candidate takeover; [contract](InputIntervention.md) |
+| `Services/CaptureService.cs` | Async WGC: 64 MiB managed-copy ingress limit, validated BGRA layout, SafeHandle retained through actual native work; additive final-frame time/geometry facts and opt-in exact-window path; ambiguous no-frame status polls, never validates |
 | `Services/WindowSpyService.cs` | Resolve the window under the cursor or enumerate visible top-level windows → `WindowInfo` (incl. monitor via `MonitorFromWindow`); inspect a given HWND, check foreground state, query client size and pick client points. All physical pixels (PMv2-aware host) |
 | `Abstractions/IScriptRuntime.cs` · `Models/ScriptExecutionResult.cs` | Script lifecycle/state contract |
 | `Models/PluginManifest.cs` · `Models/PluginConfigSchema.cs` · `Models/Permission.cs` | Plugin identity/entry/permission declarations, UI control schema and typed defaults, exact permission names |
 | `Services/LuaRuntime.cs` | NLua coroutine bridge: `StepAsync` yields a `rug.*` operation, starts its .NET task, and `ResumeAsync` awaits that task before resuming Lua; all Lua-state access is serialized |
 | `Abstractions/IPluginManager.cs` · `Services/PluginManager.cs` | Scan immediate plugin directories, validate manifest/entry/config, cache valid plugins and UI schema; skip malformed plugins with a warning |
+| `Abstractions/IPluginAuthorization.cs` · `Services/PluginAuthorization.cs` · `Models/AuthorizationModels.cs` | Process-local installation-bound explicit grants, immutable snapshots/revisions, revocable admission leases; [contract](Authorization.md) |
 | `Security/PermissionInterceptor.cs` · `Exceptions/PermissionDeniedException.cs` | Exact-match permission checks before sensitive API tasks start; denied calls log an audit warning and fault the script |
-| `Abstractions/ITaskScheduler.cs` · `Models/TaskExecutionContext.cs` · `Services/TaskScheduler.cs` | Concurrent plugin/window instances, per-instance capture/input/runtime ownership, pause/resume/stop state and periodic lifecycle dispatch |
-| `Models/StateChangedEventArgs.cs` · `Services/StateStore.cs` | Concurrent typed key/value state, null support and change notifications |
-| `Abstractions/ICommandBus.cs` · `Services/CommandBus.cs` | Shared state access, UI-dispatched change events and async named-command subscriptions |
-| `Abstractions/IAnomalyLogger.cs` · `Models/AnomalyLogModel.cs` · `Services/AnomalyLogger.cs` | Per-instance incident capture, PNG encoding and JSON black-box records |
+| `Abstractions/ITaskScheduler.cs` · `Models/TaskExecutionContext.cs` · `Models/RunIdentity.cs` · `Services/TaskScheduler.cs` | Concurrent plugin/window runs, independent run generation and target-binding identity, per-instance service ownership and lifecycle dispatch |
+| `Models/StateScope.cs` · `Models/StateChangedEventArgs.cs` · `Services/StateStore.cs` | Structural AppState/PluginConfig/InstanceState partitions, bounded JSON values, scoped revisions and detached events |
+| `Abstractions/ICommandBus.cs` · `Services/CommandBus.cs` | Scoped state subscriptions with stale UI callback rejection and async named-command routing |
+| `Abstractions/IAnomalyLogger.cs` · `Models/AnomalyLogModel.cs` · `Services/AnomalyLogger.cs` | Per-instance PNG/JSON archive, v1 incident identity and bounded pre-capture trace link |
 | `Services/FileService.cs` · `Helpers/Json.cs` | File IO / JSON helpers |
+
+08C-01 provides a [persistent controlled visual sample](../samples/controlled-visual/README.md):
+real WGC/template matching, one observed PostMessage click, new-frame business
+confirmation and read-only trace review. Exact-window capture is explicitly opt-in
+in its isolated host; ordinary capture/input policies are unchanged.
+
+08C-02 adds the [controlled recovery sample](../samples/controlled-visual/RECOVERY.md):
+verified BEFORE, planned handoff, fresh WGC verification and original-coroutine
+AFTER-only continuation, with incident/trace evidence and deterministic Stop barriers.
+It composes existing recovery contracts without adding a recovery or input policy.
 
 ## Task lifecycle and watchdog (Task 2.1.3)
 
 * `TaskScheduler.StartTaskAsync(pluginId, hwnd)` gets a scanned plugin, creates
-  independent capture/input/runtime instances through factories, starts capture
-  before Lua can call `rug.capture()`, prepares the lifecycle coroutine, then
-  registers the instance and returns its ID. A background runner executes
+  independent capture/input/runtime instances through factories, registers
+  Starting before capture/runtime setup and returns its ID after setup.
+  Capture precedes Lua `rug.capture()`. A background runner executes
   `on_init()` once, followed by `on_tick()` at a configurable interval. The script
   body defines hooks on its first run. Missing hooks are no-ops.
-* `PauseTask` suspends progress at the next coroutine boundary and preserves the
-  pending operation; `ResumeTask` continues it. `StopTaskAsync` cancels the instance,
-  awaits the runner, invokes `on_stop()` with a bounded watchdog, stops/disposes
-  capture, and disposes Lua/input resources. `on_stop()` is synchronous; yielding
-  from it is rejected during cleanup. Instances are removed after cleanup.
+* `PauseTask` accepts a request; `LifecycleSnapshot` / `LifecycleChanged` confirm
+  Paused only after Lua and admitted input/releases drain. Resume is submitted to
+  the serial driver with fresh grant/target/control checks. Stop shares one cleanup,
+  waits for actual native work, invokes bounded non-yielding `on_stop` once and
+  disposes every resource before Stopped/Faulted. Failed observers cannot fail runs.
+  Stopping closes business admission atomically before notifying observers;
+  Gateway dispatch and input queue rechecks reject without depending on token
+  propagation. The host retains Stop identity/dedup until cleanup ends; required
+  releases and shared Stop cleanup remain available. Lua classifies host Stop
+  admission refusals as cancellation; genuine errors still fault.
+  See [06A transitions, cancellation and verification](Lifecycle.md).
 * The host captures `debug.sethook` before removing Lua's `debug` and `coroutine`
   globals. Each host-created coroutine gets a count hook that checks cancellation
   every 10,000 Lua instructions. The hook and coroutine handles live in private
@@ -84,25 +106,33 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   `Stop()` cancels its token; the stop hook has its own deadline. The capture and
   input factories must provide distinct service instances for each task.
 
-## Anomaly black box and Agent hook (Task 2.1.4)
+## Anomaly black box and recovery (3.5-06B-01)
 
-* A manifest with `agent` permission may call
-  `rug.agent.resolve_anomaly(reason, context)`. The Lua bridge yields immediately,
-  captures a private Lua traceback alongside the supplied context, and dispatches
-  to the owning task's `IAnomalyLogger`. Unauthorized calls raise an audited
-  `PermissionDeniedException` before invoking the logger.
-* `AnomalyLogger` captures the owning instance's current BGRA frame and writes a
-  real RGBA PNG plus same-basename JSON under `./logs/anomalies/` by default.
-  The JSON stores a UTC timestamp, plugin/instance IDs, reason, script context,
-  relative screenshot filename, and an explicit null `agent_resolution` field for
-  Phase 4. The service returns the JSON path and emits `[Anomaly Detected]` at
-  warning level. The directory can be overridden by the host or tests.
-* Once the record is written, the runtime returns `Faulted` without resuming the
-  reporting Lua coroutine. The scheduler records the error, runs `on_stop`, and
-  releases the capture session and per-instance resources. A capture or disk
-  failure also faults the task and is surfaced through `LastError`.
+* Live `agent` grants admit bounded `rug.agent.resolve_anomaly(reason, contextString)`.
+  [Recovery contract](Recovery.md) defines the injected coordinator/executor/validator,
+  Recovering/AwaitingHuman states, preserved coroutine and Stop precedence.
+* Production waits for human verification. Trusted installation/scenario validation
+  returns Lua `{status="resolved",recoveryId,reason,error}`. Commit checks identity,
+  cancellation and deadlines under the Stop transition lock. No Resume bypass.
+* `AnomalyLogger` saves local PNG/JSON with run/recovery identity and verification.
+  [08B-02](TraceReview.md) versions new incidents and snapshots trace association before capture; recovery updates preserve the link.
+  Bounded context excludes VM stacks; permission/IO/Lua/cleanup errors still fault.
+* Planned input handoff drains releases, retires the input epoch/session and
+  preserves only that registered recovery. Other input runs stop; timer/vision
+  survive. Return control never continues Lua. Explicit Gateway VerifyRecovery
+  rechecks grants/target/detector, acquires a new session and bounds fresh-frame observation.
+  No provider or recovery input tools are added.
+* [Checkpoints](Checkpoints.md): bounded Lua saves, exact code/config identity and
+  detached reads. [Startup](CheckpointStartup.md) validates fresh scenes before
+  a new on_restore run; config.json existence/content and effective configuration
+  are pinned through the final startup check. Ordinary Start is unchanged.
 
 ## Native input bridge and coordinates (Task 2.2)
+
+* Task 3.5-05A adds [shared input arbitration](InputArbitration.md). Lua and
+  Gateway input compete with host DevTools on actual window/global resources.
+  Host takeover stops only input-declaring runs and waits for releases; grants
+  are unchanged and returning control never revives an old run.
 
 * `rug.click(x, y, button?, mode?)` and `rug.press_key(vk, duration_ms?)` require
   `input`. Buttons accept `left`, `right`, `middle`, `x1`, `x2` or their native
@@ -178,11 +208,13 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   host-only runtime fields ignored during JSON parsing. `InputDelivery` is an
   optional JSON declaration validated at scan time. The manager fills `Configuration`
   with typed config defaults; the host may override values and supplies the window.
-  Permissions are copied into `PermissionInterceptor` on initialization and checked
-  before each `rug.*` service task. A missing grant throws
+  Permissions are requested capability ceilings. The host must explicitly grant
+  all declarations before startup; live authorization and caller/run ceilings are
+  checked before sensitive calls. See [Authorization](Authorization.md) for
+  installation binding, revocation and reload rules. A missing grant throws
   `PermissionDeniedException`, logs plugin/API/
   permission details, and puts the runtime in `Faulted` state. Defined names:
-  `timer`, `vision.capture`, `vision.match`, `vision.ocr`, `input`, `network`, `filesystem`, `agent`.
+  `timer`, `vision.capture`, `vision.match`, `vision.ocr`, `input`, `network`, `filesystem`, `agent`, `checkpoint`.
 
 ## Lua coroutine contract (Task 2.1.1)
 
@@ -236,24 +268,56 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   under the ignored E2E `bin/.../e2e-run/` directory. This is an explicit
   interactive test because it sends real input to the game.
 
-## Reactive state and commands (Task 3.1.1)
+## Scoped state and commands (Tasks 3.1.1, 3.5-02)
 
-* `StateStore.GetState<T>` reads a typed value or caller default when absent.
-  `SetState<T>` commits atomically per key and raises `StateChanged` only when
-  the value actually changes. It invokes handlers after releasing its write lock,
-  so a subscriber can safely write another key. Explicit null is distinct from
-  an absent key. A type mismatch throws `InvalidCastException`.
-* `CommandBus` wraps one shared store. C# and Lua can read/write it synchronously;
-  named command handlers are registered with an `IDisposable` subscription and
-  awaited by `ExecuteCommandAsync`. UI-facing `CommandBus.StateChanged` is raised
-  directly for UI-thread writes and enqueued for background writes using injected
-  dispatcher callbacks. The core has no WinUI dependency; `Rug.UI` supplies its
-  `DispatcherQueue` at composition time. Revisions suppress stale UI callbacks
-  if concurrent writers enqueue changes out of order.
-* `LuaRuntime` accepts an optional shared `ICommandBus` and exports
-  `rug.get_state(key)` / `rug.set_state(key, value)`. Lua values are limited to
-  nil, Boolean, string and number; unsupported CLR/Lua objects are rejected.
-  Hosts must pass the same bus to UI and runtime instances for shared state.
+* `StateScope` is a structural address, separate from the user key; plugin IDs
+  are normalized case-insensitively to match catalog lookup. `AppState`
+  belongs to the application host for its lifetime; only host code uses the
+  unscoped compatibility API. `PluginConfig` belongs to one plugin and is writable
+  by the host/UI; it survives task stop and hot reload in the process, but this
+  task does not persist it to disk. Lua reads a detached startup snapshot through
+  `rug.get_config`, so later UI edits affect only future starts. `InstanceState`
+  belongs to one `(pluginId, instanceId)` run; the host and that run's Lua may
+  write it. The host opens the partition before launch inputs are written. Stop
+  closes and evicts it, including its subscription registry; a missing instance
+  partition rejects delayed writes, so no tombstone pool grows with run count.
+  A new run never inherits it. `ActivePartitionCount` reports live partitions.
+* A missing key returns the caller's default and is absent from `Snapshot`;
+  explicit JSON null is present and reads as `default(T)` (null for nullable or
+  reference types). `Contains` and `HadPreviousValue` distinguish it from absence.
+  Values must serialize to JSON
+  within 64 KiB and 16 levels. Stored bytes, typed reads, snapshots and complex
+  event payloads are detached; complex event values are immutable `JsonElement`
+  copies. Type mismatches throw `InvalidCastException`. Identical JSON writes do
+  not notify. Each partition owns a monotonically increasing revision; per-key
+  latest revisions suppress delayed UI notifications. Closed partitions reject
+  writes and invalidate queued callbacks.
+* `CommandBus.SubscribeState(scope, handler)` delivers only that scope and returns
+  a disposable subscription; `CloseInstance` removes its subscribers. The legacy
+  `StateChanged` event is AppState-only. Named commands remain host-routed. The
+  core takes dispatcher delegates; `Rug.UI` supplies `DispatcherQueue`.
+* A start creates a new `RunIdentity`: plugin ID, fresh instance GUID, per-plugin
+  monotonic run generation within the scheduler lifetime, and a separate target-binding GUID for windowed
+  runs. Windowless runs explicitly have no target binding. HWND is never used as
+  identity. Launch inputs are copied into InstanceState before Lua starts;
+  `ConfigureState` binds Lua to that scope. Lua `rug.get_state/set_state` cannot
+  address AppState, PluginConfig or another instance. JSON launch scalars are
+  unwrapped at the Lua read boundary: string, number, Boolean and null become
+  Lua string, number, boolean and nil (including false taking the false branch).
+  Arrays and objects remain detached structured JSON, preserving typed host
+  reads such as StepFlow steps. Lua writes remain limited to nil, Boolean,
+  string and number; actual Lua tests cover scalar types/values and structured
+  launch inputs. Hot reload still stops the old run and
+  starts a new one without preserving its Lua stack or InstanceState.
+
+The host starts one Raw Input source and [candidate takeover coordinator](InputIntervention.md).
+Input runs register before service creation and stay monitored through waits and cleanup;
+DevTools input sessions share this policy. New candidate downs, wheels or effective
+motion globally request existing takeover; releases, repeats, software tags and device
+changes do not. Failed detection blocks input/return; timer/vision tasks remain.
+[Diagnostics](RawInputEvents.md) and [production acceptance](../tests/Rug.UI.Core.Script.Tests/ProductionSourceAcceptance.md)
+separate target, Raw and Hook evidence. Tags are spoofable hints, not authority.
+The Hook gap and frozen native artifacts remain; 05B-02 human UI acceptance is user-confirmed.
 
 ## Native Interop & Memory Safety (CRITICAL)
 
@@ -276,8 +340,20 @@ loading and the sandboxed Lua runtime. It contains no XAML.
 
 ## Plugin & Permission Rules
 
-* Enforce `manifest.json` permissions before starting each sensitive `rug.*` task.
-  Unauthorized calls throw `PermissionDeniedException` and emit an audit warning.
+* [Explicit plugin grants](Authorization.md) are independent process-local host
+  data. Scheduler/Lua startup and all sensitive bridges enforce live grants;
+  revocation cancels affected instances before normal cleanup.
+* Plugin UI lifecycle and Lua automation use `IAutomationGateway.ExecuteAsync`
+  before dispatch to the registered run's services. Host-bound caller grants,
+  complete run identity, cancellation/deadlines, bounded deduplication and
+  sanitized outcomes and host-only failure logs are defined in [Automation Gateway](AutomationGateway.md).
+  Existing bridge/path/input gates remain enforced; denied Lua calls retain
+  `PermissionDeniedException` and a security warning. Anomaly/state/config/log
+  keep their existing paths.
+  `OperationParameterValidator` rejects wrong JSON types, missing fields and
+  invalid static ranges before service dispatch. Capture checks cancellation
+  again under its cache publication lock, so a late cancelled frame cannot
+  replace a newer frame used by OCR or matching.
 
 ## Constraints
 
@@ -285,18 +361,41 @@ loading and the sandboxed Lua runtime. It contains no XAML.
   never references `Rug.UI` (L1 §5.1).
 * Requires the native `Rug.Core.dll` (x64) plus its dependency DLLs at runtime.
 
+## .NET 10 x64 build and verification (Task 3.5-01)
+
+* `net10.0`; `global.json` pins SDK `10.0.402`, roll-forward disabled.
+  [Build matrix](BuildBaseline.md); existing NuGet versions unchanged.
+* Build with `dotnet build Rug.UI.Core/Rug.UI.Core.csproj -c Debug -p:Platform=x64 -warnaserror`
+  (or use `Release`). Run the Lua/scheduler suite with
+  `dotnet run --project tests/Rug.UI.Core.Script.Tests/Rug.UI.Core.Script.Tests.csproj -c Debug -p:Platform=x64`.
+* With `x64/Debug/Rug.Core.dll` available, run the C# C-ABI visual path via
+  `dotnet run --project tests/Rug.Core.CSharp.Tests/Rug.Core.CSharp.Tests.csproj -c Debug -p:Platform=x64 -- --visual-only`.
+  The test project copies native DLLs from `x64/$(Configuration)/` next to its
+  executable under `bin/x64/$(Configuration)/net10.0/`.
+
 ## Dynamic UI schema (Task 3.2)
 
 * `Schema/SchemaParser.cs` parses UTF-8 `ui.json` into a bounded `UISchemaNode` tree (`Page`, `Group`, `SelectorBarGroup`, `Tab` and card nodes). It rejects malformed JSON, unknown controls, duplicate IDs, wrong default types, invalid numeric ranges, duplicate option keys and empty selector groups. The parser has no WinUI dependency.
-* A node uses `type`, unique `id`, optional `title`/`description`, and type-specific properties. State controls use `stateKey` and a typed `default`; command controls use `command` and optional `parameter`. A selector group contains `tabs` of `Tab` nodes, each with `children`. `TaskSelectorCard` uses `tasks` (`id`, `title`) and a string-array default; `StepFlowView` uses `steps` (`id`, `title`, `status`, optional `thumbnail`).
+* A node uses `type`, unique `id`, optional `title`/`description`, and type-specific properties. State controls use `stateKey` and a typed `default`; command controls use `command` and optional `parameter`. A selector group contains `tabs` of `Tab` nodes, each with `children`. `TaskSelectorCard` uses `tasks` (`id`, `title`) and a string-array default; `StepFlowView` uses `steps` (`id`, `title`, `status`, optional `thumbnail`) as defaults and reads its optional `stateKey` from the active InstanceState. `StepFlowStateBinding` matches notifications by both instance scope and schema key.
 * `Rug.UI.Tests` loads the shipped example schema and checks every control kind, tab/tree structure, malformed input and state-bus round trips. The UI project owns actual WinUI construction; the core remains platform-neutral.
 
 ## Plugin hot reload (Task 3.3)
 
 * `HotReloadService` watches each immediate plugin directory recursively for JSON/Lua writes, renames and deletes. It merges bursts per directory over a 400 ms window; watcher overflow schedules a full rescan. The service is background-only and exposes `RegisterUiHandler` plus success/failure events without referencing WinUI.
-* For a changed plugin, it snapshots running instance HWNDs, stops all old instances (which invokes `on_stop` and releases WGC capture), validates `ui.json` and compiles all Lua sources without executing them, awaits registered UI rebuild callbacks, refreshes the scheduler's cached plugin catalog and starts a fresh runtime for each prior HWND. If validation or startup fails, HWNDs remain pending so the next valid save can restore them. A successful reload clears that pending set.
-* `ITaskScheduler.AcquirePluginReloadAsync` holds a per-plugin start gate through stop, validation, UI rebuild and catalog refresh; concurrent starts of that plugin wait, while other plugins can start. `RefreshPluginsAsync` holds the catalog lock used by starts, so future starts observe changed manifest/config/entry files. The hot-reload service does not dispose the shared scheduler. Callers own both lifetimes and must dispose the watcher before the scheduler.
+* [07A snapshot updates](HotReload.md) capture bounded immutable manifest/config/UI/Lua candidates, validate before touching live resources, and compile without execution. Invalid updates preserve old UI/runs/catalog; UI-only changes rebind the same run and preserve pause. Runtime/config/permission changes remain pending while any instance is active; no automatic Stop/Start occurs.
+* [07B-01 preparation](RuntimeUpdates.md) adds trusted Gateway prepare/query/cancel,
+  complete source-set reservations and new-checkpoint freezes. Cancellation releases
+  only the plan's hold in the original coroutine; user pause/Stop/fault precedence
+  remains. Every checkpoint outcome is bound to its invocation's plan/source,
+  including failed attempts without receipts. Frozen is not code publication or a new generation.
+* [07B-02 switching](RuntimeSwitch.md) adds explicit host-only Gateway group switching,
+  injected exact-snapshot direct-continuation rules, declaration-only candidates,
+  fresh pre/post-stop scene checks and irreversible source-stop/publication decisions.
+  New on_restore runs have separate origin metadata/state; inherited Pause blocks business.
+  A pre-publication group guard closes admission/stops peers on restore-phase fault or Stop;
+  completion checks all member lifecycles atomically. Publication shares the host shutdown lock.
+* The per-plugin start lease serializes validated publication. The shell and future starts use the applied snapshot, not fresh disk reads. Staged UI construction rolls back on failure and releases old subscriptions only after success. Ready precedes host activation; dispose the watcher before the scheduler. Notifications distinguish pending, unchanged, applied, superseded and failed outcomes.
 
 ## Script-only demo tasks (Task 3.4)
 
-* `TaskScheduler.StartTaskAsync(pluginId, 0)` accepts a windowless task only when the manifest grants neither `vision.capture` nor `input`. Such tasks still use a fresh Lua runtime and the ordinary lifecycle, but skip WGC session initialization. Window-bound automation continues to require a nonzero HWND and starts capture before Lua.
+* `TaskScheduler.StartTaskAsync(pluginId, 0)` accepts a windowless task only when the manifest declares neither `vision.capture` nor `input`. Such tasks still use a fresh Lua runtime and the ordinary lifecycle, but skip WGC session initialization. Window-bound automation continues to require a nonzero HWND and starts capture before Lua.

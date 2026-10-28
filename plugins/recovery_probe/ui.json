@@ -1,0 +1,4 @@
+{"type":"Page","id":"recovery-root","title":"受控异常恢复","children":[
+  {"type":"InfoBanner","id":"help","title":"绑定隔离红绿窗口","description":"启动绑定窗口任务并明确授权；等待人工后把目标变绿，交还控制，再点验证并继续。"},
+  {"type":"ButtonCard","id":"stop","title":"停止当前实例","command":"host.stop_selected"}
+]}

@@ -1,295 +1,206 @@
 #nullable enable
 using System.Diagnostics;
-using System.Text;
-using System.Text.Json;
 using Microsoft.Extensions.Logging;
-using NLua;
 using Rug.UI.Core.Abstractions;
 using Rug.UI.Core.Models;
-using Rug.UI.Core.Schema;
 
 namespace Rug.UI.Core.Services;
 
-/// <summary>Debounces file-system bursts per plugin, then reloads tasks and UI in order.</summary>
+/// <summary>Bounded latest-save-wins Prepare/Validate pipeline. Never stops/restarts a run.</summary>
 public sealed class HotReloadService : IHotReloadService
 {
+    public const int MaxPending = 64, MaxHandlers = 128;
     private readonly string _root;
     private readonly ITaskScheduler _scheduler;
-    private readonly ILogger<HotReloadService> _logger;
+    private readonly ILogger _logger;
     private readonly TimeSpan _debounce;
+    private readonly PluginUpdatePipeline _pipeline;
     private readonly object _gate = new();
-    private readonly Dictionary<string, long> _pending = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (long Ticks, long Revision)> _pending = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, long> _latest = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _knownIds = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, HashSet<nint>> _pendingRestarts = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, Dictionary<long, Func<string, CancellationToken, Task>>> _uiHandlers =
-        new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _entryFiles = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Dictionary<long, Func<PluginSnapshot, CancellationToken, Task<IPluginUiUpdate>>>> _handlers = new(StringComparer.OrdinalIgnoreCase);
     private readonly CancellationTokenSource _shutdown = new();
+    private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private FileSystemWatcher? _watcher;
     private Task? _worker;
-    private long _nextHandler;
+    private long _revision, _nextHandler;
+    private int _handlerCount;
     private bool _disposed;
-
-    public HotReloadService(string pluginsRootPath, ITaskScheduler scheduler,
-        ILogger<HotReloadService> logger, TimeSpan? debounce = null)
+    internal bool WatchFiles { get; set; } = true;
+    internal int PendingCount { get { lock (_gate) return _pending.Count; } }
+    internal int HandlerCount { get { lock (_gate) return _handlerCount; } }
+    public HotReloadService(string pluginsRootPath, ITaskScheduler scheduler, ILogger<HotReloadService> logger,
+        TimeSpan? debounce = null, PluginUpdatePipeline? pipeline = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pluginsRootPath);
-        _root = Path.GetFullPath(pluginsRootPath);
-        _scheduler = scheduler ?? throw new ArgumentNullException(nameof(scheduler));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _debounce = debounce ?? TimeSpan.FromMilliseconds(400);
-        if (_debounce < TimeSpan.FromMilliseconds(50) || _debounce > TimeSpan.FromSeconds(10))
-            throw new ArgumentOutOfRangeException(nameof(debounce));
+        _root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(pluginsRootPath));
+        _scheduler = scheduler ?? throw new ArgumentNullException(nameof(scheduler)); _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _debounce = debounce ?? TimeSpan.FromMilliseconds(400); _pipeline = pipeline ?? new();
+        if (_debounce < TimeSpan.FromMilliseconds(50) || _debounce > TimeSpan.FromSeconds(10)) throw new ArgumentOutOfRangeException(nameof(debounce));
     }
-
+    public Task Ready => _ready.Task;
     public event EventHandler<HotReloadEventArgs>? Reloaded;
     public event EventHandler<HotReloadFailedEventArgs>? ReloadFailed;
-
     public void Start()
     {
         lock (_gate)
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_watcher is not null) return;
+            ObjectDisposedException.ThrowIf(_disposed, this); if (_worker is not null) return;
             Directory.CreateDirectory(_root);
-            foreach (string directory in Directory.EnumerateDirectories(_root))
-                _knownIds[directory] = ReadPluginId(directory) ?? Path.GetFileName(directory);
-            _worker = Task.Run(WatchLoopAsync);
-            _watcher = new FileSystemWatcher(_root)
+            if (WatchFiles)
             {
-                Filter = "*", IncludeSubdirectories = true,
-                NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.CreationTime,
-                InternalBufferSize = 64 * 1024
-            };
-            _watcher.Changed += OnChanged;
-            _watcher.Created += OnChanged;
-            _watcher.Deleted += OnChanged;
-            _watcher.Renamed += OnRenamed;
-            _watcher.Error += OnWatcherError;
-            _watcher.EnableRaisingEvents = true;
+                _watcher = new(_root) { Filter = "*", IncludeSubdirectories = true,
+                    NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.CreationTime, InternalBufferSize = 64 * 1024 };
+                _watcher.Changed += (_, e) => QueueFile(e.FullPath); _watcher.Created += (_, e) => QueueFile(e.FullPath);
+                _watcher.Deleted += (_, e) => QueueFile(e.FullPath);
+                _watcher.Renamed += (_, e) => { QueueFile(e.OldFullPath); QueueFile(e.FullPath); };
+                _watcher.Error += (_, e) =>
+                {
+                    _logger.LogWarning(e.GetException(), "Watcher overflow; bounded rescan");
+                    try { foreach (var dir in Directory.EnumerateDirectories(_root).Take(MaxPending)) RequestReload(dir); }
+                    catch (Exception error) { Failure("watcher", _root, error); }
+                };
+                _watcher.EnableRaisingEvents = true;
+            }
+            _worker = Task.Run(WatchLoopAsync);
         }
     }
-
-    public IDisposable RegisterUiHandler(string pluginId,
-        Func<string, CancellationToken, Task> reloadUiAsync)
+    public IDisposable RegisterUiHandler(string pluginId, Func<PluginSnapshot, CancellationToken, Task<IPluginUiUpdate>> prepareUiAsync)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(pluginId);
-        ArgumentNullException.ThrowIfNull(reloadUiAsync);
+        ArgumentException.ThrowIfNullOrWhiteSpace(pluginId); ArgumentNullException.ThrowIfNull(prepareUiAsync);
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            long id = ++_nextHandler;
-            if (!_uiHandlers.TryGetValue(pluginId, out var handlers))
-                _uiHandlers[pluginId] = handlers = new();
-            handlers.Add(id, reloadUiAsync);
-            return new Registration(this, pluginId, id);
+            if (_handlerCount >= MaxHandlers) throw new InvalidOperationException("UI update handler capacity exceeded.");
+            if (!_handlers.TryGetValue(pluginId, out var handlers)) _handlers[pluginId] = handlers = new();
+            var switching = _scheduler.RuntimeUpdates?.RegisterUiHandler(pluginId, prepareUiAsync);
+            long id = ++_nextHandler; handlers.Add(id, prepareUiAsync); _handlerCount++; return new Registration(this, pluginId, id, switching);
         }
     }
-
-    private void OnChanged(object sender, FileSystemEventArgs e) => QueueFile(e.FullPath);
-
-    private void OnRenamed(object sender, RenamedEventArgs e)
-    {
-        QueueFile(e.OldFullPath);
-        QueueFile(e.FullPath);
-    }
-
-    private void OnWatcherError(object sender, ErrorEventArgs e)
-    {
-        _logger.LogWarning(e.GetException(), "Plugin watcher lost events; scheduling a full rescan");
-        try
-        {
-            foreach (string directory in Directory.EnumerateDirectories(_root)) QueueDirectory(directory);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            _logger.LogError(ex, "Could not rescan plugin directories after watcher overflow");
-        }
-    }
-
     private void QueueFile(string path)
     {
-        string extension = Path.GetExtension(path);
-        if (!extension.Equals(".json", StringComparison.OrdinalIgnoreCase) &&
-            !extension.Equals(".lua", StringComparison.OrdinalIgnoreCase)) return;
-        string relative = Path.GetRelativePath(_root, path);
-        string[] parts = relative.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
-            StringSplitOptions.RemoveEmptyEntries);
+        var parts = Path.GetRelativePath(_root, path).Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
         if (parts.Length < 2 || parts[0] is "." or "..") return;
-        QueueDirectory(Path.Combine(_root, parts[0]));
+        string directory = Path.Combine(_root, parts[0]);
+        if (Path.GetExtension(path).ToLowerInvariant() is not (".json" or ".lua"))
+            lock (_gate) if (!_entryFiles.TryGetValue(directory, out var entry) || !entry.Equals(path, StringComparison.OrdinalIgnoreCase)) return;
+        RequestReload(directory);
     }
-
-    private void QueueDirectory(string directory)
+    /// <summary>Trusted host retry after a pending update; never accepts a Lua-supplied path.</summary>
+    public void RequestReload(string directory)
     {
+        directory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
+        if (!string.Equals(Path.GetDirectoryName(directory), _root, StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("Update must be an immediate plugin installation.");
+        bool overflow = false;
         lock (_gate)
         {
             if (_disposed) return;
-            _pending[directory] = Stopwatch.GetTimestamp();
+            if (!_pending.ContainsKey(directory) && _pending.Count >= MaxPending || !_latest.ContainsKey(directory) && _latest.Count >= MaxPending * 2) overflow = true;
+            else { long revision = ++_revision; _latest[directory] = revision; _pending[directory] = (Stopwatch.GetTimestamp(), revision); }
         }
+        if (overflow) Failure(Path.GetFileName(directory), directory, new InvalidOperationException("Update queue capacity exceeded."));
     }
-
     private async Task WatchLoopAsync()
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(50));
         try
         {
+            var snapshots = await _scheduler.GetPluginSnapshotsAsync(_shutdown.Token).ConfigureAwait(false);
+            lock (_gate)
+            {
+                _shutdown.Token.ThrowIfCancellationRequested();
+                foreach (var snapshot in snapshots) { _knownIds[snapshot.Directory] = snapshot.PluginId; _entryFiles[snapshot.Directory] = Path.GetFullPath(Path.Combine(snapshot.Directory, snapshot.EntryCode.Entry)); }
+            }
+            _ready.TrySetResult();
+            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(25));
             while (await timer.WaitForNextTickAsync(_shutdown.Token).ConfigureAwait(false))
             {
-                string[] ready;
+                KeyValuePair<string, (long Ticks, long Revision)>? next;
                 lock (_gate)
                 {
-                    long now = Stopwatch.GetTimestamp();
-                    ready = _pending.Where(item => Stopwatch.GetElapsedTime(item.Value, now) >= _debounce)
-                        .Select(item => item.Key).ToArray();
-                    foreach (string directory in ready) _pending.Remove(directory);
+                    next = _pending.Where(p => Stopwatch.GetElapsedTime(p.Value.Ticks) >= _debounce).OrderBy(p => p.Value.Revision)
+                        .Select(p => (KeyValuePair<string, (long Ticks, long Revision)>?)p).FirstOrDefault();
+                    if (next is { } item) _pending.Remove(item.Key);
                 }
-                foreach (string directory in ready)
-                {
-                    _shutdown.Token.ThrowIfCancellationRequested();
-                    try { await ReloadDirectoryAsync(directory, _shutdown.Token).ConfigureAwait(false); }
-                    catch (OperationCanceledException) when (_shutdown.IsCancellationRequested) { throw; }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Unexpected watcher error for {Directory}", directory);
-                    }
-                }
+                if (next is { } ready) await UpdateAsync(ready.Key, ready.Value.Revision, _shutdown.Token).ConfigureAwait(false);
             }
         }
-        catch (OperationCanceledException) when (_shutdown.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (_shutdown.IsCancellationRequested) { _ready.TrySetCanceled(); }
+        catch (Exception error) { _ready.TrySetException(error); Failure("watcher", _root, error); }
     }
-
-    private async Task ReloadDirectoryAsync(string directory, CancellationToken cancellationToken)
+    private bool Current(string directory, long revision) { lock (_gate) return !_disposed && _latest.GetValueOrDefault(directory) == revision; }
+    /// <summary>@shape candidate: one bounded revision; prepare all UI trees before replacing any.
+    /// @source snapshot: Services/PluginUpdatePipeline.cs#class:PluginUpdatePipeline</summary>
+    private async Task UpdateAsync(string directory, long revision, CancellationToken token)
     {
-        string pluginId;
-        Func<string, CancellationToken, Task>[] handlers;
-        lock (_gate)
-        {
-            pluginId = ReadPluginId(directory) ??
-                (_knownIds.TryGetValue(directory, out string? previous) ? previous : Path.GetFileName(directory));
-            _knownIds[directory] = pluginId;
-            handlers = _uiHandlers.TryGetValue(pluginId, out var registered)
-                ? registered.Values.ToArray() : [];
-        }
-
+        string id; lock (_gate) id = _knownIds.GetValueOrDefault(directory) ?? Path.GetFileName(directory);
+        var stages = new List<IPluginUiUpdate>(); bool published = false;
         try
         {
-            nint[] targets;
-            await using (await _scheduler.AcquirePluginReloadAsync(pluginId, cancellationToken)
-                .ConfigureAwait(false))
+            var snapshot = await _pipeline.ValidateAsync(await _pipeline.PrepareAsync(directory, revision, token).ConfigureAwait(false), token).ConfigureAwait(false);
+            lock (_gate) if (_knownIds.TryGetValue(directory, out var known) && known != snapshot.PluginId) throw new InvalidDataException("Plugin ID changed at the same installation.");
+            id = snapshot.PluginId;
+            await using var lease = await _scheduler.AcquirePluginReloadAsync(id, token).ConfigureAwait(false);
+            if (!Current(directory, revision)) { Notify(snapshot, PluginUpdateStatus.Superseded); return; }
+            var status = await _scheduler.ClassifyPluginUpdateAsync(snapshot, token).ConfigureAwait(false);
+            if (status is PluginUpdateStatus.Unchanged or PluginUpdateStatus.RuntimePending)
             {
-                var active = _scheduler.Instances
-                    .Where(context => context.PluginId.Equals(pluginId, StringComparison.OrdinalIgnoreCase))
-                    .Select(context => (context.InstanceId, context.TargetHwnd)).ToArray();
-                lock (_gate)
-                {
-                    if (!_pendingRestarts.TryGetValue(pluginId, out var pending))
-                        _pendingRestarts[pluginId] = pending = [];
-                    foreach (var item in active) pending.Add(item.TargetHwnd);
-                    targets = pending.ToArray();
-                }
-                await Task.WhenAll(active.Select(item => _scheduler.StopTaskAsync(item.InstanceId)))
-                    .ConfigureAwait(false);
-
-                string schemaPath = Path.Combine(directory, "ui.json");
-                if (File.Exists(schemaPath))
-                    await new SchemaParser().ParseFileAsync(schemaPath, cancellationToken).ConfigureAwait(false);
-                await ValidateLuaScriptsAsync(directory, cancellationToken).ConfigureAwait(false);
-                foreach (var handler in handlers)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    await handler(schemaPath, cancellationToken).ConfigureAwait(false);
-                }
-
-                await _scheduler.RefreshPluginsAsync(cancellationToken).ConfigureAwait(false);
+                lock (_gate) if (_knownIds.ContainsKey(directory)) _entryFiles[directory] = Path.GetFullPath(Path.Combine(directory, snapshot.EntryCode.Entry));
+                Notify(snapshot, status); return;
             }
-            foreach (nint hwnd in targets)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                await _scheduler.StartTaskAsync(pluginId, hwnd, cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            lock (_gate) _pendingRestarts.Remove(pluginId);
-            var result = new HotReloadEventArgs(pluginId, directory, DateTimeOffset.Now, targets.Length);
-            _logger.LogInformation("Hot reloaded plugin {PluginId} ({Instances} instances)", pluginId, targets.Length);
-            try { Reloaded?.Invoke(this, result); }
-            catch (Exception ex) { _logger.LogWarning(ex, "Reloaded notification failed for {PluginId}", pluginId); }
+            Func<PluginSnapshot, CancellationToken, Task<IPluginUiUpdate>>[] handlers;
+            lock (_gate) handlers = _handlers.TryGetValue(id, out var registered) ? registered.Values.ToArray() : [];
+            foreach (var handler in handlers) stages.Add(await handler(snapshot, token).ConfigureAwait(false));
+            // Commit decision: earlier observed saves win. Later saves wait for this serial publication.
+            // No external callback or UI wait executes under the revision lock.
+            if (!Current(directory, revision)) { Notify(snapshot, PluginUpdateStatus.Superseded); return; }
+            token.ThrowIfCancellationRequested();
+            foreach (var stage in stages) await stage.CommitAsync(token).ConfigureAwait(false);
+            await _scheduler.PublishPluginSnapshotAsync(snapshot, token).ConfigureAwait(false);
+            published = true;
+            lock (_gate) { _knownIds[directory] = id; _entryFiles[directory] = Path.GetFullPath(Path.Combine(directory, snapshot.EntryCode.Entry)); }
+            foreach (var stage in stages) await stage.DisposeAsync().ConfigureAwait(false);
+            stages.Clear();
+            Notify(snapshot, status);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
-        catch (Exception ex)
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        catch (Exception error) { if (Current(directory, revision)) Failure(id, directory, error); }
+        finally
         {
-            _logger.LogError(ex, "Hot reload failed for plugin {PluginId}", pluginId);
-            try { ReloadFailed?.Invoke(this, new HotReloadFailedEventArgs(pluginId, directory, ex)); }
-            catch (Exception notificationError)
+            foreach (var stage in stages.AsEnumerable().Reverse())
             {
-                _logger.LogWarning(notificationError, "Reload failure notification failed for {PluginId}", pluginId);
+                try { if (!published) await stage.RollbackAsync().ConfigureAwait(false); await stage.DisposeAsync().ConfigureAwait(false); }
+                catch (Exception error) { Failure(id, directory, error); }
             }
+            lock (_gate) if (!_pending.ContainsKey(directory)) _latest.Remove(directory);
         }
     }
-
-    private static async Task ValidateLuaScriptsAsync(string directory, CancellationToken cancellationToken)
+    private void Notify(PluginSnapshot snapshot, PluginUpdateStatus status)
     {
-        if (!Directory.Exists(directory)) return;
-        foreach (string path in Directory.EnumerateFiles(directory, "*.lua", SearchOption.AllDirectories))
-        {
-            string source = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
-            await Task.Run(() =>
-            {
-                using var lua = new Lua();
-                lua.State.Encoding = Encoding.UTF8;
-                lua["__hot_reload_source"] = source;
-                lua.DoString("return assert(load(__hot_reload_source, '@hotreload', 't'))");
-            }, cancellationToken).ConfigureAwait(false);
-        }
+        try { Reloaded?.Invoke(this, new(snapshot.PluginId, snapshot.Directory, DateTimeOffset.Now, status: status, revision: snapshot.Revision, contentVersion: snapshot.ContentVersion)); }
+        catch (Exception error) { _logger.LogWarning(error, "Update observer failed"); }
     }
-
-    private static string? ReadPluginId(string directory)
+    private void Failure(string id, string directory, Exception error)
     {
-        try
-        {
-            using var document = JsonDocument.Parse(File.ReadAllText(Path.Combine(directory, "manifest.json")));
-            if (document.RootElement.ValueKind == JsonValueKind.Object)
-                foreach (JsonProperty property in document.RootElement.EnumerateObject())
-                    if (property.Name.Equals("id", StringComparison.OrdinalIgnoreCase) &&
-                        property.Value.ValueKind == JsonValueKind.String &&
-                        !string.IsNullOrWhiteSpace(property.Value.GetString()))
-                        return property.Value.GetString();
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { }
-        return null;
+        _logger.LogError(error, "Plugin update failed for {PluginId}", id);
+        try { ReloadFailed?.Invoke(this, new(id, directory, error)); } catch (Exception notification) { _logger.LogWarning(notification, "Update failure observer failed"); }
     }
-
     public async ValueTask DisposeAsync()
     {
         Task? worker;
-        lock (_gate)
-        {
-            if (_disposed) return;
-            _disposed = true;
-            _watcher?.Dispose();
-            _watcher = null;
-            _shutdown.Cancel();
-            worker = _worker;
-            _pending.Clear();
-            _pendingRestarts.Clear();
-            _uiHandlers.Clear();
-        }
-        if (worker is not null) await worker.ConfigureAwait(false);
-        _shutdown.Dispose();
+        lock (_gate) { if (_disposed) return; _disposed = true; _watcher?.Dispose(); _watcher = null; worker = _worker; _pending.Clear(); _latest.Clear(); _knownIds.Clear(); _entryFiles.Clear(); _handlers.Clear(); _handlerCount = 0; }
+        _shutdown.Cancel(); _ready.TrySetCanceled(); if (worker is not null) await worker.ConfigureAwait(false); _shutdown.Dispose();
     }
-
-    private sealed class Registration(HotReloadService owner, string pluginId, long id) : IDisposable
+    private sealed class Registration(HotReloadService owner, string pluginId, long id, IDisposable? switching) : IDisposable
     {
         private int _disposed;
         public void Dispose()
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-            lock (owner._gate)
-            {
-                if (owner._uiHandlers.TryGetValue(pluginId, out var handlers))
-                {
-                    handlers.Remove(id);
-                    if (handlers.Count == 0) owner._uiHandlers.Remove(pluginId);
-                }
-            }
+            switching?.Dispose();
+            lock (owner._gate) if (owner._handlers.TryGetValue(pluginId, out var handlers))
+            { if (handlers.Remove(id)) owner._handlerCount--; if (handlers.Count == 0) owner._handlers.Remove(pluginId); }
         }
     }
 }

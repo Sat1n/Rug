@@ -1,0 +1,15 @@
+Fresh recovery panel PASS: settles; samples=3
+Fresh recovery panel PASS: red; samples=32
+Fresh recovery panel PASS: cancel; samples=1
+Fresh recovery panel PASS: stop; samples=1
+Fresh recovery panel PASS: capture-fault; samples=2
+Fresh recovery panel PASS: deadline; samples=1
+Fresh recovery panel PASS: late-green; samples=2
+Recovery commit boundary PASS: caller
+Recovery commit boundary PASS: validation-deadline
+Recovery commit boundary PASS: request-deadline
+Recovery commit boundary PASS: stop
+Recovery commit boundary PASS: changed
+Recovery commit boundary PASS: fault
+Recovery commit boundary PASS: success
+Recovery PASS: real Lua init/tick locals, explicit tables, frozen mainline, trusted validation, dedup, Stop/late work, grants/identity, planned handoff and epoch isolation

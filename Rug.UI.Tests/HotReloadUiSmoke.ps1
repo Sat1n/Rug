@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient
-$testOutput = (Resolve-Path 'Rug.UI.Tests\bin\Debug\net9.0').Path
+$testOutput = (Resolve-Path 'Rug.UI.Tests\bin\x64\Debug\net10.0').Path
 $root = Join-Path $testOutput ('hot-ui-smoke-' + [Guid]::NewGuid().ToString('N'))
 $directory = Join-Path $root 'plugin'
 $previousRootEnv = $env:RUG_PLUGINS_ROOT
@@ -13,15 +13,18 @@ try {
     [System.IO.File]::WriteAllText((Join-Path $directory 'ui.json'),
         '{"type":"Page","id":"root","title":"BeforeReload"}')
     $env:RUG_PLUGINS_ROOT = $root
-    $appPath = (Resolve-Path 'Rug.UI\bin\x64\Debug\net9.0-windows10.0.22621.0\win-x64\Rug.UI.exe').Path
+    $appPath = (Resolve-Path 'Rug.UI\bin\x64\Debug\net10.0-windows10.0.22621.0\win-x64\Rug.UI.exe').Path
     $appProcess = Start-Process -FilePath $appPath -WorkingDirectory (Split-Path $appPath) -WindowStyle Hidden -PassThru
-    Start-Sleep -Seconds 3
-    $appProcess.Refresh()
-    if ($appProcess.HasExited) { throw "App exited: $($appProcess.ExitCode)" }
     $pidCondition = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $appProcess.Id)
-    $window = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst(
-        [System.Windows.Automation.TreeScope]::Children, $pidCondition)
+    $startup = [Diagnostics.Stopwatch]::StartNew()
+    $window = $null
+    while($startup.Elapsed.TotalSeconds -lt 15 -and $null -eq $window) {
+        $appProcess.Refresh()
+        if($appProcess.HasExited){throw "App exited: $($appProcess.ExitCode)"}
+        $window = [System.Windows.Automation.AutomationElement]::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Children,$pidCondition)
+        if($null -eq $window){Start-Sleep -Milliseconds 50}
+    }
     if ($null -eq $window) { throw 'UI Automation could not find the app window.' }
     $before = [System.Windows.Automation.PropertyCondition]::new(
         [System.Windows.Automation.AutomationElement]::NameProperty, 'BeforeReload')
@@ -85,14 +88,14 @@ try {
     if ($null -eq $luaError) { throw 'Invalid Lua did not show the reload error banner.' }
     [System.IO.File]::WriteAllText((Join-Path $directory 'main.lua'), 'function on_tick() end')
     $watch.Restart()
-    $luaRecovered = $null
+    $luaError = $null
     while ($watch.Elapsed -lt [TimeSpan]::FromSeconds(3)) {
-        $luaRecovered = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $successTitle)
-        if ($null -ne $luaRecovered) { break }
+        $luaError = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $errorTitle)
+        if ($null -eq $luaError) { break }
         Start-Sleep -Milliseconds 50
     }
-    if ($null -eq $luaRecovered) { throw 'Corrected Lua did not show the success banner.' }
-    Write-Output "lua-error-recovery-ok elapsedMs=$($watch.ElapsedMilliseconds)"
+    if ($null -ne $luaError) { throw 'Restoring unchanged valid Lua did not clear the failure.' }
+    Write-Output "lua-error-corrected-without-reapplication-ok elapsedMs=$($watch.ElapsedMilliseconds)"
 }
 finally {
     $env:RUG_PLUGINS_ROOT = $previousRootEnv

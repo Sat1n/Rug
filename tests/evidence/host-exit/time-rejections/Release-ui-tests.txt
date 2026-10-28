@@ -1,0 +1,14 @@
+UI lifecycle presentation passed: terminal/Stopping status overrides retained validation phase
+Trace presentation passed: unknown outcome, memory window and every offline integrity status
+Actual trace page selection regression passed: blocked/queued incident cannot overwrite event; clear/page/catalog discard stale details
+shutdown:start:preview-drain
+shutdown:complete:preview-drain
+shutdown:start:commands-drain
+shutdown:complete:commands-drain
+shutdown:start:preview-drain
+shutdown:complete:preview-drain
+shutdown:start:commands-drain
+shutdown:complete:commands-drain
+Notification lifecycle passed: actual service source, bounded queued callback, close-before-delivery, active dialog drain, paired registration, duplicate cleanup and visible failure (WinRT doubles)
+Host shutdown passed: shared close, real-work barrier, failure continuation; actual DevTools start/capture races, no late frame, no unused input service access
+Schema, state, and hot reload tests passed.

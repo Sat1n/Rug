@@ -182,6 +182,41 @@ RUGCORE_API int32_t RUGCORE_CALL Rug_GrabFrame(RugCapturerHandle handle,
     return RUG_OK;
 }
 
+RUGCORE_API int32_t RUGCORE_CALL Rug_CheckCaptureGeometry(void* boundWindow, const RugCaptureFacts* facts) {
+    if(!facts || facts->structSize!=sizeof(*facts) || facts->version!=1) return RUG_ERR_INVALID_PARAM;
+    try { return rug::core::CheckCaptureGeometry(static_cast<HWND>(boundWindow),*facts); }
+    catch (...) { return RUG_ERR_CAPTURE_FAILED; }
+}
+RUGCORE_API int32_t RUGCORE_CALL Rug_CreateCapturerExact(const RugCaptureConfig* config, RugCapturerHandle* outHandle) {
+    if (outHandle) *outHandle = nullptr;
+    if (!config || !config->targetWindow || !outHandle) return RUG_ERR_INVALID_PARAM;
+    try {
+        WgcCapturer::Config c;
+        c.targetWindow = static_cast<HWND>(config->targetWindow);
+        c.captureCursor = config->captureCursor != 0; c.exactWindow = true;
+        auto capturer = std::make_unique<WgcCapturer>(c);
+        auto status = capturer->Start();
+        if (status != RUG_OK) return status;
+        *outHandle = FromCapturer(capturer.release()); return RUG_OK;
+    } catch (...) { return RUG_ERR_CAPTURE_FAILED; }
+}
+RUGCORE_API int32_t RUGCORE_CALL Rug_GrabFrameWithFacts(RugCapturerHandle handle, RugFrame* outFrame, RugCaptureFacts* facts) {
+    static_assert(sizeof(RugCaptureFacts) == 136);
+    if (outFrame) std::memset(outFrame, 0, sizeof(*outFrame));
+    if (!handle || !outFrame || !facts || facts->structSize != sizeof(*facts) || facts->version != 1)
+        return RUG_ERR_INVALID_PARAM;
+    std::memset(facts, 0, sizeof(*facts));
+    CapturedFrame cf;
+    try {
+        auto status = ToCapturer(handle)->GrabFrame(cf);
+        if (status != RUG_OK) { delete[] cf.data; return status; }
+        *facts = cf.facts;
+        outFrame->data = cf.data; outFrame->dataLength = cf.dataLength;
+        outFrame->width = cf.width; outFrame->height = cf.height; outFrame->stride = cf.stride;
+        outFrame->format = RUG_PIXEL_BGRA8; return RUG_OK;
+    } catch (...) { delete[] cf.data; return RUG_ERR_CAPTURE_FAILED; }
+}
+
 // --- OCR ---------------------------------------------------------------------
 
 RUGCORE_API int32_t RUGCORE_CALL Rug_CreateOcrEngine(int32_t engine_type,

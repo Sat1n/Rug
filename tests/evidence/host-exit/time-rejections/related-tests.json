@@ -1,0 +1,77 @@
+[
+  {
+    "configuration": "Debug",
+    "exit": 0,
+    "test": "WinUI build"
+  },
+  {
+    "configuration": "Debug",
+    "exit": 0,
+    "test": "--observed-click-tests"
+  },
+  {
+    "configuration": "Debug",
+    "exit": 0,
+    "test": "--execution-trace-tests"
+  },
+  {
+    "configuration": "Debug",
+    "exit": 0,
+    "test": "--trace-review-tests"
+  },
+  {
+    "configuration": "Debug",
+    "exit": 0,
+    "test": "--recovery-tests"
+  },
+  {
+    "configuration": "Debug",
+    "exit": 0,
+    "test": "--lifecycle-tests"
+  },
+  {
+    "configuration": "Debug",
+    "exit": 0,
+    "test": "UI core"
+  },
+  {
+    "configuration": "Release",
+    "exit": 0,
+    "test": "WinUI build"
+  },
+  {
+    "configuration": "Release",
+    "exit": 0,
+    "test": "--observed-click-tests"
+  },
+  {
+    "configuration": "Release",
+    "exit": 0,
+    "test": "--execution-trace-tests"
+  },
+  {
+    "configuration": "Release",
+    "exit": 0,
+    "test": "--trace-review-tests"
+  },
+  {
+    "configuration": "Release",
+    "exit": 0,
+    "test": "--recovery-tests"
+  },
+  {
+    "configuration": "Release",
+    "exit": 0,
+    "test": "--lifecycle-tests"
+  },
+  {
+    "configuration": "Release",
+    "exit": 0,
+    "test": "UI core"
+  },
+  {
+    "configuration": "95149f3 Release",
+    "exit": 0,
+    "test": "--observed-click-tests (same diagnostics only)"
+  }
+]

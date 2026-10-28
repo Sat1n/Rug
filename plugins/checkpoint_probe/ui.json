@@ -1,0 +1,1 @@
+{"type":"Page","id":"checkpoint-page","title":"检查点受控示例","children":[{"type":"InfoBanner","id":"checkpoint-help","title":"受控检查点：BEFORE B → 保存 → 重启 → AFTER C","description":"先绑定绿色目标并显式授权启动；保存后停止来源。重新启动宿主并重新授权、绑定，点击底部查看检查点和从此检查点恢复。红色现场拒绝；恢复只执行 AFTER C，不重放 BEFORE B。输入任务期间键鼠操作仍会触发接管。","severity":"Informational"}]}

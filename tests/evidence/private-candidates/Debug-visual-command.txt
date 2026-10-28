@@ -1,0 +1,17 @@
+CONTROLLED SAMPLE: explicit trusted test-host grants; exact-window WGC, real OpenCV and PostMessage only. Output=F:\Cardinal\Rug\Rug\artifacts\08d-first-Debug-visual\sample-57c7cb155301453a8818675a2272c0b4
+SCENE stable: API=completed/RoiConsistent; target=(1, 1); business=confirmed; trace=Valid e2cbc165-d27d-4385-a9b9-abc23d6c205a/12331352-ef15-4313-a882-3b1c2ac88a5f; instance=c06e606f-82ce-4dd2-820e-64ebeb818bf8 g1; resources=drained
+SCENE changed: API=rejected/SceneChanged; target=(0, 0); business=not_confirmed; trace=Valid c3a344ab-ba5d-455b-b2d8-f94971183d3b/052bebfe-75e6-4d1e-afb7-e23a2e6c633d; instance=11be0b40-a932-4557-a0a6-c9c91d32bfbe g1; resources=drained
+SCENE resize: API=rejected/GeometryChanged; target=(0, 0); business=not_confirmed; trace=Valid 4107d301-0d07-4f07-aaaf-8c66fbce1425/596fc973-8f52-4965-90af-a0c90088ad17; instance=0306afb2-22cf-4a97-b655-bdb7d596b9da g1; resources=drained
+SCENE stale: API=rejected/Stale; target=(0, 0); business=not_confirmed; trace=Valid e1389083-a631-4069-876b-1d4c3d78db6c/a3e2b23f-47b2-4033-a04f-becaa16a7785; instance=26f4ae2b-10ca-4d24-9c20-7273c867939a g1; resources=drained
+SCENE invalidated: API=rejected/InvalidReference; target=(0, 0); business=not_confirmed; trace=Valid 92b4cb6a-8b67-4cae-9c7c-b87a66c48177/37a4a89c-a701-4805-91c7-c8fd92c6738c; instance=f41321f9-eca2-43bd-8330-1c34fc1af835 g1; resources=drained
+SCENE stop: API=NOT RUN/NOT RUN; target=(0, 0); business=NOT RUN; trace=Valid b7ac78ef-4486-46d5-b897-ebf958e5b241/c23c7183-f460-44d5-a689-88bae3869b7d; instance=15163366-a618-4327-b53b-f913678d5dc3 g1; resources=drained
+SCENE revoked: API=NOT RUN/NOT RUN; target=(0, 0); business=NOT RUN; trace=Valid 9ac92bb2-134b-44af-bce5-1b106cc7358c/51983a90-0f6d-4976-b556-515418a72aec; instance=e684c710-c9ae-4af0-864f-eb44a05e0b8a g1; resources=drained
+SCENE no-completion: API=completed/RoiConsistent; target=(1, 1); business=unconfirmed_timeout; trace=Valid bfb95887-5356-4480-9405-941d9853352d/8554ebf1-0ffb-40c8-bc21-ff43341cdf69; instance=51cf61a7-c09c-4fec-ba51-5c757ae9779a g1; resources=drained
+VIEWER stage: host ready
+VIEWER stage: catalog ready
+VIEWER stage: stable trace selected
+VIEWER stage: persisted page Valid
+CONTROLLED VIEWER PASS: read-only historical trace 文件 · controlled_visual / c06e606f82ce4dd2820e64ebeb818bf8 g1 · session e2cbc165d27d4385a9b9abc23d6c205a · trace 12331352ef154313a8823b1c2ac88a5f · Valid
+VIEWER interactions=True; processExit=0;
+REPORT F:\Cardinal\Rug\Rug\artifacts\08d-first-Debug-visual\sample-57c7cb155301453a8818675a2272c0b4\report.json
+[ INFO:0@0.699] global registry_parallel.impl.hpp:96 cv::parallel::ParallelBackendRegistry::ParallelBackendRegistry core(parallel): Enabled backends(0, sorted by priority): N/A

@@ -13,15 +13,47 @@ namespace Rug.UI.Services;
 public sealed class UIFactory : IDisposable
 {
     private readonly ICommandBus _bus;
+    private readonly StateScope _pluginScope;
+    private readonly IDisposable _pluginSubscription;
+    private IDisposable? _instanceSubscription;
+    private StateScope? _instanceScope;
+    private IReadOnlyDictionary<string, IReadOnlyList<SchemaStep>> _stepFallbacks =
+        new Dictionary<string, IReadOnlyList<SchemaStep>>();
+    private readonly List<(StepFlowView View, StepFlowStateBinding Binding)> _stepViews = [];
     private readonly Dictionary<string, List<Action<object?>>> _bindings = new(StringComparer.Ordinal);
     private bool _disposed;
+    private readonly Dictionary<string, object?> _defaults = new(StringComparer.Ordinal);
+    public void CommitDefaults()
+    {
+        foreach (var pair in _defaults) if (!_bus.Contains(_pluginScope, pair.Key)) _bus.SetState(_pluginScope, pair.Key, pair.Value);
+        _defaults.Clear();
+    }
 
     public event EventHandler<Exception>? CommandFailed;
 
-    public UIFactory(ICommandBus bus)
+    public UIFactory(ICommandBus bus, string pluginId)
     {
         _bus = bus ?? throw new ArgumentNullException(nameof(bus));
-        _bus.StateChanged += OnStateChanged;
+        _pluginScope = StateScope.Plugin(pluginId);
+        _pluginSubscription = _bus.SubscribeState(_pluginScope, OnStateChanged);
+    }
+
+    public void SetActiveInstance(Guid? instanceId,
+        IReadOnlyDictionary<string, IReadOnlyList<SchemaStep>>? displayFallbacks = null)
+    {
+        StateScope? next = instanceId is Guid id ? StateScope.Instance(_pluginScope.PluginId!, id) : null;
+        if (next != _instanceScope)
+        {
+            _instanceSubscription?.Dispose();
+            _instanceSubscription = next is StateScope scope
+                ? _bus.SubscribeState(scope, OnStateChanged) : null;
+            _instanceScope = next;
+        }
+        _stepFallbacks = displayFallbacks?.ToDictionary(pair => pair.Key,
+            pair => (IReadOnlyList<SchemaStep>)pair.Value.ToArray(), StringComparer.Ordinal)
+            ?? new Dictionary<string, IReadOnlyList<SchemaStep>>();
+        foreach (var (view, binding) in _stepViews)
+            view.SetSteps(binding.Read(_bus, _instanceScope, _stepFallbacks));
     }
 
     public UIElement Build(UISchemaNode node) => node.Type switch
@@ -98,7 +130,7 @@ public sealed class UIFactory : IDisposable
     {
         string key = node.StateKey!;
         var control = new ToggleSwitch { IsOn = State(key, node.DefaultValue?.GetBoolean() ?? false) };
-        control.Toggled += (_, _) => _bus.SetState(key, control.IsOn);
+        control.Toggled += (_, _) => _bus.SetState(_pluginScope, key, control.IsOn);
         Bind(key, value => { if (value is bool current && control.IsOn != current) control.IsOn = current; });
         return control;
     }
@@ -112,7 +144,7 @@ public sealed class UIFactory : IDisposable
         control.SelectedItem = node.Options.FirstOrDefault(option => option.Key == selected) ?? node.Options[0];
         control.SelectionChanged += (_, _) =>
         {
-            if (control.SelectedItem is SchemaOption option) _bus.SetState(key, option.Key);
+            if (control.SelectedItem is SchemaOption option) _bus.SetState(_pluginScope, key, option.Key);
         };
         Bind(key, value =>
         {
@@ -131,7 +163,7 @@ public sealed class UIFactory : IDisposable
             StepFrequency = node.Step ?? 1, Width = 220,
             Value = State(key, node.DefaultValue?.GetDouble() ?? node.Min.Value)
         };
-        control.ValueChanged += (_, _) => _bus.SetState(key, control.Value);
+        control.ValueChanged += (_, _) => _bus.SetState(_pluginScope, key, control.Value);
         Bind(key, value =>
         {
             if (value is double number && Math.Abs(control.Value - number) > 0.000001)
@@ -144,7 +176,7 @@ public sealed class UIFactory : IDisposable
     {
         string key = node.StateKey!;
         var control = new TextBox { MinWidth = 220, Text = State(key, node.DefaultValue?.GetString() ?? "") };
-        control.TextChanged += (_, _) => _bus.SetState(key, control.Text);
+        control.TextChanged += (_, _) => _bus.SetState(_pluginScope, key, control.Text);
         Bind(key, value => { if (value is string text && control.Text != text) control.Text = text; });
         return control;
     }
@@ -160,7 +192,7 @@ public sealed class UIFactory : IDisposable
         };
         control.ValueChanged += (_, _) =>
         {
-            if (!double.IsNaN(control.Value)) _bus.SetState(key, control.Value);
+            if (!double.IsNaN(control.Value)) _bus.SetState(_pluginScope, key, control.Value);
         };
         Bind(key, value =>
         {
@@ -211,7 +243,7 @@ public sealed class UIFactory : IDisposable
         control.SetTasks(node.Tasks);
         var defaults = node.DefaultValue?.EnumerateArray().Select(item => item.GetString()!).ToArray() ?? [];
         control.SetSelection(State(key, defaults));
-        control.SelectionChanged += (_, ids) => _bus.SetState(key, ids);
+        control.SelectionChanged += (_, ids) => _bus.SetState(_pluginScope, key, ids);
         control.StartRequested += async (_, _) =>
         {
             if (node.Command is { } command) await DispatchAsync(command, control.SelectedIds);
@@ -223,24 +255,27 @@ public sealed class UIFactory : IDisposable
     private UIElement BuildStepFlow(UISchemaNode node)
     {
         var control = new StepFlowView();
-        control.SetSteps(node.StateKey is { } existingKey
-            ? _bus.GetState<IEnumerable<SchemaStep>>(existingKey, node.Steps)
-            : node.Steps);
-        if (node.StateKey is { } key)
-            Bind(key, value => { if (value is IEnumerable<SchemaStep> steps) control.SetSteps(steps); });
+        var binding = new StepFlowStateBinding(node.StateKey, node.Steps);
+        _stepViews.Add((control, binding));
+        control.SetSteps(binding.Read(_bus, _instanceScope, _stepFallbacks));
         return new SettingsCard { Header = node.Title, Description = node.Description, Content = control };
     }
 
     private T State<T>(string key, T fallback)
     {
-        object marker = new();
-        object? existing = _bus.GetState<object?>(key, marker);
-        if (ReferenceEquals(existing, marker))
+        if (_bus.Contains(_pluginScope, key)) return _bus.GetState<T>(_pluginScope, key);
+        if (_defaults.TryGetValue(key, out object? staged))
         {
-            _bus.SetState(key, fallback);
-            return fallback;
+            // Read the first staged value with the same typed JSON semantics as committed state.
+            if (staged is null) return default!;
+            try { return JsonSerializer.SerializeToElement(staged).Deserialize<T>()!; }
+            catch (JsonException error)
+            {
+                throw new InvalidCastException($"State '{key}' cannot be read as {typeof(T).Name}.", error);
+            }
         }
-        return existing is T typed ? typed : throw new InvalidCastException($"State '{key}' has an incompatible type.");
+        _defaults.Add(key, Rug.UI.Core.Services.StateStore.CloneValue(fallback));
+        return fallback;
     }
 
     private void Bind(string key, Action<object?> update)
@@ -251,8 +286,14 @@ public sealed class UIFactory : IDisposable
 
     private void OnStateChanged(object? sender, StateChangedEventArgs e)
     {
-        if (!_disposed && _bindings.TryGetValue(e.Key, out var actions))
-            foreach (var action in actions) action(e.Value);
+        if (!_disposed && _instanceScope == e.Scope)
+        {
+            foreach (var (view, binding) in _stepViews)
+                if (binding.Matches(e, _instanceScope))
+                    view.SetSteps(binding.Read(_bus, _instanceScope, _stepFallbacks));
+        }
+        if (!_disposed && e.Scope == _pluginScope && _bindings.TryGetValue(e.Key, out var actions))
+            foreach (var action in actions) action(_bus.GetState<object?>(_pluginScope, e.Key));
     }
 
     private async Task DispatchAsync(string command, object? parameter = null)
@@ -275,7 +316,8 @@ public sealed class UIFactory : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        _bus.StateChanged -= OnStateChanged;
+        _pluginSubscription.Dispose();
+        _instanceSubscription?.Dispose();
         _bindings.Clear();
     }
 }

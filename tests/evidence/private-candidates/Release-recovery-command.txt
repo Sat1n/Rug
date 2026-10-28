@@ -1,0 +1,13 @@
+RECOVERY success: BEFORE=1/1 AFTER=1/1; preserved=True; terminal=Stopped; incident=d3603bf4-9755-4920-a674-a1c8857a77e0; trace=fe57d826-cb9e-4dff-b056-ee24e6ec3e7e/d6700f0d-afb2-4e55-9e0b-956f84ef99fd Valid; resources=drained
+RECOVERY stop-wait: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Stopped; incident=19b2e67e-aaf1-4062-8067-6cffb1fb379b; trace=9b72761b-8cb6-4561-a218-e8688f82206a/e7ad30c1-88dc-44b6-88ee-ec087fd3c4e8 Valid; resources=drained
+RECOVERY revoke-wait: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Stopped; incident=52d4c805-235c-4f9c-8d41-3369d3d3413a; trace=8ceafb99-13c4-46c2-b309-ba2c7e859271/883447be-5cc0-40c7-9d14-c8134238834e Valid; resources=drained
+RECOVERY stop-validation: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Stopped; incident=6adc4d12-2fb2-40c3-bc00-8317dcee0454; trace=a0441ccb-f39a-4df0-9079-1452dba7d4f4/4c5e3a87-d6d7-4226-b3fd-4031789debe9 Valid; resources=drained
+RECOVERY revoke-validation: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Stopped; incident=1e2c67d0-5b7b-4aaa-8973-6d1c626f3a27; trace=726864ce-b236-429c-8578-e405cda88e73/e3665d92-4e99-4b22-a22a-2d0e1c8e6da1 Valid; resources=drained
+RECOVERY cancel-late: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Stopped; incident=721f1f5d-0a0d-43fb-982b-e07d2292e5eb; trace=8609b11e-c597-4b28-a2ea-9972d30d2b67/fac528e2-7840-4245-bf2e-05dead1bd1d2 Valid; resources=drained
+RECOVERY stop-late: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Stopped; incident=c5260d58-5f17-4d73-9fbf-3f37e6556b36; trace=0026b4f0-8191-49cf-b593-5d8151854caa/628fcf09-c76d-4eea-9ceb-df637ea98e6f Valid; resources=drained
+RECOVERY lua-error: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Faulted; incident=; trace=a94b5088-7b57-4dca-86dc-be0ad6395ec9/1f420312-8e7a-4a66-9b3b-15eeb6533442 Valid; resources=drained
+RECOVERY UI: BEFORE received/visually confirmed, planned handoff
+RECOVERY UI: red rejected, original run remains waiting
+RECOVERY UI PASS: explicit fresh WGC verification, AFTER-only, real incident -> trace. Human acceptance NOT RUN.
+RECOVERY UI interactions=True; target=(2, 2); exit=0;
+RECOVERY REPORT F:\Cardinal\Rug\Rug\artifacts\08d-first-Release-recovery\recovery-ab51680219d845bc934a4b8ea0c8367c\report.json

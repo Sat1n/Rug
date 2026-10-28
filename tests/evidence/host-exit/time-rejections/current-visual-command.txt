@@ -1,0 +1,20 @@
+CONTROLLED SAMPLE: explicit trusted test-host grants; exact-window WGC, real OpenCV and PostMessage only. Output=F:\Cardinal\Rug\Rug\artifacts\exit-time-visual-real\sample-43e1c1ee18824c0abb68491e6f7bf414
+SCENE stable: API=completed/RoiConsistent; target=(1, 1); business=confirmed; trace=Valid b145b93b-0276-4fee-b8ea-4c2389aace1d/c04fb228-f7bc-4c3f-99fa-991ae6a7fbb6; instance=2bbed992-b22b-4b07-a47e-c5af06879f04 g1; resources=drained
+SCENE changed FAILED: wrong rejection branch: rejected/TimeUnavailable
+SCENE resize: API=rejected/GeometryChanged; target=(0, 0); business=not_confirmed; trace=Valid 5a0b0d1a-8795-4b54-8083-5fcaca2cabcb/a848677c-cbb2-4a2a-b68f-5f2520fb1d68; instance=484b30cc-6d70-4dbf-b00e-f24129f3e5ec g1; resources=drained
+SCENE stale: API=rejected/Stale; target=(0, 0); business=not_confirmed; trace=Valid 2c3fc65d-ab39-4f48-b95a-46eec38a5fde/d5aaddc9-1a18-4029-9fa7-9cc2155fb632; instance=005e0e61-b189-4cce-b0ef-7e06b0129f78 g1; resources=drained
+SCENE invalidated: API=rejected/InvalidReference; target=(0, 0); business=not_confirmed; trace=Valid 15225433-eb54-4f58-a3c1-2d23dc609bd1/91d5f763-c40d-43f4-99ec-9566993e7c00; instance=b96edca7-fb50-46eb-9f9a-f808028a0c2c g1; resources=drained
+SCENE stop: API=NOT RUN/NOT RUN; target=(0, 0); business=NOT RUN; trace=Valid 51ad0593-c0f1-4fd7-9347-1cb46540a2f8/59f551c3-9ea7-4249-8a1a-5beea5c4b2f6; instance=35980560-f2ac-4817-82a5-f4d3639b19f5 g1; resources=drained
+SCENE revoked: API=NOT RUN/NOT RUN; target=(0, 0); business=NOT RUN; trace=Valid af32a9e9-d98a-4db9-8e50-9fe55b7f2c60/34483bae-d868-42cc-9903-45073dcedb06; instance=41f9284a-2092-41ef-914d-4954b479b8bf g1; resources=drained
+SCENE no-completion: API=completed/RoiConsistent; target=(1, 1); business=unconfirmed_timeout; trace=Valid bbf13fba-ddb7-439d-9711-b692e7f81d0c/aceb9319-631a-479d-8941-bd66085de594; instance=5f1cd056-e906-43c2-b3c8-3ec81ad8d379 g1; resources=drained
+VIEWER stage: host ready
+VIEWER stage: catalog ready
+VIEWER stage: stable trace selected
+VIEWER stage: persisted page Valid
+CONTROLLED VIEWER PASS: read-only historical trace 文件 · controlled_visual / 2bbed992b22b4b07a47ec5af06879f04 g1 · session b145b93b02764feeb8ea4c2389aace1d · trace c04fb228f7bc4c3f99fa991ae6a7fbb6 · Valid
+VIEWER interactions=True; processExit=0;
+REPORT F:\Cardinal\Rug\Rug\artifacts\exit-time-visual-real\sample-43e1c1ee18824c0abb68491e6f7bf414\report.json
+Unhandled exception. System.InvalidOperationException: Sample acceptance incomplete: see independent functional/viewer/shutdown results. Abnormal UI exit is retained as failure.
+   at ControlledVisualSample.RunAsync(String output) in F:\Cardinal\Rug\Rug\tests\Rug.UI.Core.Script.Tests\ControlledVisualSample.cs:line 70
+   at Program.<Main>$(String[] args) in F:\Cardinal\Rug\Rug\tests\Rug.UI.Core.Script.Tests\Program.cs:line 28
+   at Program.<Main>(String[] args)

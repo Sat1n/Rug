@@ -1,8 +1,95 @@
+---
+id: rug_native_tests
+type: logic_node
+inputs: [rug_core]
+outputs: []
+tags: [tests, native, cabi]
+---
+
 # Rug.Core Native Tests
 
-A console harness that exercises **Rug.Core through its public C-ABI only**
-(`RugCoreAbi.h`) — the same boundary the C# host will use. It validates OCR
+Stage-wide evidence/configuration audit: [Phase 3.5 acceptance](../docs/phase3.5/ACCEPTANCE.md)
+and [evidence index](../docs/phase3.5/EVIDENCE.md). Historical and current Native
+configuration claims are kept separate.
+
+A console harness that exercises Rug.Core pipeline operations through its public
+C-ABI (`RugCoreAbi.h`) — the same boundary the C# host uses. It validates OCR
 correctness, OCR memory/stability under repetition, and OpenCV template matching.
+The `capture` mode additionally unit-tests the internal pure candidate, geometry
+sample and QPC helpers; actual WGC marker/resize/DPI evidence is provided by the
+[managed capture smoke](Rug.UI.Core.Script.Tests/README.md).
+`Rug.Tests.exe capture-lifetime` adds deterministic real-WGC delivery-barrier
+tests for in-flight lifetime token removal/replacement (exact bound and distinct
+selected capture windows). It compiles the same internal capturer source for a
+test-only Config callback; production C-ABI exposes no injection facility.
+
+## Independent input Hook comparison
+
+The standalone [x64 native probe](NativeInputProbe/README.md) compares F8/B with
+real Rug.Core input and optionally observes managed diagnostic input in another
+process. Run `./tests/run_native_input_probe.ps1 -Mode Test` or `-Mode Human`.
+It builds separately, changes no C-ABI, stores no human key sequences and does
+not integrate takeover. User runs now include a passing paired session and a
+failing opposite order; see [evidence and remaining limits](NativeInputProbe/HookComparison.md).
+The [controlled stages](NativeInputProbe/ControlledStages.md) retain native sending
+while comparing threads, managed Hooks and [device-class registration/packet processing/delivery](NativeInputProbe/ReceiverRegistrationControl.md).
+The runner also builds a [test-only same-process native receiver](NativeInputProbe/NativeReceiverControl.md),
+replacing B's keyboard count receiver without changing Rug.Core or the sender.
+Its no-managed-Hook control retains B's idle receiver thread and uses A's observers.
+The [native callback control](NativeInputProbe/NativeHookCallbackControl.md) retains
+B's thread/receiver while selecting a separate callback DLL. The next
+[module/send evidence repair](NativeInputProbe/InputEvidenceControl.md) verifies its
+owning hmod, native send returns and specific F8/B target down/up before new
+order/role controls. Original integrated acceptance remains open.
+The next [startup-order control](NativeInputProbe/StartupOrderControl.md) fixes
+A-first process order and compares awaited Hook installation against native
+receiver startup/registration readiness, without modifying the native binaries.
+All three ordered pairs reproduced the observation gap. The next
+[separate observer process C](NativeInputProbe/ExternalObserverControl.md) retains
+A's Core sender and B's target/native count receiver. Real child-process lifecycle
+tests preserve parent registrations; manual three-process acceptance remains pending.
+The next [manual B/C Hook order](NativeInputProbe/ManualHookOrderControl.md) holds
+process/Raw preparation fixed before the one-shot install commands; real paired
+subprocess tests verify clocks, unchanged ownership and clean disposal without AUTO.
+The user's nine-log order reversal recovered/missed/recovered all observers.
+The next [native B/C hosts](NativeInputProbe/NativeRolesControl.md) preserve A's
+sender and existing callback/receiver DLLs. Build with `-Mode Build`, then run
+`tests/run_native_role_tests.ps1` for actual no-AUTO A/B/C contract checks.
+Original integrated acceptance remains open and automatic takeover stays closed.
+That native user run also recovered/missed/recovered without CLR. The next
+[Raw owner control](NativeInputProbe/RawOwnerControl.md) fixes Hook order and
+compares owner B/C/B while B retains the target/Core. Subprocess tests accept
+`-RawOwner B|C`. The user's fixed B-C ownership run was complete in all three
+sessions; fixed C-B/owner B-C-B reproduced missing/complete/missing. The next
+[target owner control](NativeInputProbe/TargetOwnerControl.md) fixes Core/Raw B,
+Hook C-B and moves target B/C/B. Subprocess tests additionally accept
+-TargetOwner B|C. The user reproduced missing/complete/missing with target B/C/B.
+The next [B Core load control](NativeInputProbe/CoreLoadControl.md) fixes target/
+Raw B and Hook C-B, comparing --core-load on/off/on without altering A's sender.
+Tests accept -CoreLoad on|off. The user reproduced missing/missing/missing with
+Core on/off/on; B's diagnostic load is not necessary. The next
+[registration control](NativeInputProbe/RawRegistrationControl.md) fixes B Core
+off and compares only keyboard registration on/off/on, preserving the receiver
+DLL/thread/window/timer. Tests additionally accept -RawRegistration on|off.
+The user reproduced missing/complete/missing with registration on/off/on. The
+[DEVNOTIFY control](NativeInputProbe/DeviceNotifyControl.md) kept registration and
+INPUTSINK, adding actual registration-call evidence; notification on/off/on
+missed in all three sessions. The next
+[INPUTSINK control](NativeInputProbe/InputSinkControl.md) keeps registration on
+and DEVNOTIFY off, compares sink on/off/on and preserves previous exports/layouts.
+Tests accept -InputSink on|off; all 64 subprocess configurations passed. Manual
+sink reversal reproduced the gap in all three sessions, including flags zero
+with successful registration. The next [native A+B reduction](NativeInputProbe/TwoProcessControl.md)
+removes C, retains all five binaries and checks the no-AUTO contract with
+`tests/run_native_two_process_tests.ps1`. Manual verification requires two full
+A/B logs; the clean user retry reproduced the gap without AUTO interference.
+The next [A+B registration control and thread audit](NativeInputProbe/TwoProcessRegistrationControl.md)
+retains binaries and receiver infrastructure; the runner accepts
+-RawRegistration on|off. The completed A+B ON/OFF/ON reversal recovered Hooks
+only in OFF, with complete F8 targets throughout and an unresolved OFF B target
+down/up=0/1. The [expert review package](NativeInputProbe/RegistrationReversalReview.md)
+records six artifacts, clocks, hashes and next decision gates; no identical rerun
+is requested. Raw attribution is NOT COLLECTED and takeover stays closed.
 
 ## Layout
 
@@ -55,6 +142,8 @@ mode the menu is shown once and reused for both tests.
 Paths are resolved from the executable location (it walks up to the directory
 containing `Rug.slnx`), so the working directory does not matter.
 
+Real marker/resize validation runs via [managed geometry smoke](Rug.UI.Core.Script.Tests/README.md).
+
 ## Prerequisites
 
 - **Images:** see [test_images/README.md](test_images/README.md). Without `ocr_*.png`
@@ -76,3 +165,22 @@ containing `Rug.slnx`), so the working directory does not matter.
 - **Match:** best match `(x, y, w, h)` + `Score` + timing, or `[SKIP]`.
 - **Discovery:** lists every bundle under `models/ocr` (id/engine/version),
   creates the first by id, and confirms an unknown id reports model-not-found.
+
+08A-02B adds [observed click tests](Rug.UI.Core.Script.Tests/README.md): deterministic
+execution boundaries in both input modes and actual Lua/Gateway/WGC/PostMessage
+marker delivery/refusal. `Rug_CheckCaptureGeometry` is checked against live frames,
+resize, destroyed identity and unsupported ABI version by the geometry smoke.
+
+## EXIT-01 host process verification
+
+Use [run_host_exit_probe.ps1](run_host_exit_probe.ps1) for empty-plugin startup,
+loaded-runtime/dependency versions, natural close, stderr and exit status. Run
+`-Configuration Debug -Count 5`, then Release, and `-Viewer -RepeatClose` in both.
+The real scenario matrix is the script test host's `--host-exit-ui` entry.
+[Shutdown contract](../Rug.UI/Shutdown.md) and [preserved evidence](evidence/host-exit/README.md)
+separate functional assertions, resource drain and process exit. Owned timeout
+cleanup is a failure, never a substitute for natural exit.
+
+3.5-ENV-01: [Application Control and regression recheck](evidence/environment-recheck/README.md)
+separates historical blocks, current security state, rebuilt-process validation
+and read-only capture-time counts; current success is not permanent trust acceptance.

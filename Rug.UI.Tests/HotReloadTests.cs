@@ -20,7 +20,9 @@ internal static class HotReloadTests
         await File.WriteAllTextAsync(uiPath, Schema("Initial"));
         await File.WriteAllTextAsync(luaPath, "value = 1\n");
 
-        var scheduler = new FakeScheduler();
+        await using var scheduler = new Rug.UI.Core.Services.TaskScheduler(new PluginManager(NullLogger<PluginManager>.Instance), root,
+            () => throw new Exception("No run expected"), () => throw new Exception("No run expected"), (_, _) => throw new Exception("No run expected"),
+            NullLogger<Rug.UI.Core.Services.TaskScheduler>.Instance, new NoAnomaly());
         var success = Channel.CreateUnbounded<HotReloadEventArgs>();
         var failure = Channel.CreateUnbounded<HotReloadFailedEventArgs>();
         int callbackCount = 0;
@@ -32,12 +34,13 @@ internal static class HotReloadTests
             {
                 service.Reloaded += (_, e) => success.Writer.TryWrite(e);
                 service.ReloadFailed += (_, e) => failure.Writer.TryWrite(e);
-                using var registration = service.RegisterUiHandler("demo", async (path, token) =>
+                using var registration = service.RegisterUiHandler("demo", (snapshot, token) =>
                 {
-                    latestTitle = (await new SchemaParser().ParseFileAsync(path, token)).Title;
-                    Interlocked.Increment(ref callbackCount);
+                    string title = new SchemaParser().Parse(snapshot.UiJson!).Title;
+                    return Task.FromResult<IPluginUiUpdate>(new UiUpdate(() => { latestTitle = title; Interlocked.Increment(ref callbackCount); }));
                 });
                 service.Start();
+                await service.Ready;
 
                 var stopwatch = Stopwatch.StartNew();
                 for (int i = 0; i < 5; i++)
@@ -72,7 +75,15 @@ internal static class HotReloadTests
                 Check(luaFailure.Error is not null, "invalid Lua is reported");
                 await File.WriteAllTextAsync(luaPath, "value = 3\n");
                 await NextAsync(success.Reader);
-                Check(scheduler.RefreshCount == 5, "catalog refreshed only for valid saves");
+                Check((await scheduler.GetPluginSnapshotsAsync()).Single().EntryCode.Source == "value = 3\n", "validated snapshot published for future starts");
+                Directory.CreateDirectory(Path.Combine(plugin, "nested"));
+                await File.WriteAllTextAsync(Path.Combine(plugin, "nested", "entry.txt"), "entry_value = 1\n");
+                string manifestPath = Path.Combine(plugin, "manifest.json");
+                await File.WriteAllTextAsync(manifestPath, (await File.ReadAllTextAsync(manifestPath)).Replace("main.lua", "nested/entry.txt"));
+                await NextAsync(success.Reader);
+                await File.WriteAllTextAsync(Path.Combine(plugin, "nested", "entry.txt"), "entry_value = 2\n");
+                await NextAsync(success.Reader);
+                Check((await scheduler.GetPluginSnapshotsAsync()).Single().EntryCode.Source == "entry_value = 2\n", "non-.lua entry changes were not monitored");
             }
         }
         finally
@@ -98,27 +109,14 @@ internal static class HotReloadTests
         if (!condition) throw new Exception("Hot reload test failed: " + message);
     }
 
-    private sealed class FakeScheduler : ITaskScheduler
+    private sealed class NoAnomaly : IAnomalyLogger
     {
-        public int RefreshCount { get; private set; }
-        public IReadOnlyCollection<TaskExecutionContext> Instances => [];
-        public Task<Guid> StartTaskAsync(string pluginId, nint hwnd, CancellationToken cancellationToken = default)
-            => Task.FromResult(Guid.NewGuid());
-        public Task<IAsyncDisposable> AcquirePluginReloadAsync(string pluginId,
-            CancellationToken cancellationToken = default) => Task.FromResult<IAsyncDisposable>(new NoOpLease());
-        public Task RefreshPluginsAsync(CancellationToken cancellationToken = default)
-        {
-            RefreshCount++;
-            return Task.CompletedTask;
-        }
-        public bool PauseTask(Guid instanceId) => false;
-        public bool ResumeTask(Guid instanceId) => false;
-        public Task StopTaskAsync(Guid instanceId) => Task.CompletedTask;
+        public Task<string> LogAnomalyAsync(TaskExecutionContext context, string reason, string detail) => throw new NotSupportedException();
+    }
+    private sealed class UiUpdate(Action commit) : IPluginUiUpdate
+    {
+        public Task CommitAsync(CancellationToken token) { token.ThrowIfCancellationRequested(); commit(); return Task.CompletedTask; }
+        public Task RollbackAsync() => Task.CompletedTask;
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-
-        private sealed class NoOpLease : IAsyncDisposable
-        {
-            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-        }
     }
 }

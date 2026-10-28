@@ -22,3 +22,10 @@ public interface ICaptureService : IAsyncDisposable
     /// <summary>Close the current capture session and release native resources.</summary>
     Task StopAsync();
 }
+
+/// <summary>Trusted producer ingress: enforce the requested limit before allocating a managed frame copy.
+/// Other trusted capture adapters own their temporary output allocation outside the run cache.</summary>
+internal interface IBoundedFrameCapture
+{
+    Task<CapturedFrame?> GrabFrameBoundedAsync(long maxBytes, CancellationToken cancellationToken);
+}

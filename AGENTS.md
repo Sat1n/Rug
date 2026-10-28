@@ -78,6 +78,9 @@ Rug/
 
 ## 7. Roadmap (navigation aid)
 
+* **Phase 3.5 acceptance:** [stage matrix, evidence and PR draft](docs/phase3.5/ACCEPTANCE.md)
+  records the current baseline and retained limits; historical task evidence remains unchanged.
+
 * **Phase 1 (current):** `Rug.Core` decoupling — `WgcCapturer`, `WinRtOcr`, `InputController`, C-ABI.
 * **Phase 2:** `Rug.UI.Core` host logic — Lua runtime, `TaskScheduler`, permission interceptor.
 * **Phase 3:** JSON-Schema dynamic UI, `CommandBus`, hot reload.

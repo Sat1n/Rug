@@ -1,0 +1,2 @@
+Trace subprocess offline read PASS; no task/authorization/window restored
+Execution traces PASS: actual Gateway/Lua, dedup, actual-work vs caller, source/validation/release, bounded writer/reader, corruption, quotas and stuck IO isolation

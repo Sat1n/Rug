@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient
-$testOutput = (Resolve-Path 'Rug.UI.Tests/bin/x64/Debug/net9.0').Path
+$testOutput = (Resolve-Path 'Rug.UI.Tests/bin/x64/Debug/net10.0').Path
 $root = Join-Path $testOutput ('phase3-e2e-' + [Guid]::NewGuid().ToString('N'))
 $plugin = Join-Path $root 'demo_arknights'
 $app = $null
@@ -27,7 +27,7 @@ try {
         Copy-Item -LiteralPath (Join-Path 'plugins/demo_arknights' $file) -Destination (Join-Path $plugin $file)
     }
     $env:RUG_PLUGINS_ROOT = $root
-    $appPath = (Resolve-Path 'Rug.UI/bin/x64/Debug/net9.0-windows10.0.22621.0/win-x64/Rug.UI.exe').Path
+    $appPath = (Resolve-Path 'Rug.UI/bin/x64/Debug/net10.0-windows10.0.22621.0/win-x64/Rug.UI.exe').Path
     $app = Start-Process -FilePath $appPath -WorkingDirectory (Split-Path $appPath) -WindowStyle Hidden -PassThru
     Start-Sleep -Seconds 2
     $app.Refresh()
@@ -44,6 +44,8 @@ try {
     if ($toggle.Current.ToggleState -ne [System.Windows.Automation.ToggleState]::On) { $toggle.Toggle() }
     $button = Await-Name $window '开始执行'
     $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $allow = Await-Name $window 'Allow permissions'
+    $allow.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $null = Await-Name $window '刷图步骤完成（模拟）' 8
     $watch = [System.Diagnostics.Stopwatch]::StartNew()
     $ui = Join-Path $plugin 'ui.json'

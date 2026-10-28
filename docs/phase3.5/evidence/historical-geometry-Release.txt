@@ -1,0 +1,5 @@
+WGC marker PASS: image=(82,115) -> client=(80,70), content=622x411, buffer=622x411, client=618x364, dpi=144, compositor100ns=642407503533, nativeSampleAge=00:00:00.1000982
+WGC marker PASS: image=(82,115) -> client=(80,70), content=782x521, buffer=782x521, client=778x474, dpi=144, compositor100ns=642410288958, nativeSampleAge=00:00:00.0719035
+WGC marker PASS: image=(81,101) -> client=(80,70), content=519x346, buffer=519x346, client=517x314, dpi=96, compositor100ns=642413136379, nativeSampleAge=00:00:00.0196196
+WGC cross-monitor PASS: dpi 144 -> 96; real DPI transition PASS
+WGC geometry PASS: ordinary bordered window + resize, old/new C-ABI, alternate selection and destroyed lifetime

@@ -8,4 +8,5 @@ public interface IAnomalyLogger
 {
     /// <returns>The path to the JSON record.</returns>
     Task<string> LogAnomalyAsync(TaskExecutionContext context, string reason, string detail);
+    Task UpdateRecoveryAsync(string recordPath, RecoveryVerificationSummary summary) => Task.CompletedTask;
 }

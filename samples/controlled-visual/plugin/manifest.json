@@ -1,0 +1,9 @@
+{
+  "id": "controlled_visual",
+  "name": "Controlled visual sample",
+  "version": "1.0.0",
+  "entry": "main.lua",
+  "targetProcess": "Rug.UI.Core.Script.Tests",
+  "inputDelivery": "Win32PostMessage",
+  "permissions": ["vision.capture", "vision.match", "input", "timer"]
+}

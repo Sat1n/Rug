@@ -1,0 +1,13 @@
+Paused wake boundary PASS: stop; token propagation held
+Paused wake boundary PASS: resume-fault; token propagation held
+Paused wake boundary PASS: resume-stop; token propagation held
+Paused host Stop PASS: actual Lua, no resume check/input, normal Stopped and one on_stop
+Host close admission passed: blocked cancellation callback, two real Lua runs, no new Gateway input/start/pause/resume, normal shared cleanup
+Direct anomaly admission passed: host Stop cancels before capture; permission denial and real archive IO failure remain faults
+Unhandled exception. System.Exception: deferred stop rejection relied on cancellation
+   at LifecycleTests.Check(Boolean value, String reason) in F:\Cardinal\Rug\Rug\tests\Rug.UI.Core.Script.Tests\LifecycleTests.cs:line 15
+   at LifecycleTests.StopClassificationAsync(String mode) in F:\Cardinal\Rug\Rug\tests\Rug.UI.Core.Script.Tests\LifecycleTests.cs:line 481
+   at LifecycleTests.StopClassificationAsync(String mode) in F:\Cardinal\Rug\Rug\tests\Rug.UI.Core.Script.Tests\LifecycleTests.cs:line 526
+   at LifecycleTests.RunAsync() in F:\Cardinal\Rug\Rug\tests\Rug.UI.Core.Script.Tests\LifecycleTests.cs:line 42
+   at Program.<Main>$(String[] args) in F:\Cardinal\Rug\Rug\tests\Rug.UI.Core.Script.Tests\Program.cs:line 111
+   at Program.<Main>(String[] args)

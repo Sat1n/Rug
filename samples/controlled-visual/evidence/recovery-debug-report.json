@@ -1,0 +1,468 @@
+{
+  "schemaVersion": 1,
+  "configuration": "Debug",
+  "functionalPassed": true,
+  "scenes": [
+    {
+      "scene": "success",
+      "passed": true,
+      "hostSessionId": "a73c7b6b-8804-42f8-9f2a-3b3a2424a3d7",
+      "traceId": "1b38fd10-3f4e-431f-b432-f7bf56541f01",
+      "instanceId": "7b894f9f-9c72-4952-abc9-74ac4cac166e",
+      "runGeneration": 1,
+      "targetBindingId": "e2bff060-f37f-4c68-a4e1-a3011e3e9ea6",
+      "recoveryId": "d5db8cec-8571-426b-a0f5-836070c5f34c",
+      "incidentId": "a499a60f-120a-4408-b4f1-03db92b44817",
+      "incidentLinkPreserved": true,
+      "verification": {
+        "RecoveryId": "d5db8cec-8571-426b-a0f5-836070c5f34c",
+        "Generation": 2,
+        "Status": "resolved",
+        "Error": "None",
+        "Reason": "controlled-visual-ready",
+        "Timestamp": "2026-10-22T06:26:39.8314148Z"
+      },
+      "beforeDown": 1,
+      "beforeUp": 1,
+      "afterDown": 1,
+      "afterUp": 1,
+      "originalCoroutineContinued": true,
+      "finalBusinessConfirmation": "confirmed",
+      "onStopCalls": 1,
+      "terminal": "Stopped",
+      "validations": 2,
+      "verifyOperation": "62b47a6c-6c97-45fe-9f7d-54bfceb037d5",
+      "beforeConfirmationFrameId": "d8edf5ec-06ba-46c5-b986-f2f5e593c459",
+      "afterSourceFrameId": "e3ac9bea-de3b-4a5e-bc13-6387b0f89b37",
+      "afterConfirmationFrameId": "403abd82-935c-4487-8d8b-c25a4eb25137",
+      "clicks": [
+        {
+          "OperationId": "e6dd8a3b-8ba5-48f8-9152-6ccd233cbe09",
+          "ExecutionId": "b1202acc-2997-4d60-a206-fb7c6d7ec5e9",
+          "Status": "Success",
+          "Error": "None",
+          "OutcomeUncertain": false,
+          "Observation": {
+            "ObservationId": "d4f3d369-538e-46cb-a6f5-95619c3385a6",
+            "FrameId": "3a85ebde-91a9-4e62-adb6-35f0bce4c993",
+            "PolicyId": "roi-consistency-v1",
+            "ClientPoint": {
+              "X": 186,
+              "Y": 166
+            },
+            "ValidationFrames": [
+              "d7adb44f-7e56-40c6-8a90-355a37bfa5e9",
+              "7612c088-3ab6-44ab-8630-106f9bb10008"
+            ]
+          }
+        },
+        {
+          "OperationId": "4ba20233-4074-4c63-922c-d4062c86ce7a",
+          "ExecutionId": "e5780d10-09ec-48f2-ba70-dd89c26d479e",
+          "Status": "Success",
+          "Error": "None",
+          "OutcomeUncertain": false,
+          "Observation": {
+            "ObservationId": "d26a5ed1-e841-4c48-aa85-22b83c254082",
+            "FrameId": "e3ac9bea-de3b-4a5e-bc13-6387b0f89b37",
+            "PolicyId": "roi-consistency-v1",
+            "ClientPoint": {
+              "X": 186,
+              "Y": 166
+            },
+            "ValidationFrames": [
+              "18d7be66-2de9-4c3f-abbb-143d58539c2b",
+              "617f64d0-13f8-4e82-8eca-ba1ddb3fdf99"
+            ]
+          }
+        }
+      ],
+      "traceIntegrity": "Valid",
+      "cleanupSucceeded": true,
+      "actualWorkOutstanding": 0,
+      "resourcesDrained": true
+    },
+    {
+      "scene": "stop-wait",
+      "passed": true,
+      "hostSessionId": "22b24ad7-8a07-45ea-9c26-98d5ea3cd614",
+      "traceId": "df8bf17c-09c3-44e6-940e-18d5e7816198",
+      "instanceId": "0c54cc2c-f087-4050-8279-fcadc722254b",
+      "runGeneration": 1,
+      "targetBindingId": "3962a674-8bd8-4a93-b159-cdba95289441",
+      "recoveryId": "73067727-3f00-4ce8-9466-686054c7e7d7",
+      "incidentId": "f3a4411b-7b5e-43af-bda9-13e13c213134",
+      "incidentLinkPreserved": true,
+      "verification": null,
+      "beforeDown": 1,
+      "beforeUp": 1,
+      "afterDown": 0,
+      "afterUp": 0,
+      "originalCoroutineContinued": null,
+      "finalBusinessConfirmation": "NOT RUN",
+      "onStopCalls": 1,
+      "terminal": "Stopped",
+      "validations": 0,
+      "verifyOperation": null,
+      "beforeConfirmationFrameId": "3ce24be7-5671-41ca-8c24-26f612ce9064",
+      "afterSourceFrameId": null,
+      "afterConfirmationFrameId": null,
+      "clicks": [
+        {
+          "OperationId": "50991a4a-7e01-4030-855d-d7bf5ab89341",
+          "ExecutionId": "713ef2a5-0aae-45db-ac2e-76c165bff99e",
+          "Status": "Success",
+          "Error": "None",
+          "OutcomeUncertain": false,
+          "Observation": {
+            "ObservationId": "7f828cbb-df46-4527-b42e-f668109bf249",
+            "FrameId": "e9729936-0ea6-4ccf-9ebc-ca40497d37d4",
+            "PolicyId": "roi-consistency-v1",
+            "ClientPoint": {
+              "X": 186,
+              "Y": 166
+            },
+            "ValidationFrames": [
+              "a23feb3b-2e9d-433c-9d1b-19853cc55e96",
+              "05a7d9e9-0111-4cc9-aa75-61713a49347f"
+            ]
+          }
+        }
+      ],
+      "traceIntegrity": "Valid",
+      "cleanupSucceeded": true,
+      "actualWorkOutstanding": 0,
+      "resourcesDrained": true
+    },
+    {
+      "scene": "revoke-wait",
+      "passed": true,
+      "hostSessionId": "20432667-1d1d-408d-8337-f270b711fd43",
+      "traceId": "3af7ef47-fbdc-4f24-b2c5-074f7f9eb64c",
+      "instanceId": "bb7c84af-0d74-42a1-aeff-9db3a7c74d60",
+      "runGeneration": 1,
+      "targetBindingId": "843f0562-a77a-4f74-aff0-0cc552a75166",
+      "recoveryId": "d55a8e69-a48c-454b-a702-d51eac928603",
+      "incidentId": "29f2a923-6fcb-4404-8ac2-3b8d8a38732b",
+      "incidentLinkPreserved": true,
+      "verification": null,
+      "beforeDown": 1,
+      "beforeUp": 1,
+      "afterDown": 0,
+      "afterUp": 0,
+      "originalCoroutineContinued": null,
+      "finalBusinessConfirmation": "NOT RUN",
+      "onStopCalls": 1,
+      "terminal": "Stopped",
+      "validations": 0,
+      "verifyOperation": null,
+      "beforeConfirmationFrameId": "7fbe9afd-cdee-4fb8-a317-be3f8763cc2e",
+      "afterSourceFrameId": null,
+      "afterConfirmationFrameId": null,
+      "clicks": [
+        {
+          "OperationId": "810f685a-923e-451e-b197-3d8065d8b909",
+          "ExecutionId": "67d7a888-730a-45d9-bb55-2fde586aafbc",
+          "Status": "Success",
+          "Error": "None",
+          "OutcomeUncertain": false,
+          "Observation": {
+            "ObservationId": "f2db03b1-defc-4452-a9e1-9b8968dba709",
+            "FrameId": "5f3d787e-dba9-4bfa-b44c-d295c1561f6f",
+            "PolicyId": "roi-consistency-v1",
+            "ClientPoint": {
+              "X": 186,
+              "Y": 166
+            },
+            "ValidationFrames": [
+              "ba62cdfa-1965-494f-9c60-c71a73436fa8",
+              "aa8c1ad1-9bfa-4f9a-9c40-2b8a597efd3e"
+            ]
+          }
+        }
+      ],
+      "traceIntegrity": "Valid",
+      "cleanupSucceeded": true,
+      "actualWorkOutstanding": 0,
+      "resourcesDrained": true
+    },
+    {
+      "scene": "stop-validation",
+      "passed": true,
+      "hostSessionId": "52714e4e-145d-48fa-9b37-0cc9f0e3a4a7",
+      "traceId": "baac9aa4-c528-4906-b9cf-11daebb8b75d",
+      "instanceId": "28cd414d-0a0b-407d-9df1-69dd619da611",
+      "runGeneration": 1,
+      "targetBindingId": "19970a59-bfa1-4a40-a184-d239d00f79c8",
+      "recoveryId": "572079da-09c3-41a3-a0ee-baa9a27f63d6",
+      "incidentId": "61e36ffc-2292-4fb4-916e-5401d5c07dd4",
+      "incidentLinkPreserved": true,
+      "verification": null,
+      "beforeDown": 1,
+      "beforeUp": 1,
+      "afterDown": 0,
+      "afterUp": 0,
+      "originalCoroutineContinued": null,
+      "finalBusinessConfirmation": "NOT RUN",
+      "onStopCalls": 1,
+      "terminal": "Stopped",
+      "validations": 1,
+      "verifyOperation": "83bb0d0a-9345-4cc9-878c-ddc84a1f9092",
+      "beforeConfirmationFrameId": "0d382fb6-d52c-4c08-a3cc-97fcd6f86c01",
+      "afterSourceFrameId": null,
+      "afterConfirmationFrameId": null,
+      "clicks": [
+        {
+          "OperationId": "71fb75bd-b5c0-4f90-901c-d2352eb103e5",
+          "ExecutionId": "29abe876-4f6b-4178-a278-a67610ef420f",
+          "Status": "Success",
+          "Error": "None",
+          "OutcomeUncertain": false,
+          "Observation": {
+            "ObservationId": "74b2223b-d7b2-485f-8c50-45d6579bea26",
+            "FrameId": "a487fd49-6e79-4fd7-93a0-511996edecd7",
+            "PolicyId": "roi-consistency-v1",
+            "ClientPoint": {
+              "X": 186,
+              "Y": 166
+            },
+            "ValidationFrames": [
+              "a3951e19-2046-4351-8b3b-bffbf4adde6a",
+              "a81cad78-c41f-49eb-9195-ad988802e8d1"
+            ]
+          }
+        }
+      ],
+      "traceIntegrity": "Valid",
+      "cleanupSucceeded": true,
+      "actualWorkOutstanding": 0,
+      "resourcesDrained": true
+    },
+    {
+      "scene": "revoke-validation",
+      "passed": true,
+      "hostSessionId": "a47a89fa-d410-41c4-adab-6b40236262d1",
+      "traceId": "5c83126c-efcc-4d4e-9562-417d0d9b87d1",
+      "instanceId": "97e15517-8487-422b-9ce9-ebbe6f26a9e9",
+      "runGeneration": 1,
+      "targetBindingId": "619780e6-5d53-44ec-8784-2f87b7ee1fcf",
+      "recoveryId": "89d4f237-5c5a-4a38-83c9-b5ad2e98ce3d",
+      "incidentId": "cd5df9cf-c666-40c5-b0fb-4315723c7d62",
+      "incidentLinkPreserved": true,
+      "verification": null,
+      "beforeDown": 1,
+      "beforeUp": 1,
+      "afterDown": 0,
+      "afterUp": 0,
+      "originalCoroutineContinued": null,
+      "finalBusinessConfirmation": "NOT RUN",
+      "onStopCalls": 1,
+      "terminal": "Stopped",
+      "validations": 1,
+      "verifyOperation": "1c1400e9-42cb-4881-8868-2a2c7608b1d1",
+      "beforeConfirmationFrameId": "918f230d-6d64-4878-a64b-a07fbed44cfb",
+      "afterSourceFrameId": null,
+      "afterConfirmationFrameId": null,
+      "clicks": [
+        {
+          "OperationId": "44483b26-b2fb-43c1-977f-0e11391ad501",
+          "ExecutionId": "aa4b4279-6c4e-4626-8e5b-2d99db3a74dc",
+          "Status": "Success",
+          "Error": "None",
+          "OutcomeUncertain": false,
+          "Observation": {
+            "ObservationId": "aaa28bef-ee87-4691-9e23-bfc95c3f0ef2",
+            "FrameId": "6984d564-fbf1-44bf-b7c9-8acc90ee84d0",
+            "PolicyId": "roi-consistency-v1",
+            "ClientPoint": {
+              "X": 186,
+              "Y": 166
+            },
+            "ValidationFrames": [
+              "dc707d56-5999-43db-baa5-f8f4d726ea67",
+              "9a403a82-dd41-427b-b95d-c47b889e1880"
+            ]
+          }
+        }
+      ],
+      "traceIntegrity": "Valid",
+      "cleanupSucceeded": true,
+      "actualWorkOutstanding": 0,
+      "resourcesDrained": true
+    },
+    {
+      "scene": "cancel-late",
+      "passed": true,
+      "hostSessionId": "b97a54f2-aa80-4fce-9b45-7e06694e47fe",
+      "traceId": "0b57c975-afdb-457a-9a82-839767756f96",
+      "instanceId": "95f87189-de08-493a-ab03-0da5050315e0",
+      "runGeneration": 1,
+      "targetBindingId": "97fbff37-3760-4688-bd3b-932db8bf1908",
+      "recoveryId": "86635deb-07d6-4d3a-8fcf-895097049b97",
+      "incidentId": "021b40dd-e421-4c5d-be19-5408564040be",
+      "incidentLinkPreserved": true,
+      "verification": {
+        "RecoveryId": "86635deb-07d6-4d3a-8fcf-895097049b97",
+        "Generation": 1,
+        "Status": "needs_human",
+        "Error": "ValidationTimedOut",
+        "Reason": "controlled-visual-ready",
+        "Timestamp": "2026-10-22T06:26:47.2729258Z"
+      },
+      "beforeDown": 1,
+      "beforeUp": 1,
+      "afterDown": 0,
+      "afterUp": 0,
+      "originalCoroutineContinued": null,
+      "finalBusinessConfirmation": "NOT RUN",
+      "onStopCalls": 1,
+      "terminal": "Stopped",
+      "validations": 1,
+      "verifyOperation": "653fafd9-c8ec-4410-a2fc-aab8a6c6721b",
+      "beforeConfirmationFrameId": "7519d46c-0e19-4dce-a905-b4fa0c51f590",
+      "afterSourceFrameId": null,
+      "afterConfirmationFrameId": null,
+      "clicks": [
+        {
+          "OperationId": "7f7fabd9-5880-4de0-822e-b0d6bbb18f68",
+          "ExecutionId": "41946fbe-a400-401c-b4c3-ad2985b015b6",
+          "Status": "Success",
+          "Error": "None",
+          "OutcomeUncertain": false,
+          "Observation": {
+            "ObservationId": "b5c253de-f5cd-43a1-9274-0e61b67009ca",
+            "FrameId": "ed8a3675-75a7-4683-86ed-4b50976ec3d3",
+            "PolicyId": "roi-consistency-v1",
+            "ClientPoint": {
+              "X": 186,
+              "Y": 166
+            },
+            "ValidationFrames": [
+              "5660601c-4b11-4138-b8c9-b9f286c3c6b8",
+              "4131d3fc-ab54-4b15-984e-1d528ad55fc6"
+            ]
+          }
+        }
+      ],
+      "traceIntegrity": "Valid",
+      "cleanupSucceeded": true,
+      "actualWorkOutstanding": 0,
+      "resourcesDrained": true
+    },
+    {
+      "scene": "stop-late",
+      "passed": true,
+      "hostSessionId": "08964ac4-75b9-4c09-9c85-a5b03ebca3c2",
+      "traceId": "dc7f47a0-d5be-4a7f-8002-0e2515f4bf08",
+      "instanceId": "2c10872c-e9e4-486a-9241-4e7eb8ae255e",
+      "runGeneration": 1,
+      "targetBindingId": "c2669981-656b-4afa-9b5d-f1e49aaea342",
+      "recoveryId": "0e020308-9403-40ae-8bf7-64e7045acd7e",
+      "incidentId": "e0f8f4b7-b28c-4d07-a0ee-c9d7a95d4035",
+      "incidentLinkPreserved": true,
+      "verification": null,
+      "beforeDown": 1,
+      "beforeUp": 1,
+      "afterDown": 0,
+      "afterUp": 0,
+      "originalCoroutineContinued": null,
+      "finalBusinessConfirmation": "NOT RUN",
+      "onStopCalls": 1,
+      "terminal": "Stopped",
+      "validations": 1,
+      "verifyOperation": "2145039a-2048-4796-adf7-f9d7d88a74c3",
+      "beforeConfirmationFrameId": "0801abdb-409a-4720-8076-4b60867a92af",
+      "afterSourceFrameId": null,
+      "afterConfirmationFrameId": null,
+      "clicks": [
+        {
+          "OperationId": "35c06a60-ece2-494f-ac6e-9521fac28775",
+          "ExecutionId": "bbe0b4e2-eb74-488d-8232-03fbfe6d2e12",
+          "Status": "Success",
+          "Error": "None",
+          "OutcomeUncertain": false,
+          "Observation": {
+            "ObservationId": "1a732eff-3ca1-4cdf-ba56-99dcb6d855eb",
+            "FrameId": "a0f8bd9d-e8c1-4112-894c-661d5e29e630",
+            "PolicyId": "roi-consistency-v1",
+            "ClientPoint": {
+              "X": 186,
+              "Y": 166
+            },
+            "ValidationFrames": [
+              "bff433c6-d66e-45b2-a58b-c15b04ea95c3",
+              "b15db04e-48fa-4e9c-b8e9-cbd7719b5a87"
+            ]
+          }
+        }
+      ],
+      "traceIntegrity": "Valid",
+      "cleanupSucceeded": true,
+      "actualWorkOutstanding": 0,
+      "resourcesDrained": true
+    },
+    {
+      "scene": "lua-error",
+      "passed": true,
+      "hostSessionId": "a979ad5f-4b4c-4730-8ed7-89bd2189381d",
+      "traceId": "cd9f404b-fbb8-4074-ac50-2509249f8357",
+      "instanceId": "a36901fe-4f15-4fed-9e31-91ca381afb0e",
+      "runGeneration": 1,
+      "targetBindingId": "422501b3-c6b3-46b2-b55c-27c8bed97e0c",
+      "recoveryId": null,
+      "incidentId": null,
+      "incidentLinkPreserved": null,
+      "verification": null,
+      "beforeDown": 1,
+      "beforeUp": 1,
+      "afterDown": 0,
+      "afterUp": 0,
+      "originalCoroutineContinued": null,
+      "finalBusinessConfirmation": "NOT RUN",
+      "onStopCalls": 1,
+      "terminal": "Faulted",
+      "validations": 0,
+      "verifyOperation": null,
+      "beforeConfirmationFrameId": null,
+      "afterSourceFrameId": null,
+      "afterConfirmationFrameId": null,
+      "clicks": [
+        {
+          "OperationId": "79eaa7e9-e6e1-43e5-b95c-d0137a764c10",
+          "ExecutionId": "f370b96b-8152-4a03-85e5-71f27234b038",
+          "Status": "Success",
+          "Error": "None",
+          "OutcomeUncertain": false,
+          "Observation": {
+            "ObservationId": "689093c2-462c-474e-99bc-df022fb1a4ed",
+            "FrameId": "b1238966-71a4-4880-850c-dbaa5134937b",
+            "PolicyId": "roi-consistency-v1",
+            "ClientPoint": {
+              "X": 186,
+              "Y": 166
+            },
+            "ValidationFrames": [
+              "a2ab8356-8873-4b3e-b922-515827c3de6d",
+              "be2f22f6-c263-4df5-a6a6-cd5411e58dee"
+            ]
+          }
+        }
+      ],
+      "traceIntegrity": "Valid",
+      "cleanupSucceeded": true,
+      "actualWorkOutstanding": 0,
+      "resourcesDrained": true
+    }
+  ],
+  "ui": {
+    "InteractionsPassed": true,
+    "ExitCode": -1073740286,
+    "TargetDown": 2,
+    "TargetUp": 2,
+    "IncidentId": "adb86aae-110d-464d-8ba9-e8144fb7d4a3",
+    "TraceId": "6b335f0a-1b5a-417a-a614-6021dead7711",
+    "Diagnostic": "; UI exit=-1073740286; CLR: Assert failure(PID 53060 [0x0000cf44], Thread: 24636 [0x603c]): !\u0022Attempt to execute managed code after the .NET runtime thread state has been destroyed.\u0022\r\n    File: D:\\a\\_work\\1\\s\\src\\runtime\\src\\coreclr\\vm\\ceemain.cpp:1721 Image:\r\nF:\\Cardinal\\Rug\\Rug\\Rug.UI\\bin\\x64\\Debug\\net10.0-windows10.0.22621.0\\win-x64\\Rug.UI.exe\r\n"
+  },
+  "humanAcceptance": "NOT RUN",
+  "sendInput": "NOT RUN"
+}

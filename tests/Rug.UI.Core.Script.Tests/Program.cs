@@ -16,6 +16,104 @@ using Rug.UI.Core.Security;
 using Rug.UI.Core.Schema;
 using RugTaskScheduler = Rug.UI.Core.Services.TaskScheduler;
 
+if (args.Contains("--checkpoint-restore-child")) { await CheckpointTests.RestoreChildAsync(args[1]); return; }
+if (args.Contains("--checkpoint-restore-manual")) { await ManualCheckpointRestore.RunAsync(); return; }
+if (args.Contains("--checkpoint-restore-ui")) { await ManualCheckpointRestore.RunAsync(automated: true); return; }
+if (args.Contains("--checkpoint-restore-native")) { await NativeCheckpointRestore.RunAsync(); return; }
+if (args.Contains("--checkpoint-restore-tests")) { await CheckpointTests.RunRestoreAsync(); return; }
+if (args.Contains("--observed-click-tests")) { await CheckpointTests.RunObservedClicksAsync(); return; }
+if (args.Contains("--private-candidate-tests")) { await CheckpointTests.RunPrivateCandidatesAsync(); return; }
+if (args.Contains("--execution-trace-tests")) { await CheckpointTests.RunExecutionTracesAsync(); return; }
+if (args.Contains("--trace-review-tests")) { await CheckpointTests.RunTraceReviewAsync(); return; }
+if (args.Contains("--trace-review-ui")) { await TraceReviewUi.RunAsync(); return; }
+if (args.Contains("--controlled-visual-sample")) { await ControlledVisualSample.RunAsync(args.Length>1?args[1]:Path.Combine(Environment.CurrentDirectory,"artifacts","controlled-visual")); return; }
+if (args.Contains("--controlled-recovery-sample")) { await ControlledRecoverySample.RunAsync(args.Length>1?args[1]:Path.Combine(Environment.CurrentDirectory,"artifacts","controlled-recovery")); return; }
+if (args.Contains("--capture-time-probe")) { await CaptureTimeProbe.RunAsync(args[^1]); return; }
+if (args.Contains("--host-exit-ui")) { await HostExitMatrix.RunAsync(); return; }
+if (args.Contains("--controlled-recovery-ui") || args.Contains("--controlled-recovery-manual"))
+{
+    string repo = ControlledRecoverySample.Repo(); ControlledRecoverySample.LoadNative(repo);
+    string root = Path.Combine(repo,"artifacts","controlled-recovery-ui-"+Guid.NewGuid().ToString("N"));
+    var result = await ControlledRecoveryUi.RunAsync(repo, root, args.Contains("--controlled-recovery-manual"));
+    Console.WriteLine(JsonSerializer.Serialize(result)); Console.WriteLine("ARTIFACTS "+root);
+    if(!result.InteractionsPassed || result.ExitCode!=0) Environment.ExitCode=1;
+    return;
+}
+if (args.Contains("--execution-trace-read")) { CheckpointTests.TraceReadChild(args); return; }
+if (args.Contains("--execution-trace-export"))
+{
+    var page=new TraceFileStore(args[1]).Read(Guid.Parse(args[2]),Guid.Parse(args[3]),limit:256);
+    Console.WriteLine(JsonSerializer.Serialize(page,new JsonSerializerOptions{WriteIndented=true,Converters={new System.Text.Json.Serialization.JsonStringEnumConverter()}}));return;
+}
+if (args.Contains("--execution-trace-native")) { await ObservedClickNative.RunAsync(args[^1]); return; }
+if (args.Contains("--observed-click-native")) { await ObservedClickNative.RunAsync(); return; }
+if (args.Contains("--observation-tests")) { await CheckpointTests.RunObservationsAsync(); return; }
+if (args.Contains("--observation-native")) { await ObservationNativeSmoke.RunAsync(); return; }
+if (args.Contains("--capture-geometry-native")) { await CaptureGeometryTests.RunNativeAsync(); return; }
+if (args.Contains("--plugin-update-tests")) { await CheckpointTests.RunPluginUpdatesAsync(); return; }
+if (args.Contains("--runtime-update-tests")) { await CheckpointTests.RunRuntimeUpdatesAsync(); return; }
+if (args.Contains("--runtime-switch-tests")) { await CheckpointTests.RunRuntimeSwitchesAsync(); return; }
+if (args.Contains("--runtime-switch-race")) { await CheckpointTests.RunRuntimeSwitchRaceAsync(args.Last()); return; }
+if (args.Contains("--runtime-update-late-tests")) { await CheckpointTests.RunLateCheckpointResultsAsync(); return; }
+if (args.Contains("--runtime-update-ui")) { await RuntimeUpdateUi.RunAsync(); return; }
+if (args.Contains("--runtime-switch-ui")) { await RuntimeUpdateUi.RunAsync("Switch"); await RuntimeUpdateUi.RunAsync("SwitchPause"); await RuntimeUpdateUi.RunAsync("SwitchReject"); return; }
+if (args.Contains("--runtime-switch-manual")) { await RuntimeUpdateUi.RunSwitchManualAsync(); return; }
+if (args.Contains("--checkpoint-child-read")) { await CheckpointTests.ChildReadAsync(args); return; }
+if (args.Contains("--checkpoint-tests")) { await CheckpointTests.RunAsync(); return; }
+
+if (args.Contains("--recovery-ui")) { await ManualRecovery.RunAsync(automated: true); return; }
+if (args.Contains("--recovery-manual")) { await ManualRecovery.RunAsync(); return; }
+if (args.Contains("--intervention-manual")) { await ManualInputIntervention.RunAsync(); return; }
+
+if (args.Contains("--hook-observer"))
+{
+    try
+    {
+        ExternalHookObserver.ValidateArguments(args);
+        await ExternalHookObserver.RunAsync();
+    }
+    catch (Exception error) { Console.WriteLine($"OBSERVER FAILED: {error.Message}"); Environment.ExitCode = 1; }
+    return;
+}
+
+if (args.Contains("--hook-isolation-stage"))
+{
+    try
+    {
+        int index = Array.IndexOf(args, "--hook-isolation-stage");
+        int moduleIndex = Array.IndexOf(args, "--hook-module");
+        int orderIndex = Array.IndexOf(args, "--startup-order");
+        if (args.Count(a => a == "--manual-hook-install") > 1) throw new ArgumentException("Specify --manual-hook-install once");
+        await RawInputDiagnostics.RunIsolationAsync(index + 1 < args.Length ? args[index + 1] : "",
+            moduleIndex < 0 ? "callback" : moduleIndex + 1 < args.Length ? args[moduleIndex + 1] : "",
+            orderIndex < 0 ? null : orderIndex + 1 < args.Length ? args[orderIndex + 1] : "",
+            args.Contains("--manual-hook-install"));
+    }
+    catch (Exception error) { Console.WriteLine($"ISOLATION FAILED: {error.Message}"); Environment.ExitCode = 1; }
+    return;
+}
+
+if (args.Contains("--manual-hook-install"))
+{
+    Console.WriteLine("ISOLATION FAILED: --manual-hook-install requires --hook-isolation-stage keyboard-native-callback");
+    Environment.ExitCode = 1; return;
+}
+
+if (args.Contains("--raw-input-self-test") || args.Contains("--raw-input-diagnostic"))
+{
+    try { await RawInputDiagnostics.RunAsync(args.Contains("--raw-input-diagnostic")); }
+    catch (Exception error) { Console.WriteLine($"DIAGNOSTIC FAILED: {error.Message}"); Environment.ExitCode = 1; }
+    return;
+}
+
+if (args.Contains("--raw-input-tests")) { await RawInputTests.RunAsync(); return; }
+if (args.Contains("--intervention-tests")) { await InputInterventionTests.RunAsync(); return; }
+if (args.Contains("--recovery-native")) { await NativeRecoveryTests.RunAsync(); return; }
+if (args.Contains("--recovery-tests")) { await RecoveryTests.RunAsync(); return; }
+if (args.Contains("--lifecycle-tests")) { await LifecycleTests.RunAsync(); return; }
+if (args.Contains("--observer-tests")) { await ExternalHookObserverTests.RunAsync(); return; }
+if (args.Contains("--manual-hook-tests")) { await ManualHookInstallTests.RunAsync(); return; }
+
 string path = Path.Combine(AppContext.BaseDirectory, "bridge_test.lua");
 await File.WriteAllTextAsync(path, "function on_tick() rug.sleep(200); local frame = rug.capture(); assert(frame.width == 1 and frame.height == 1); rug.log('done') end");
 var capture = new FakeCapture();
@@ -23,7 +121,7 @@ await using (var runtime = new LuaRuntime(capture, new FakeOcr(), new FakeInput(
 {
     var states = new List<ScriptState>();
     runtime.StateChanged += (_, e) => states.Add(e.Current);
-    await runtime.InitializeAsync(path, new PluginManifest(new HashSet<string> { "timer", "vision.capture" }));
+    await TestAuthorizationHost.InitializeAsync(runtime, path, new PluginManifest(new HashSet<string> { "timer", "vision.capture" }));
     var watch = Stopwatch.StartNew();
     Check((await runtime.StepAsync()).State == ScriptState.Yielded, "sleep must yield");
     Check(watch.ElapsedMilliseconds < 150, "StepAsync blocked on sleep");
@@ -40,7 +138,7 @@ await using (var runtime = new LuaRuntime(capture, new FakeOcr(), new FakeInput(
 await File.WriteAllTextAsync(path, "function on_tick() rug.sleep(5000) end");
 await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new FakeInput(), NullLogger<LuaRuntime>.Instance))
 {
-    await runtime.InitializeAsync(path, new PluginManifest(new HashSet<string> { "timer" }));
+    await TestAuthorizationHost.InitializeAsync(runtime, path, new PluginManifest(new HashSet<string> { "timer" }));
     Check((await runtime.StepAsync()).State == ScriptState.Yielded, "long sleep must yield");
     Task<ScriptExecutionResult> pending = runtime.ResumeAsync();
     runtime.Stop();
@@ -52,7 +150,7 @@ var readyCapture = new FakeCapture();
 readyCapture.Complete();
 await using (var runtime = new LuaRuntime(readyCapture, new FakeOcr(), new FakeInput(), NullLogger<LuaRuntime>.Instance))
 {
-    await runtime.InitializeAsync(path, new PluginManifest(new HashSet<string> { "vision.capture", "vision.ocr" }));
+    await TestAuthorizationHost.InitializeAsync(runtime, path, new PluginManifest(new HashSet<string> { "vision.capture", "vision.ocr" }));
     Check((await runtime.StepAsync()).State == ScriptState.Yielded, "capture must yield");
     Check((await runtime.ResumeAsync()).State == ScriptState.Yielded, "OCR must yield");
     Check((await runtime.ResumeAsync()).State == ScriptState.Stopped, "OCR result must reach Lua");
@@ -60,7 +158,7 @@ await using (var runtime = new LuaRuntime(readyCapture, new FakeOcr(), new FakeI
 
 await using (var runtime = new LuaRuntime(readyCapture, new FakeOcr(), new FakeInput(), NullLogger<LuaRuntime>.Instance))
 {
-    await runtime.InitializeAsync(path, new PluginManifest(new HashSet<string>()));
+    await TestAuthorizationHost.InitializeAsync(runtime, path, new PluginManifest(new HashSet<string>()));
     ScriptExecutionResult denied = await runtime.StepAsync();
     Check(denied.State == ScriptState.Faulted && denied.Error is PermissionDeniedException { Permission: Permission.VisionCapture }, "capture permission must be enforced");
 }
@@ -79,7 +177,7 @@ foreach ((string call, string permission) in new[]
     await File.WriteAllTextAsync(path, "function on_tick() " + call + " end");
     var deniedCapture = new FakeCapture();
     await using var runtime = new LuaRuntime(deniedCapture, new FakeOcr(), new FakeInput(), NullLogger<LuaRuntime>.Instance);
-    await runtime.InitializeAsync(path, new PluginManifest([]) { Id = "denied-test" });
+    await TestAuthorizationHost.InitializeAsync(runtime, path, new PluginManifest([]) { Id = "denied-test" });
     ScriptExecutionResult result = await runtime.StepAsync();
     Check(result.State == ScriptState.Faulted && result.Error is PermissionDeniedException ex &&
           ex.Permission == permission && ex.Api == "rug." + call.Split('(')[0][4..],
@@ -95,11 +193,12 @@ try
     await File.WriteAllTextAsync(Path.Combine(visionRoot, "broken.png"), "not an image");
     var visionManifest = new PluginManifest([Permission.VisionCapture, Permission.VisionMatch, Permission.VisionOcr,
         Permission.Timer]) { PluginDirectory = visionRoot };
-    var visionGate = new PermissionInterceptor(visionManifest, NullLogger.Instance);
+    var visionGate = TestAuthorizationHost.Gate(visionManifest, NullLogger.Instance);
     var matcher = new FakeTemplateMatch();
     var ocr = new FakeOcr();
     var directCapture = new SequenceCapture(_ => VisualFrame(true));
-    using (var visual = new VisualEngineBridge(directCapture, ocr, matcher, visionGate, visionRoot))
+    using (var visual = new VisualEngineBridge(directCapture, ocr, matcher, visionGate,
+        new RunIdentity("visual-test", Guid.NewGuid(), 1, null, 0), visionRoot))
     {
         Check((await visual.CaptureAsync())?.Width == 4, "visual capture did not cache the WGC frame");
         ImageFindResult? hit = await visual.FindImageAsync("template.png", 0.9f, new Rect(1, 1, 3, 2));
@@ -124,7 +223,8 @@ try
     }
 
     using (var deniedVisual = new VisualEngineBridge(new SequenceCapture(_ => VisualFrame(true)),
-        new FakeOcr(), matcher, new PermissionInterceptor(new PluginManifest([]), NullLogger.Instance), visionRoot))
+        new FakeOcr(), matcher, TestAuthorizationHost.Gate(new PluginManifest([]), NullLogger.Instance),
+        new RunIdentity("visual-test", Guid.NewGuid(), 1, null, 0), visionRoot))
     {
         try { await deniedVisual.CaptureAsync(); throw new Exception("capture without grant succeeded"); }
         catch (PermissionDeniedException ex) when (ex.Permission == Permission.VisionCapture) { }
@@ -147,7 +247,7 @@ try
     await using (var runtime = new LuaRuntime(new SequenceCapture(_ => VisualFrame(true)),
         new FakeOcr(), new FakeInput(), NullLogger<LuaRuntime>.Instance, templateMatcher: matcher))
     {
-        await runtime.InitializeAsync(path, visionManifest);
+        await TestAuthorizationHost.InitializeAsync(runtime, path, visionManifest);
         ScriptExecutionResult result = await DriveToEndAsync(runtime);
         Check(result.State == ScriptState.Stopped, "Lua visual result tables lost coordinates or OCR text");
     }
@@ -162,7 +262,7 @@ try
     await using (var runtime = new LuaRuntime(appearing, new FakeOcr(), new FakeInput(),
         NullLogger<LuaRuntime>.Instance, templateMatcher: matcher))
     {
-        await runtime.InitializeAsync(path, visionManifest);
+        await TestAuthorizationHost.InitializeAsync(runtime, path, visionManifest);
         ScriptExecutionResult result = await DriveToEndAsync(runtime);
         Check(result.State == ScriptState.Stopped && appearing.GrabCalls == 3,
               "wait_image did not return promptly when the template appeared");
@@ -177,7 +277,7 @@ try
     await using (var runtime = new LuaRuntime(absent, new FakeOcr(), new FakeInput(),
         NullLogger<LuaRuntime>.Instance, templateMatcher: matcher))
     {
-        await runtime.InitializeAsync(path, visionManifest);
+        await TestAuthorizationHost.InitializeAsync(runtime, path, visionManifest);
         var watch = Stopwatch.StartNew();
         ScriptExecutionResult result = await DriveToEndAsync(runtime);
         Check(result.State == ScriptState.Stopped && absent.GrabCalls >= 2 &&
@@ -194,7 +294,7 @@ try
     });
     var repeatedMatch = new FakeTemplateMatch();
     using (var visual = new VisualEngineBridge(repeatedCapture, new FakeOcr(), repeatedMatch,
-        visionGate, visionRoot))
+        visionGate, new RunIdentity("visual-test", Guid.NewGuid(), 1, null, 0), visionRoot))
     {
         for (int i = 0; i < 1000; i++)
         {
@@ -218,7 +318,7 @@ var anomalyGate = new TaskCompletionSource<string>(TaskCreationOptions.RunContin
 await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new FakeInput(), NullLogger<LuaRuntime>.Instance))
 {
     runtime.ConfigureAnomalyHandler((_, _) => anomalyGate.Task);
-    await runtime.InitializeAsync(path, new PluginManifest([Permission.Agent]));
+    await TestAuthorizationHost.InitializeAsync(runtime, path, new PluginManifest([Permission.Agent]));
     Check((await runtime.StepAsync()).State == ScriptState.Yielded, "agent hook must yield before persistence finishes");
     Task<ScriptExecutionResult> pending = runtime.ResumeAsync();
     await Task.Delay(20);
@@ -233,7 +333,7 @@ await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new 
 await File.WriteAllTextAsync(path, "function on_tick() rug.sleep(10); rug.log('resumed') end");
 await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new FakeInput(), NullLogger<LuaRuntime>.Instance))
 {
-    await runtime.InitializeAsync(path, new PluginManifest(new HashSet<string> { "timer" }));
+    await TestAuthorizationHost.InitializeAsync(runtime, path, new PluginManifest(new HashSet<string> { "timer" }));
     Check((await runtime.StepAsync()).State == ScriptState.Yielded, "pause fixture must yield");
     runtime.Pause();
     await Task.Delay(20);
@@ -258,7 +358,7 @@ var fakeMapper = new FakeCoordinateMapper();
 var inputAudit = new AuditLogger();
 var deniedInput = new FakeInput();
 await using (var bridge = new InputBridge(deniedInput,
-    new PermissionInterceptor(new PluginManifest([]) { Id = "input-denied" }, inputAudit), fakeMapper))
+    TestAuthorizationHost.Gate(new PluginManifest([]) { Id = "input-denied" }, inputAudit), fakeMapper))
 {
     try { await bridge.ClickAsync(100, 100); throw new Exception("ungranted input was dispatched"); }
     catch (PermissionDeniedException ex)
@@ -271,8 +371,8 @@ await using (var bridge = new InputBridge(deniedInput,
 
 var bridgedInput = new FakeInput();
 await using (var bridge = new InputBridge(bridgedInput,
-    new PermissionInterceptor(new PluginManifest([Permission.ControlInput]), NullLogger.Instance),
-    fakeMapper, _ => true))
+    TestAuthorizationHost.Gate(new PluginManifest([Permission.ControlInput]), NullLogger.Instance),
+    fakeMapper, _ => true, arbiter: TestAuthorizationHost.InputArbiter))
 {
     await bridge.BindAsync(123, InputDeliveryMode.Win32PostMessage);
     await bridge.ClickAsync(100, 100, MouseButton.Right, InputDeliveryMode.Win32SendInput);
@@ -299,8 +399,8 @@ await using (var bridge = new InputBridge(bridgedInput,
 
 var unfocusedInput = new FakeInput();
 await using (var bridge = new InputBridge(unfocusedInput,
-    new PermissionInterceptor(new PluginManifest([Permission.ControlInput]), NullLogger.Instance),
-    fakeMapper, _ => false))
+    TestAuthorizationHost.Gate(new PluginManifest([Permission.ControlInput]), NullLogger.Instance),
+    fakeMapper, _ => false, arbiter: TestAuthorizationHost.InputArbiter))
 {
     await bridge.BindAsync(123, InputDeliveryMode.Win32PostMessage);
     await bridge.ClickAsync(100, 100);
@@ -322,7 +422,7 @@ var input = new FakeInput();
 await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), input,
     NullLogger<LuaRuntime>.Instance, fakeMapper, _ => true))
 {
-    await runtime.InitializeAsync(path, new PluginManifest(new HashSet<string> { "input" }, TargetWindow: 123));
+    await TestAuthorizationHost.InitializeAsync(runtime, path, new PluginManifest(new HashSet<string> { "input" }, TargetWindow: 123));
     Check((await runtime.StepAsync()).State == ScriptState.Yielded, "click must yield");
     Check((await runtime.ResumeAsync()).State == ScriptState.Yielded, "key must yield");
     Check((await runtime.ResumeAsync()).State == ScriptState.Stopped, "input script must finish");
@@ -337,7 +437,7 @@ var manifestInput = new FakeInput();
 await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), manifestInput,
     NullLogger<LuaRuntime>.Instance, fakeMapper, _ => true))
 {
-    await runtime.InitializeAsync(path, new PluginManifest([Permission.ControlInput], TargetWindow: 123)
+    await TestAuthorizationHost.InitializeAsync(runtime, path, new PluginManifest([Permission.ControlInput], TargetWindow: 123)
     {
         InputDelivery = InputDeliveryMode.Win32SendInput
     });
@@ -350,7 +450,7 @@ await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), mani
 await File.WriteAllTextAsync(path, "assert(os == nil and io == nil and package == nil and debug == nil and luanet == nil and load == nil)");
 await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new FakeInput(), NullLogger<LuaRuntime>.Instance))
 {
-    await runtime.InitializeAsync(path, new PluginManifest([]));
+    await TestAuthorizationHost.InitializeAsync(runtime, path, new PluginManifest([]));
     Check((await runtime.StepAsync()).State == ScriptState.Stopped, "dangerous Lua globals must be absent");
 }
 
@@ -424,7 +524,7 @@ try
           Equals(config.Defaults["speed"], 2.5d) && Equals(config.Defaults["mode"], "fast"), "config schema/default parsing failed");
     await using (var configRuntime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new FakeInput(), NullLogger<LuaRuntime>.Instance))
     {
-        await configRuntime.InitializeAsync(Path.Combine(valid, plugins[0].Entry), plugins[0]);
+        await TestAuthorizationHost.InitializeAsync(configRuntime, Path.Combine(valid, plugins[0].Entry), plugins[0]);
         Check((await configRuntime.StepAsync()).State == ScriptState.Stopped, "typed config defaults did not reach Lua");
     }
     Check(!plugins.Any(p => p.Id == "escape"), "entry traversal was accepted");
@@ -435,7 +535,7 @@ try
 finally { Directory.Delete(pluginsRoot, recursive: true); }
 
 var audit = new AuditLogger();
-var gate = new PermissionInterceptor(new PluginManifest([Permission.Timer]) { Id = "audit-demo" }, audit);
+var gate = TestAuthorizationHost.Gate(new PluginManifest([Permission.Timer]) { Id = "audit-demo" }, audit);
 gate.Demand(Permission.Timer, "rug.sleep");
 try
 {
@@ -450,7 +550,7 @@ catch (PermissionDeniedException ex)
 
 await File.WriteAllTextAsync(path, "while true do end");
 var watchdogRuntime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new FakeInput(), NullLogger<LuaRuntime>.Instance);
-await watchdogRuntime.InitializeAsync(path, new PluginManifest([]));
+await TestAuthorizationHost.InitializeAsync(watchdogRuntime, path, new PluginManifest([]));
 Task<ScriptExecutionResult> spinning = watchdogRuntime.StepAsync();
 await Task.Delay(30);
 watchdogRuntime.Stop();
@@ -467,6 +567,7 @@ await watchdogRuntime.DisposeAsync();
 
 string schedulerRoot = Path.Combine(AppContext.BaseDirectory, "scheduler-test-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(schedulerRoot);
+var schedulerAuthorization = new PluginAuthorization();
 try
 {
     await WritePluginAsync("life", """
@@ -510,14 +611,19 @@ try
     var captures = new ConcurrentBag<FakeCapture>();
     var inputs = new ConcurrentBag<FakeInput>();
     var luaLogger = new RecordingLogger<LuaRuntime>(events);
+    var scopedStore = new StateStore();
+    using var scopedBus = new CommandBus(scopedStore);
     string anomalyDirectory = Path.Combine(schedulerRoot, "logs", "anomalies");
     var anomalyLogger = new AnomalyLogger(new RecordingLogger<AnomalyLogger>(events), anomalyDirectory);
     await using var scheduler = new RugTaskScheduler(
         new PluginManager(NullLogger<PluginManager>.Instance), schedulerRoot,
         () => { var c = new FakeCapture(events); captures.Add(c); return c; },
         () => { var i = new FakeInput(); inputs.Add(i); return i; },
-        (c, i) => new LuaRuntime(c, new FakeOcr(), i, luaLogger),
-        NullLogger<RugTaskScheduler>.Instance, anomalyLogger, TimeSpan.FromMilliseconds(20));
+        (c, i) => new LuaRuntime(c, new FakeOcr(), i, luaLogger, commandBus: scopedBus),
+        NullLogger<RugTaskScheduler>.Instance, anomalyLogger, TimeSpan.FromMilliseconds(20),
+        commandBus: scopedBus, authorization: schedulerAuthorization, inputArbiter: TestAuthorizationHost.InputArbiter);
+    int instanceListNotifications = 0;
+    scheduler.InstancesChanged += (_, _) => Interlocked.Increment(ref instanceListNotifications);
 
     Guid life = await scheduler.StartTaskAsync("life", 101);
     TaskExecutionContext lifeContext = scheduler.Instances.Single(c => c.InstanceId == life);
@@ -534,8 +640,32 @@ try
     Check(scheduler.ResumeTask(life), "resume failed");
     await WaitUntilAsync(() => events.Count(e => e == "Lua: life_tick") > pausedTicks);
     await scheduler.StopTaskAsync(life);
+    Check(instanceListNotifications >= 2, "instance add/remove did not notify the host");
     Check(lifeContext.TaskStatus == AutomationTaskStatus.Stopped && events.Contains("Lua: life_stop") &&
           events.Contains("capture-stop:101"), "on_stop or capture cleanup missing");
+    Guid rebound = await scheduler.StartTaskAsync("life", 101);
+    TaskExecutionContext reboundContext = scheduler.Instances.Single(item => item.InstanceId == rebound);
+    Check(reboundContext.InstanceId != lifeContext.InstanceId &&
+          reboundContext.RunGeneration > lifeContext.RunGeneration &&
+          reboundContext.TargetBindingId is not null &&
+          reboundContext.TargetBindingId != lifeContext.TargetBindingId,
+          "same HWND was reused as run or target-binding identity");
+    await scheduler.StopTaskAsync(rebound);
+    int stablePartitionCount = scopedStore.ActivePartitionCount;
+    StateScope? stoppedScope = null;
+    for (int run = 0; run < 24; run++)
+    {
+        Guid repeated = await scheduler.StartTaskAsync("other", 0);
+        StateScope scope = scheduler.Instances.Single(item => item.InstanceId == repeated).InstanceScope;
+        scopedBus.SetState(scope, "repeat", run);
+        await scheduler.StopTaskAsync(repeated);
+        stoppedScope = scope;
+        Check(scopedStore.ActivePartitionCount == stablePartitionCount,
+            "repeated starts and stops retained instance partitions");
+    }
+    try { scopedBus.SetState(stoppedScope!.Value, "late", true);
+        throw new Exception("stopped run accepted a late write"); }
+    catch (ObjectDisposedException) { }
 
     Guid[] concurrent = await Task.WhenAll(
         scheduler.StartTaskAsync("life", 201),
@@ -557,6 +687,49 @@ try
     Check(scheduler.Instances.Count == 2, "stopping one instance affected the others");
     await Task.WhenAll(concurrent.Skip(1).Select(scheduler.StopTaskAsync));
     Check(scheduler.Instances.Count == 0 && captures.All(c => c.StopCalls == 1), "concurrent sessions leaked");
+
+    await WritePluginAsync("scoped-a", """
+        function on_init()
+          rug.set_state('same_key', rug.get_state('launch'))
+          rug.set_state('config_at_start', rug.get_config('level'))
+        end
+        """);
+    await WritePluginAsync("scoped-b", """
+        function on_init() rug.set_state('same_key', rug.get_state('launch')) end
+        """);
+    await scheduler.RefreshPluginsAsync();
+    var pluginA = StateScope.Plugin("scoped-a");
+    scopedBus.SetState(pluginA, "level", "before");
+    Guid[] scoped = await Task.WhenAll(
+        scheduler.StartTaskAsync("scoped-a", 0, new Dictionary<string, object?> { ["launch"] = "one" }),
+        scheduler.StartTaskAsync("scoped-a", 0, new Dictionary<string, object?> { ["launch"] = "two" }),
+        scheduler.StartTaskAsync("scoped-b", 0, new Dictionary<string, object?> { ["launch"] = "three" }));
+    var scopedContexts = scoped.Select(id => scheduler.Instances.Single(item => item.InstanceId == id)).ToArray();
+    await WaitUntilAsync(() => scoped.All(id => scopedBus.Contains(
+        scopedContexts.Single(item => item.InstanceId == id).InstanceScope, "same_key")));
+    Check(scopedBus.GetState(scopedContexts[0].InstanceScope, "same_key", "") == "one" &&
+          scopedBus.GetState(scopedContexts[1].InstanceScope, "same_key", "") == "two" &&
+          scopedBus.GetState(scopedContexts[2].InstanceScope, "same_key", "") == "three" &&
+          scopedContexts[0].RunGeneration != scopedContexts[1].RunGeneration &&
+          scopedContexts.All(item => item.TargetBindingId is null && item.TargetHwnd == 0),
+          "windowless runs shared state or identity");
+    Check(scopedBus.GetState(scopedContexts[0].InstanceScope, "config_at_start", "") == "before" &&
+          scopedBus.GetState(scopedContexts[1].InstanceScope, "config_at_start", "") == "before",
+          "plugin config startup snapshot was not isolated");
+    scopedBus.SetState(pluginA, "level", "after");
+    Check(scopedBus.GetState(scopedContexts[0].InstanceScope, "config_at_start", "") == "before",
+          "running instance observed later plugin config write");
+    await Task.WhenAll(scoped.Select(scheduler.StopTaskAsync));
+    Check(!scopedBus.Contains(scopedContexts[0].InstanceScope, "same_key") &&
+          scopedBus.GetState(pluginA, "level", "") == "after", "stop did not clear instance state or keep plugin config");
+    try { scopedBus.SetState(scopedContexts[0].InstanceScope, "late", true); throw new Exception("old run wrote after stop"); }
+    catch (ObjectDisposedException) { }
+    Guid fresh = await scheduler.StartTaskAsync("scoped-a", 0);
+    TaskExecutionContext freshContext = scheduler.Instances.Single(item => item.InstanceId == fresh);
+    Check(freshContext.RunGeneration > scopedContexts[1].RunGeneration &&
+          !scopedBus.Contains(freshContext.InstanceScope, "launch"), "restart inherited old launch inputs");
+    await WaitUntilAsync(() => scopedBus.GetState(freshContext.InstanceScope, "config_at_start", "") == "after");
+    await scheduler.StopTaskAsync(fresh);
 
     Guid spin = await scheduler.StartTaskAsync("spin", 303);
     TaskExecutionContext spinContext = scheduler.Instances.Single(c => c.InstanceId == spin);
@@ -584,8 +757,10 @@ try
 
     Guid anomaly = await scheduler.StartTaskAsync("anomaly", 306);
     TaskExecutionContext anomalyContext = scheduler.Instances.Single(c => c.InstanceId == anomaly);
-    await WaitUntilAsync(() => anomalyContext.TaskStatus == AutomationTaskStatus.Faulted &&
+    await WaitUntilAsync(() => anomalyContext.TaskStatus == AutomationTaskStatus.AwaitingHuman &&
         Directory.Exists(anomalyDirectory) && Directory.GetFiles(anomalyDirectory, "*.json").Length == 1);
+    Check(!events.Contains("Lua: must_not_resume"), "human wait returned to mainline");
+    await scheduler.StopTaskAsync(anomaly);
     await WaitUntilAsync(() => !scheduler.Instances.Any(c => c.InstanceId == anomaly));
     string jsonPath = Directory.GetFiles(anomalyDirectory, "*.json").Single();
     using (JsonDocument document = JsonDocument.Parse(await File.ReadAllTextAsync(jsonPath)))
@@ -596,7 +771,8 @@ try
               record.GetProperty("reason").GetString() == "界面未响应" &&
               record.GetProperty("timestamp").GetDateTime().Kind == DateTimeKind.Utc &&
               record.GetProperty("scriptContext").GetString()!.Contains("超时3秒") &&
-              record.GetProperty("scriptContext").GetString()!.Contains("on_tick") &&
+              !record.GetProperty("scriptContext").GetString()!.Contains("on_tick") &&
+              record.GetProperty("recoveryId").GetGuid() == anomalyContext.Snapshot.Recovery!.RecoveryId &&
               record.GetProperty("agent_resolution").ValueKind == JsonValueKind.Null,
               "anomaly metadata is incomplete");
         string screenshotName = record.GetProperty("screenshotPath").GetString()!;
@@ -615,10 +791,10 @@ try
         Check(pixels.ToArray().SequenceEqual(new byte[] { 0, 30, 20, 10, 255 }),
               "anomaly PNG did not encode the captured BGRA pixel");
     }
-    Check(anomalyContext.LastError?.Message.Contains(jsonPath) == true &&
+    Check(anomalyContext.LastError is null && anomalyContext.TaskStatus == AutomationTaskStatus.Stopped &&
           events.Any(e => e.Contains("[Anomaly Detected]")) &&
           events.Contains("Lua: anomaly_stop") && !events.Contains("Lua: must_not_resume") &&
-          events.Contains("capture-stop:306"), "anomaly did not fault and clean up safely");
+          events.Contains("capture-stop:306"), "human wait did not preserve/stop/clean up safely");
 
     var delayedCapture = new FakeCapture
     {
@@ -628,7 +804,7 @@ try
         new PluginManager(NullLogger<PluginManager>.Instance), schedulerRoot,
         () => delayedCapture, () => new FakeInput(),
         (c, i) => new LuaRuntime(c, new FakeOcr(), i, luaLogger),
-        NullLogger<RugTaskScheduler>.Instance, anomalyLogger);
+        NullLogger<RugTaskScheduler>.Instance, anomalyLogger, authorization: schedulerAuthorization, inputArbiter: TestAuthorizationHost.InputArbiter);
     Task<Guid> opening = delayedScheduler.StartTaskAsync("life", 404);
     await WaitUntilAsync(() => delayedCapture.StartCalls == 1);
     await delayedScheduler.DisposeAsync();
@@ -658,36 +834,39 @@ try
     await using (var reloader = new HotReloadService(schedulerRoot, scheduler,
         NullLogger<HotReloadService>.Instance, TimeSpan.FromMilliseconds(300)))
     {
-        using var uiBinding = reloader.RegisterUiHandler("hot", async (path, token) =>
+        using var uiBinding = reloader.RegisterUiHandler("hot", (snapshot, token) =>
         {
-            await new SchemaParser().ParseFileAsync(path, token);
+            new SchemaParser().Parse(snapshot.UiJson!);
+            return Task.FromResult<IPluginUiUpdate>(new TestPluginUiStage());
         });
         reloader.Reloaded += (_, e) =>
         {
-            if (e.PluginId == "hot") reloadSignals.Enqueue("success");
+            if (e.PluginId == "hot") reloadSignals.Enqueue(e.Status.ToString());
         };
         reloader.ReloadFailed += (_, e) =>
         {
             if (e.PluginId == "hot") reloadSignals.Enqueue("failure");
         };
         reloader.Start();
+        await reloader.Ready;
         await File.WriteAllTextAsync(Path.Combine(hotDirectory, "main.lua"), """
             function on_init() rug.log('hot_v2') end
             function on_stop() rug.log('hot_stop') end
             """);
-        await WaitUntilAsync(() => reloadSignals.Contains("success") && events.Contains("Lua: hot_v2"));
-        Check(!scheduler.Instances.Any(instance => instance.InstanceId == hotOriginal) &&
-              scheduler.Instances.Any(instance => instance.PluginId == "hot" && instance.TargetHwnd == 707) &&
-              events.Contains("Lua: hot_stop") && captures.Any(item => item.StartedHwnd == 707 && item.StopCalls == 1),
-              "hot reload did not stop/cleanup old Lua and start a fresh HWND session");
+        await WaitUntilAsync(() => reloadSignals.Contains("RuntimePending"));
+        Check(scheduler.Instances.Any(instance => instance.InstanceId == hotOriginal) && !events.Contains("Lua: hot_v2"),
+              "runtime update changed active instance or replayed init");
 
         await File.WriteAllTextAsync(hotUi, "{ invalid JSON");
-        await WaitUntilAsync(() => reloadSignals.Contains("failure") &&
-            !scheduler.Instances.Any(instance => instance.PluginId == "hot"));
+        await WaitUntilAsync(() => reloadSignals.Contains("failure"));
+        Check(scheduler.Instances.Any(instance => instance.InstanceId == hotOriginal), "invalid update stopped old instance");
         await File.WriteAllTextAsync(hotUi, """{"type":"Page","id":"hot-page","title":"Recovered"}""");
-        await WaitUntilAsync(() => reloadSignals.Count(signal => signal == "success") == 2 &&
-            scheduler.Instances.Any(instance => instance.PluginId == "hot" && instance.TargetHwnd == 707));
-        await WaitUntilAsync(() => events.Count(item => item == "Lua: hot_v2") >= 2);
+        await WaitUntilAsync(() => reloadSignals.Count(signal => signal == "RuntimePending") >= 2);
+        await scheduler.StopTaskAsync(hotOriginal);
+        reloader.RequestReload(hotDirectory);
+        await WaitUntilAsync(() => reloadSignals.Contains("RuntimeApplied"));
+        await scheduler.StartTaskAsync("hot", 707);
+        await WaitUntilAsync(() => events.Contains("Lua: hot_v2"));
     }
     await Task.WhenAll(scheduler.Instances.Where(instance => instance.PluginId == "hot")
         .Select(instance => scheduler.StopTaskAsync(instance.InstanceId)));
@@ -699,6 +878,7 @@ try
         await File.WriteAllTextAsync(Path.Combine(directory, "manifest.json"),
             "{\"id\":\"" + id + "\",\"name\":\"" + id + "\",\"version\":\"1.0.0\",\"targetProcess\":\"Demo.exe\",\"permissions\":[" + permissions + "]}");
         await File.WriteAllTextAsync(Path.Combine(directory, "main.lua"), script);
+        TestAuthorizationHost.ApproveCatalog(schedulerAuthorization, schedulerRoot);
     }
 }
 finally
@@ -736,6 +916,61 @@ stateStore.StateChanged += (_, e) =>
 stateStore.SetState("parent", true);
 Check(stateStore.GetState("child", false), "state listener could not re-enter the store");
 
+var tenantA = StateScope.Instance("alpha", Guid.NewGuid());
+var tenantB = StateScope.Instance("alpha", Guid.NewGuid());
+var tenantC = StateScope.Instance("beta", Guid.NewGuid());
+stateStore.OpenInstance(tenantA);
+stateStore.OpenInstance(tenantB);
+stateStore.OpenInstance(tenantC);
+stateStore.SetState(StateScope.Plugin("alpha"), "level", "alpha-only");
+stateStore.SetState(StateScope.Plugin("beta"), "level", "beta-only");
+Check(stateStore.GetState(StateScope.Plugin("alpha"), "level", "") == "alpha-only" &&
+      stateStore.GetState(StateScope.Plugin("beta"), "level", "") == "beta-only",
+      "plugin configurations shared a key");
+Check(StateScope.Plugin("ALPHA") == StateScope.Plugin("alpha"),
+      "plugin scope casing diverged from catalog identity");
+var tenantEvents = new ConcurrentQueue<StateChangedEventArgs>();
+stateStore.StateChanged += (_, change) => tenantEvents.Enqueue(change);
+await Task.WhenAll(Enumerable.Range(0, 3).Select(index => Task.Run(() =>
+{
+    StateScope scope = new[] { tenantA, tenantB, tenantC }[index];
+    for (int value = 0; value < 100; value++) stateStore.SetState(scope, "shared", value);
+})));
+Check(new[] { tenantA, tenantB, tenantC }.All(scope =>
+    stateStore.GetState(scope, "shared", -1) == 99) &&
+    tenantEvents.Count(change => change.Key == "shared" && change.Scope == tenantA) == 100 &&
+    tenantEvents.Count(change => change.Key == "shared" && change.Scope == tenantB) == 100 &&
+    tenantEvents.Count(change => change.Key == "shared" && change.Scope == tenantC) == 100,
+    "structural scopes mixed values or events");
+Check(tenantEvents.Where(change => change.Scope == tenantA && change.Key == "shared")
+    .Select(change => change.Revision).Distinct().Count() == 100,
+    "scope revisions were not unique");
+stateStore.SetState<string?>(tenantA, "explicit_null", null);
+Check(stateStore.Contains(tenantA, "explicit_null") && !stateStore.Contains(tenantB, "explicit_null") &&
+      stateStore.GetState(tenantA, "explicit_null", "fallback") is null &&
+      stateStore.GetState(tenantA, "missing", "fallback") == "fallback",
+      "scoped null and missing semantics are wrong");
+string[] mutable = ["original"];
+stateStore.SetState(tenantA, "array", mutable);
+mutable[0] = "changed";
+string[] detached = stateStore.GetState(tenantA, "array", Array.Empty<string>());
+detached[0] = "changed again";
+var detachedSnapshot = stateStore.Snapshot(tenantA);
+((string[])detachedSnapshot["array"]!)[0] = "changed in snapshot";
+Check(stateStore.GetState(tenantA, "array", Array.Empty<string>())[0] == "original" &&
+      tenantEvents.Last(change => change.Key == "array").Value is JsonElement,
+      "mutable state leaked through a snapshot or event");
+try { stateStore.SetState(tenantA, "too_large", new string('x', StateStore.MaxValueBytes));
+    throw new Exception("oversized state was accepted"); }
+catch (ArgumentOutOfRangeException) { }
+try { stateStore.SetState(tenantA, "unsupported", (Action)(() => { }));
+    throw new Exception("unsupported state was accepted"); }
+catch (ArgumentException) { }
+object deep = "leaf";
+for (int depth = 0; depth < StateStore.MaxDepth + 2; depth++) deep = new object[] { deep };
+try { stateStore.SetState(tenantA, "too_deep", deep); throw new Exception("deep state was accepted"); }
+catch (ArgumentException) { }
+
 var uiCallbacks = new ConcurrentQueue<Action>();
 bool uiAccess = false;
 using var bus = new CommandBus(stateStore,
@@ -769,6 +1004,55 @@ uiAccess = true;
 while (uiCallbacks.TryDequeue(out Action? callback)) callback();
 Check(busNotifications == 3 && bus.GetState("ui_value", 0) == 4,
     "delayed UI notification applied an obsolete state revision");
+int scopedNotifications = 0;
+int otherScopeNotifications = 0;
+using var scopedSubscription = bus.SubscribeState(tenantA, (_, change) =>
+{
+    if (change.Scope == tenantA && change.Key == "queued") scopedNotifications++;
+});
+using var otherScopeSubscription = bus.SubscribeState(tenantB, (_, change) =>
+{
+    if (change.Key == "queued") otherScopeNotifications++;
+});
+uiAccess = false;
+await Task.Run(() => bus.SetState(tenantA, "queued", 1));
+await Task.Run(() => bus.SetState(tenantA, "queued", 2));
+await Task.Run(() => bus.SetState(tenantB, "queued", 3));
+uiAccess = true;
+while (uiCallbacks.TryDequeue(out Action? callback)) callback();
+Check(scopedNotifications == 1 && otherScopeNotifications == 1 &&
+      bus.GetState(tenantA, "queued", 0) == 2,
+    "late UI notification overwrote a scoped revision or crossed instances");
+uiAccess = false;
+await Task.Run(() => bus.SetState(tenantA, "queued", 3));
+bus.CloseInstance(tenantA);
+var replacementScope = StateScope.Instance("alpha", Guid.NewGuid());
+bus.OpenInstance(replacementScope);
+int replacementNotifications = 0;
+using var replacementSubscription = bus.SubscribeState(replacementScope, (_, change) =>
+{
+    if (change.Key == "queued") replacementNotifications++;
+});
+bus.SetState(replacementScope, "queued", 4);
+uiAccess = true;
+int beforeDrain = scopedNotifications;
+while (uiCallbacks.TryDequeue(out Action? callback)) callback();
+Check(scopedNotifications == beforeDrain && replacementNotifications == 1 &&
+      !bus.Contains(tenantA, "queued") && bus.GetState(replacementScope, "queued", 0) == 4,
+    "stopped instance delivered a queued callback or changed the replacement run");
+bus.CloseInstance(replacementScope);
+try { bus.SetState(tenantA, "late", true); throw new Exception("closed instance accepted a late write"); }
+catch (ObjectDisposedException) { }
+int partitionsBeforeChurn = stateStore.ActivePartitionCount;
+for (int run = 0; run < 1000; run++)
+{
+    StateScope scope = StateScope.Instance("alpha", Guid.NewGuid());
+    bus.OpenInstance(scope);
+    bus.SetState(scope, "value", run);
+    bus.CloseInstance(scope);
+}
+Check(stateStore.ActivePartitionCount == partitionsBeforeChurn,
+    "closed partitions or revisions accumulated after repeated runs");
 int routed = 0;
 using (bus.Subscribe("save", async (parameter, ct) =>
 {
@@ -784,8 +1068,10 @@ try { await bus.ExecuteCommandAsync("save", 1); throw new Exception("unsubscribe
 catch (KeyNotFoundException) { }
 
 string stateScript = Path.Combine(AppContext.BaseDirectory, "state_bus_test.lua");
+bus.SetState("host_only", true);
 await File.WriteAllTextAsync(stateScript, """
     function on_tick()
+      assert(rug.get_state('host_only') == nil)
       rug.set_state('auto_sell', true)
       assert(rug.get_state('auto_sell') == true)
       rug.sleep(20)
@@ -795,14 +1081,94 @@ await File.WriteAllTextAsync(stateScript, """
 await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new FakeInput(),
     NullLogger<LuaRuntime>.Instance, commandBus: bus))
 {
-    await runtime.InitializeAsync(stateScript, new PluginManifest([Permission.Timer]));
+    var identity = new RunIdentity("state-test", Guid.NewGuid(), 1, null, 0);
+    runtime.ConfigureState(identity, new Dictionary<string, object?>(), new Dictionary<string, object?>());
+    await TestAuthorizationHost.InitializeAsync(runtime, stateScript, new PluginManifest([Permission.Timer]));
     Check((await runtime.StepAsync()).State == ScriptState.Yielded &&
-          bus.GetState("auto_sell", false), "Lua set_state did not update the shared C# store");
-    bus.SetState("auto_sell", false);
+          bus.GetState(identity.InstanceScope, "auto_sell", false), "Lua set_state did not update its C# instance state");
+    bus.SetState(identity.InstanceScope, "auto_sell", false);
     Check((await runtime.ResumeAsync()).State == ScriptState.Stopped,
         "Lua get_state did not observe the latest C# write");
 }
 
+// Use the same cloned JSON launch inputs as host.start_windowless, with real NLua execution.
+Dictionary<string, object?> jsonLaunchInputs;
+using (var launchDocument = JsonDocument.Parse("""
+    {"label":"中文启动", "count":42, "fraction":1.25, "negative":-3,
+     "enabled":true, "disabled":false, "empty":null,
+     "custom.timeline":[{"Id":"launch","Title":"Structured step","Status":"Succeeded","Thumbnail":null}],
+     "options":{"enabled":false,"nested":[1,null,"value"]}}
+    """))
+{
+    jsonLaunchInputs = launchDocument.RootElement.EnumerateObject()
+        .ToDictionary(property => property.Name, property => (object?)property.Value.Clone());
+}
+string jsonLaunchScript = Path.Combine(AppContext.BaseDirectory, "json_launch_test.lua");
+await File.WriteAllTextAsync(jsonLaunchScript, """
+    function on_tick()
+        assert(type(rug.get_state('label')) == 'string' and rug.get_state('label') == '中文启动')
+        assert(type(rug.get_state('count')) == 'number' and rug.get_state('count') == 42)
+        assert(type(rug.get_state('fraction')) == 'number' and rug.get_state('fraction') == 1.25)
+        assert(type(rug.get_state('negative')) == 'number' and rug.get_state('negative') == -3)
+        assert(type(rug.get_state('enabled')) == 'boolean' and rug.get_state('enabled') == true)
+        assert(type(rug.get_state('disabled')) == 'boolean' and rug.get_state('disabled') == false)
+        assert(type(rug.get_state('empty')) == 'nil' and rug.get_state('empty') == nil)
+        assert(rug.get_state('missing') == nil)
+        if rug.get_state('disabled') then
+            error('JSON false must not enter the true branch')
+        else
+            rug.set_state('false_branch', true)
+        end
+        assert(rug.get_state('custom.timeline') ~= nil)
+        local options = rug.get_state('options')
+        assert(type(options) == 'table' and options.enabled == false)
+        assert(type(options.nested) == 'table' and options.nested[1] == 1 and options.nested[2] == nil)
+        assert(options.nested[3] == 'value' and options.GetType == nil)
+        local timeline = rug.get_state('custom.timeline')
+        assert(type(timeline) == 'table' and timeline[1].Title == 'Structured step')
+        assert(timeline.GetType == nil and timeline[1].GetType == nil)
+        assert(type(rug.get_config('structured')) == 'table' and rug.get_config('structured').GetType == nil)
+        local ok, err = pcall(rug.get_state, '')
+        assert(not ok and type(err) == 'string', 'safe host error: ok=' .. tostring(ok) .. ', type=' .. type(err))
+        ok, err = pcall(rug.set_state, '', true)
+        assert(not ok and type(err) == 'string', 'safe host error: ok=' .. tostring(ok) .. ', type=' .. type(err))
+        ok, err = pcall(rug.get_config, {})
+        assert(not ok and type(err) == 'string', 'safe host error: ok=' .. tostring(ok) .. ', type=' .. type(err))
+    end
+    """);
+await using (var runtime = new LuaRuntime(new FakeCapture(), new FakeOcr(), new FakeInput(),
+    NullLogger<LuaRuntime>.Instance, commandBus: bus))
+{
+    var identity = new RunIdentity("json-launch-test", Guid.NewGuid(), 1, null, 0);
+    runtime.ConfigureState(identity, jsonLaunchInputs, new Dictionary<string, object?>
+    { ["structured"] = new Dictionary<string, object?> { ["approved"] = false } });
+    await TestAuthorizationHost.InitializeAsync(runtime, jsonLaunchScript, new PluginManifest([Permission.Timer]));
+    Check((await DriveToEndAsync(runtime)).State == ScriptState.Stopped, "JSON launch Lua script completed");
+    Check(bus.GetState(identity.InstanceScope, "false_branch", false), "JSON false takes the Lua else branch");
+    SchemaStep[] launchSteps = bus.GetState<SchemaStep[]>(identity.InstanceScope, "custom.timeline", []);
+    Check(launchSteps.Length == 1 && launchSteps[0].Title == "Structured step" &&
+        launchSteps[0].Status == "Succeeded", "JSON launch arrays remain readable by StepFlow bindings");
+    JsonElement launchOptions = bus.GetState<JsonElement>(identity.InstanceScope, "options");
+    Check(launchOptions.GetProperty("enabled").ValueKind == JsonValueKind.False &&
+        launchOptions.GetProperty("nested")[1].ValueKind == JsonValueKind.Null,
+        "JSON launch objects retain their nested structure");
+}
+await GatewayTests.RunAsync();
+await RecoveryTests.RunAsync();
+await CheckpointTests.RunAsync();
+await CheckpointTests.RunPluginUpdatesAsync();
+await CheckpointTests.RunRuntimeUpdatesAsync();
+await CheckpointTests.RunRuntimeSwitchesAsync();
+await CheckpointTests.RunObservationsAsync();
+await CheckpointTests.RunObservedClicksAsync();
+await CheckpointTests.RunExecutionTracesAsync();
+await CheckpointTests.RunTraceReviewAsync();
+await LifecycleTests.RunAsync();
+await AuthorizationTests.RunAsync();
+await InputArbitrationTests.RunAsync();
+await InputInterventionTests.RunAsync();
+await RawInputTests.RunAsync();
+await NativeInputTakeoverTests.RunAsync();
 Console.WriteLine("Lua bridge, scheduler and state/command bus tests passed");
 
 static void Check(bool condition, string message)
@@ -932,6 +1298,8 @@ sealed class FakeOcr : IOcrService
 
 sealed class FakeInput : IInputService
 {
+    public Func<Task>? OnMove,OnDown,OnUp=null;
+    public int MouseDownCalls,MouseUpCalls;
     public nint Target { get; private set; }
     public List<bool> TargetModes { get; } = [];
     public MouseButton Button { get; private set; }
@@ -942,12 +1310,12 @@ sealed class FakeInput : IInputService
     public int MoveCalls { get; private set; }
     public int Key { get; private set; }
     public Task MoveMouseAsync(int x, int y, TrajectoryType trajectory = TrajectoryType.CubicBezier, bool smooth = true, CancellationToken cancellationToken = default)
-    { X = x; Y = y; MoveCalls++; return Task.CompletedTask; }
+    { X = x; Y = y; MoveCalls++; return OnMove?.Invoke()??Task.CompletedTask; }
     public Task MoveMouseRelativeAsync(int dx, int dy, TrajectoryType trajectory = TrajectoryType.CubicBezier, bool smooth = true, CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task ClickAsync(MouseButton button = MouseButton.Left, int holdMs = 0, CancellationToken cancellationToken = default)
     { Button = button; return Task.CompletedTask; }
-    public Task MouseDownAsync(MouseButton button, CancellationToken cancellationToken = default) => Task.CompletedTask;
-    public Task MouseUpAsync(MouseButton button, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task MouseDownAsync(MouseButton button, CancellationToken cancellationToken = default) {MouseDownCalls++;return OnDown?.Invoke()??Task.CompletedTask;}
+    public Task MouseUpAsync(MouseButton button, CancellationToken cancellationToken = default) {MouseUpCalls++;return OnUp?.Invoke()??Task.CompletedTask;}
     public Task DragAndDropAsync(int sx, int sy, int ex, int ey, TrajectoryType trajectory = TrajectoryType.CubicBezier, bool smooth = true, CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task KeyDownAsync(int virtualKey, CancellationToken cancellationToken = default)
     { Key = virtualKey; KeyDownCalls++; return Task.CompletedTask; }

@@ -1,0 +1,15 @@
+RECOVERY success: BEFORE=1/1 AFTER=1/1; preserved=True; terminal=Stopped; incident=fba8a412-bdf1-40c7-9d05-5f24500733c3; trace=b756549c-74cc-41b4-98a2-9a19ae6e7fcd/bf178256-24d4-469b-9b06-2f96e79e5112 Valid; resources=drained
+RECOVERY stop-wait: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Stopped; incident=27fbea52-f5dd-42f9-8129-7de24258e506; trace=6e90123f-7aad-4ae7-9c73-0b871e97d79c/2ea7e2a2-f6b0-4f59-8230-e25b487ffb56 Valid; resources=drained
+RECOVERY revoke-wait: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Stopped; incident=065dc51e-3051-4c26-b244-d608674c4285; trace=ae5c019a-08b2-481a-ab3d-f9d77aa55ad8/e67a5cfd-e892-4249-8a1d-0762a2571dab Valid; resources=drained
+RECOVERY stop-validation: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Stopped; incident=a163bfc1-17bb-4495-98d9-40b5c040f055; trace=75266aa8-a98e-4efa-86bb-8fcd5ea5b5cc/4ec2bed1-a1a9-47ff-99d7-feba8999d5ac Valid; resources=drained
+RECOVERY revoke-validation: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Stopped; incident=c48cabee-10f1-4297-a4c9-b279969e6acb; trace=1dbbfc32-570d-4bf8-8a7f-439f916c27c6/18611a16-d727-4e0a-a2f1-1f8010aeff68 Valid; resources=drained
+RECOVERY cancel-late: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Stopped; incident=357abdbf-1cd4-44f1-8cb1-701d27bb1f64; trace=394b64bc-f1f8-46d5-81fc-bdec46a7fde6/68553c8b-74e0-4065-810c-3cc8488755c9 Valid; resources=drained
+RECOVERY stop-late: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Stopped; incident=ea7e877a-9aa3-4659-b755-38d19ca99782; trace=bc153edd-37a9-475c-9dc0-b0afadea3dcf/f59ff7e3-9dfe-4aef-9b3f-8451c6d4fae3 Valid; resources=drained
+RECOVERY lua-error: BEFORE=1/1 AFTER=0/0; preserved=False; terminal=Faulted; incident=; trace=7f69a19c-a2ca-4a29-a81e-bbcd1e117d9e/5ce7f005-4c19-4307-84eb-d7d7f37b4d30 Valid; resources=drained
+Unhandled exception. System.ComponentModel.Win32Exception (4551): An error occurred trying to start process 'F:\Cardinal\Rug\Rug\artifacts\exit-time-baseline\Rug.UI\bin\x64\Release\net10.0-windows10.0.22621.0\win-x64\Rug.UI.exe' with working directory 'F:\Cardinal\Rug\Rug'. An Application Control policy has blocked this file.
+   at System.Diagnostics.Process.StartWithCreateProcess(ProcessStartInfo startInfo)
+   at System.Diagnostics.Process.Start(ProcessStartInfo startInfo)
+   at ControlledRecoveryUi.RunAsync(String repo, String root, Boolean manual) in F:\Cardinal\Rug\Rug\artifacts\exit-time-baseline\tests\Rug.UI.Core.Script.Tests\ControlledRecoveryUi.cs:line 21
+   at ControlledRecoverySample.RunAsync(String output) in F:\Cardinal\Rug\Rug\artifacts\exit-time-baseline\tests\Rug.UI.Core.Script.Tests\ControlledRecoverySample.cs:line 104
+   at Program.<Main>$(String[] args) in F:\Cardinal\Rug\Rug\artifacts\exit-time-baseline\tests\Rug.UI.Core.Script.Tests\Program.cs:line 29
+   at Program.<Main>(String[] args)

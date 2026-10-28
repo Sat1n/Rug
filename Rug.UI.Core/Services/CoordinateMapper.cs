@@ -17,6 +17,7 @@ public sealed class CoordinateMapper : ICoordinateMapper
     {
         if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763))
             throw new PlatformNotSupportedException("Win32 coordinate mapping requires Windows 10 or later.");
+        using var coordinates=ObservedInputCoordinates.ForNativeCall();
         if (hwnd == 0) throw new ArgumentException("A bound window is required.", nameof(hwnd));
         if (!WindowNative.GetClientRect(hwnd, out WindowNative.RECT rect))
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not read the target client area.");

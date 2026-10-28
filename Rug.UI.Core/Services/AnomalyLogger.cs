@@ -20,6 +20,7 @@ public sealed class AnomalyLogger : IAnomalyLogger
 
     private readonly ILogger<AnomalyLogger> _logger;
     private readonly string _directory;
+    public string DirectoryPath=>Path.GetFullPath(_directory);
 
     public AnomalyLogger(ILogger<AnomalyLogger> logger, string? directory = null)
     {
@@ -32,6 +33,11 @@ public sealed class AnomalyLogger : IAnomalyLogger
         ArgumentNullException.ThrowIfNull(context);
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
         ArgumentNullException.ThrowIfNull(detail);
+
+        // Boundary snapshot precedes capture/encoding/IO. It is not an exact fault timestamp.
+        Guid incidentId=Guid.NewGuid();
+        IncidentTraceLink link=context.Trace is {} trace?trace.Owner.IncidentBoundary(trace,ExecutionTraceScope.Current.Value):new("Unavailable");
+        var recovery=context.Snapshot.Recovery;
 
         CapturedFrame frame = await context.Capture.GrabFrameAsync().ConfigureAwait(false)
             ?? throw new InvalidOperationException("No capture frame is available for the anomaly record.");
@@ -46,12 +52,16 @@ public sealed class AnomalyLogger : IAnomalyLogger
         string jsonPath = Path.Combine(_directory, name + ".json");
         var record = new AnomalyLogModel
         {
+            SchemaVersion=1,IncidentId=incidentId,TraceLink=link,ScreenshotCaptureKind="independent-anomaly-capture",
             Timestamp = timestamp,
             PluginId = context.PluginId,
             InstanceId = context.InstanceId,
             Reason = reason,
             ScriptContext = detail,
             ScreenshotPath = screenshotName,
+            RecoveryId = recovery?.RecoveryId,
+            RecoveryGeneration = recovery?.Generation,
+            RunGeneration = context.RunGeneration, TargetBindingId = context.TargetBindingId,
             AgentResolution = null
         };
 
@@ -70,6 +80,29 @@ public sealed class AnomalyLogger : IAnomalyLogger
         _logger.LogWarning("[Anomaly Detected] Plugin {PluginId}, instance {InstanceId}: {Reason}. Record: {Path}",
             context.PluginId, context.InstanceId, reason, jsonPath);
         return jsonPath;
+    }
+
+    public async Task UpdateRecoveryAsync(string recordPath, RecoveryVerificationSummary summary)
+    {
+        string full = Path.GetFullPath(recordPath);
+        string root = Path.GetFullPath(_directory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("Record is outside anomaly directory.");
+        if(!full.Equals(new IncidentStore(_directory).Resolve(Path.GetFileName(full)),StringComparison.OrdinalIgnoreCase))throw new ArgumentException("Record is not in the archive root.");
+        byte[] bytes=await Task.Run(()=>IncidentStore.ReadBounded(full)).ConfigureAwait(false);
+        using var document=JsonDocument.Parse(bytes);
+        var version=IncidentStore.Version(document.RootElement);
+        if(version==IncidentReadStatus.UnsupportedFormat)throw new NotSupportedException("Unsupported incident format.");
+        if(version==IncidentReadStatus.Corrupt)throw new InvalidDataException("Invalid incident format.");
+        var node=System.Text.Json.Nodes.JsonNode.Parse(bytes)??throw new InvalidDataException("Missing anomaly metadata.");
+        if(node["recoveryId"]?.GetValue<Guid>()!=summary.RecoveryId)throw new InvalidDataException("Recovery record mismatch.");
+        node["verification"]=JsonSerializer.SerializeToNode(summary,JsonOptions);
+        string temporary = full + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            await File.WriteAllTextAsync(temporary,node.ToJsonString(JsonOptions)).ConfigureAwait(false);
+            File.Move(temporary, full, overwrite: true);
+        }
+        finally { File.Delete(temporary); }
     }
 
     private static byte[] EncodePng(CapturedFrame frame)

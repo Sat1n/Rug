@@ -1,0 +1,22 @@
+[
+  {
+    "configuration": "Debug",
+    "exitCode": 0,
+    "sample": "visual"
+  },
+  {
+    "configuration": "Debug",
+    "exitCode": 0,
+    "sample": "recovery"
+  },
+  {
+    "configuration": "Release",
+    "exitCode": 0,
+    "sample": "visual"
+  },
+  {
+    "configuration": "Release",
+    "exitCode": 0,
+    "sample": "recovery"
+  }
+]
